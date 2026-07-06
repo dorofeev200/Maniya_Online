@@ -58,6 +58,10 @@
       url = Lampa.Utils.addUrlComponent(url, 'token=' + encodeURIComponent(token));
     }
 
+    if (email && url.indexOf('cub_id=') === -1) {
+      url = Lampa.Utils.addUrlComponent(url, 'cub_id=' + encodeURIComponent(Lampa.Utils.hash(email)));
+    }
+
     return url;
   }
 
@@ -72,6 +76,10 @@
     query.push('original_title=' + encodeURIComponent(original));
     query.push('serial=' + (movie.name ? 1 : 0));
     query.push('year=' + encodeURIComponent((date + '').slice(0, 4)));
+    query.push('original_language=' + encodeURIComponent(movie.original_language || ''));
+    query.push('source=' + encodeURIComponent(movie.source || 'tmdb'));
+    query.push('clarification=' + (object && object.clarification ? 1 : 0));
+    query.push('similar=' + (object && object.similar ? true : false));
 
     if (movie.imdb_id) query.push('imdb_id=' + encodeURIComponent(movie.imdb_id));
     if (movie.kinopoisk_id) query.push('kinopoisk_id=' + encodeURIComponent(movie.kinopoisk_id));

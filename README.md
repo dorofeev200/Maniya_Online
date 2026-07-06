@@ -56,3 +56,7 @@ https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
 ```
 
 Перед production-запуском замените тестового пользователя и тестовый HLS-поток в `server/data/` на вашу реальную базу подписок и легальные источники.
+
+## Что уже извлечено из исходного WTCH-кода
+
+Разбор присланного примера находится в `docs/wtch-sample-analysis.md`. Там перечислены найденные storage-ключи, endpoint-ы, query-параметры, форматы ответа и то, что не стоит переносить в Maniya Online.

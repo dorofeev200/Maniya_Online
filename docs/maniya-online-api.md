@@ -11,6 +11,7 @@
 | `uid` | локальный ID устройства/плагина |
 | `token` | токен подписки, если задан |
 | `account_email` | email аккаунта Lampa, если доступен |
+| `cub_id` | hash email аккаунта Lampa для совместимости с логикой старого примера |
 | `id` | TMDB/CUB ID карточки |
 | `imdb_id` | IMDb ID, если есть |
 | `kinopoisk_id` | Kinopoisk ID, если есть |
@@ -19,6 +20,10 @@
 | `original_title` | оригинальное название |
 | `serial` | `1` для сериала, `0` для фильма |
 | `year` | год релиза |
+| `original_language` | язык оригинала, если есть |
+| `source` | источник карточки, обычно `tmdb` |
+| `clarification` | `1`, если включён уточнённый поиск |
+| `similar` | `true`, если запрошены похожие результаты |
 
 ## GET `/subscription/check`
 
