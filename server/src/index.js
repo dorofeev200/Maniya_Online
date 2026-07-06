@@ -26,11 +26,13 @@ function sourceUrl(context) {
   return url.toString();
 }
 
+function isApiPath(pathname) {
+  return pathname.startsWith('/api/');
+}
+
 async function route(context, response) {
   const { request, url } = context;
   const pathname = url.pathname;
-
-  assertCorsAllowed(request);
 
   if (request.method === 'OPTIONS') return sendJson(request, response, 204, {});
   if (request.method !== 'GET') throw new HttpError(405, 'method_not_allowed', 'Method not allowed');
@@ -47,6 +49,11 @@ async function route(context, response) {
     });
   }
 
+  if (!isApiPath(pathname)) {
+    return sendStatic(request, response, pathname);
+  }
+
+  assertCorsAllowed(request);
   assertRateLimit(request);
 
   if (pathname === '/api/lampa/subscription/check') {
@@ -91,7 +98,7 @@ async function route(context, response) {
     return sendJson(request, response, 200, { url: streamUrl, headers: {}, subtitles: [] });
   }
 
-  return sendStatic(request, response, pathname);
+  throw new HttpError(404, 'not_found', 'Not found');
 }
 
 export const server = http.createServer((request, response) => {

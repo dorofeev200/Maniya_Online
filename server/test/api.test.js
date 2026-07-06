@@ -32,6 +32,26 @@ describe('Maniya Online API', () => {
     assert.equal(body.ready, true);
   });
 
+
+
+  it('serves plugin file without token', async () => {
+    const response = await fetch(`${base}/maniya-online.js`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /javascript/);
+    assert.match(await response.text(), /MANIYA_API_BASE/);
+  });
+
+  it('never rejects OPTIONS preflight with 403', async () => {
+    const response = await fetch(`${base}/api/lampa/subscription/check`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://not-allowed.example',
+        'Access-Control-Request-Method': 'GET'
+      }
+    });
+    assert.equal(response.status, 204);
+  });
+
   it('accepts demo token', async () => {
     const response = await fetch(`${base}/api/lampa/subscription/check?token=demo-token`);
     assert.equal(response.status, 200);
