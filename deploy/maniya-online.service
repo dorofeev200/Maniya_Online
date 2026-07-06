@@ -1,0 +1,14 @@
+[Unit]
+Description=Maniya Online Lampa server
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/maniya-online/server
+Environment=PORT=3000
+Environment=PUBLIC_BASE_URL=https://plugin.maniya-kvn.online
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

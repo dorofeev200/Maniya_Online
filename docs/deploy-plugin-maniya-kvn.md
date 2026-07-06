@@ -2,6 +2,20 @@
 
 Ниже пример деплоя Node.js-сервера и статического плагина на VPS.
 
+
+## Быстрый деплой скриптом
+
+Если на сервер настроен SSH-доступ, можно выполнить:
+
+```bash
+SERVER_HOST=95.85.241.121 \
+SERVER_USER=root \
+DOMAIN=plugin.maniya-kvn.online \
+./scripts/deploy.sh
+```
+
+Скрипт копирует проект в `/opt/maniya-online`, создаёт `systemd` service, настраивает `nginx` reverse proxy и перезапускает сервис. Пароль в скрипт не записывайте; используйте SSH-ключ или ввод пароля в терминале.
+
 ## 1. Установить Node.js и nginx
 
 ```bash
