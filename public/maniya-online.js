@@ -12,16 +12,75 @@
     return (value || '').replace(/\/+$/, '');
   }
 
-  function getQueryParam(name) {
-    try {
-      var scripts = document.getElementsByTagName('script');
-      var current = scripts[scripts.length - 1];
-      var src = current && current.src ? current.src : '';
-      var match = src.match(new RegExp('[?&]' + name + '=([^&]+)'));
-      return match ? decodeURIComponent(match[1]) : '';
-    } catch (e) {
-      return '';
+  function readParamFromUrl(url, name) {
+    if (!url) return '';
+    var escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var match = (url + '').match(new RegExp('[?&#]' + escaped + '=([^&#]+)'));
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  function getScriptUrlToken(name) {
+    var scripts = document.getElementsByTagName('script');
+    var current = document.currentScript && document.currentScript.src ? document.currentScript.src : '';
+    var candidates = [];
+
+    if (current) candidates.push(current);
+
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      var src = scripts[i] && scripts[i].src ? scripts[i].src : '';
+      if (src && candidates.indexOf(src) === -1) candidates.push(src);
     }
+
+    for (var j = 0; j < candidates.length; j++) {
+      var url = candidates[j];
+      if (url.indexOf('maniya-online.js') !== -1 || url.indexOf('maniya') !== -1) {
+        var token = readParamFromUrl(url, name);
+        if (token) return token;
+      }
+    }
+
+    for (var k = 0; k < candidates.length; k++) {
+      var fallback = readParamFromUrl(candidates[k], name);
+      if (fallback) return fallback;
+    }
+
+    return '';
+  }
+
+  function readStoredToken() {
+    var token = Lampa.Storage.get('maniya_token', '') || Lampa.Storage.get('lampac_token', '') || '';
+
+    if (!token) {
+      try {
+        token = window.localStorage ? (localStorage.getItem('maniya_token') || localStorage.getItem('lampac_token') || '') : '';
+      } catch (e) {}
+    }
+
+    return token;
+  }
+
+  function persistToken(token) {
+    token = (token || '').trim();
+    if (!token) return '';
+
+    Lampa.Storage.set('maniya_token', token);
+
+    try {
+      if (window.localStorage) localStorage.setItem('maniya_token', token);
+    } catch (e) {}
+
+    return token;
+  }
+
+  function getTokenFromRuntime() {
+    if (window.MANIYA_ONLINE_TOKEN) return window.MANIYA_ONLINE_TOKEN;
+    if (window.maniya_online_token) return window.maniya_online_token;
+    if (window.maniyaOnlineToken) return window.maniyaOnlineToken;
+    return '';
+  }
+
+  function getQueryParam(name) {
+    return readParamFromUrl(location.href, name) || getScriptUrlToken(name);
   }
 
   function ensureUid() {
@@ -34,9 +93,7 @@
   }
 
   function ensureToken() {
-    var urlToken = getQueryParam('token');
-    if (urlToken) Lampa.Storage.set('maniya_token', urlToken);
-    return Lampa.Storage.get('maniya_token', '');
+    return persistToken(getQueryParam('token') || getTokenFromRuntime() || readStoredToken());
   }
 
   function addAccountParams(url) {
@@ -89,6 +146,9 @@
   }
 
   function requestJson(network, url, success, error) {
+    var token = ensureToken();
+    var headers = token ? { Authorization: 'Bearer ' + token } : {};
+
     network.timeout(15000);
     network.silent(addAccountParams(url), function (json) {
       if (typeof json === 'string') json = Lampa.Arrays.decodeJson(json, {});
@@ -96,7 +156,8 @@
     }, function (response) {
       error(response || {});
     }, false, {
-      dataType: 'json'
+      dataType: 'json',
+      headers: headers
     });
   }
 

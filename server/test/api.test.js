@@ -40,6 +40,17 @@ describe('Maniya Online API', () => {
     assert.equal(body.plan, 'demo');
   });
 
+
+
+  it('accepts bearer token header', async () => {
+    const response = await fetch(`${base}/api/lampa/subscription/check`, {
+      headers: { Authorization: 'Bearer demo-token' }
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.active, true);
+  });
+
   it('rejects missing subscription for sources', async () => {
     const response = await fetch(`${base}/api/lampa/sources`);
     assert.equal(response.status, 403);

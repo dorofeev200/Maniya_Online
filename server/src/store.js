@@ -12,9 +12,16 @@ async function readJson(filePath, fallback) {
   }
 }
 
+function bearerToken(context) {
+  const authorization = context.request?.headers?.authorization || '';
+  const match = String(authorization).match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
 export async function findUserByRequest(context) {
   const users = await readJson(config.usersFile, []);
-  const token = context.query.token ? validateToken(context.query.token) : '';
+  const rawToken = context.query.token || bearerToken(context);
+  const token = rawToken ? validateToken(rawToken) : '';
   const email = String(context.query.account_email || '').trim().toLowerCase();
 
   if (!token && !email) return null;
