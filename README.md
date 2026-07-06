@@ -64,3 +64,7 @@ https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
 ## Пошаговая инструкция для новичка
 
 Если вы не знаете, что делать дальше, откройте `docs/novice-next-steps.md`. Там расписаны шаги: локальная проверка, DNS, SSH, деплой, HTTPS, подключение плагина в Lampa и замена тестовых данных.
+
+## Проверка удалённого деплоя
+
+После запуска деплоя используйте `scripts/verify-remote.sh`, чтобы проверить `/health`, файл плагина, API подписки, `nginx -t` и состояние `systemd`-сервиса. Текущий статус и команды собраны в `docs/deployment-status.md`.
