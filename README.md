@@ -29,3 +29,30 @@ https://your-domain.com/maniya-online.js?token=USER_TOKEN
 ```js
 Lampa.Storage.set('maniya_token', 'USER_TOKEN')
 ```
+
+## Сервер Maniya Online
+
+В репозиторий добавлен минимальный Node.js-сервер для домена `plugin.maniya-kvn.online`.
+
+### Локальный запуск
+
+```bash
+cd server
+PUBLIC_BASE_URL=https://plugin.maniya-kvn.online PORT=3000 npm start
+```
+
+### Тестовый доступ
+
+По умолчанию в `server/data/users.json` есть тестовый токен:
+
+```text
+demo-token
+```
+
+Плагин можно подключить так:
+
+```text
+https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
+```
+
+Перед production-запуском замените тестового пользователя и тестовый HLS-поток в `server/data/` на вашу реальную базу подписок и легальные источники.

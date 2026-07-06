@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var MANIYA_API_BASE = 'https://maniya.online/api/lampa';
+  var MANIYA_API_BASE = 'https://plugin.maniya-kvn.online/api/lampa';
   var COMPONENT = 'maniya_online';
   var PLUGIN_FLAG = 'maniya_online_plugin_started';
 
