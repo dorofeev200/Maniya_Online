@@ -60,3 +60,7 @@ https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
 ## Что уже извлечено из исходного WTCH-кода
 
 Разбор присланного примера находится в `docs/wtch-sample-analysis.md`. Там перечислены найденные storage-ключи, endpoint-ы, query-параметры, форматы ответа и то, что не стоит переносить в Maniya Online.
+
+## Пошаговая инструкция для новичка
+
+Если вы не знаете, что делать дальше, откройте `docs/novice-next-steps.md`. Там расписаны шаги: локальная проверка, DNS, SSH, деплой, HTTPS, подключение плагина в Lampa и замена тестовых данных.
