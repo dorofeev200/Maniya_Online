@@ -4,11 +4,14 @@ After=network.target
 
 [Service]
 WorkingDirectory=/opt/maniya-online/server
-Environment=PORT=3000
-Environment=PUBLIC_BASE_URL=https://plugin.maniya-kvn.online
+EnvironmentFile=/opt/maniya-online/server/.env
 ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target

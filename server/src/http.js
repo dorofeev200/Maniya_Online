@@ -1,5 +1,8 @@
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
+import { config } from './config.js';
+import { corsHeaders } from './security.js';
 
 const contentTypes = {
   '.js': 'application/javascript; charset=utf-8',
@@ -8,36 +11,42 @@ const contentTypes = {
   '.txt': 'text/plain; charset=utf-8'
 };
 
-export function sendJson(response, statusCode, payload) {
-  const body = JSON.stringify(payload);
+export function sendJson(request, response, statusCode, payload, extraHeaders = {}) {
+  const body = statusCode === 204 ? '' : JSON.stringify(payload);
+  const { headers } = corsHeaders(request?.headers?.origin);
   response.writeHead(statusCode, {
+    ...headers,
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Content-Length': Buffer.byteLength(body)
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+    'Content-Length': Buffer.byteLength(body),
+    ...extraHeaders
   });
   response.end(body);
 }
 
-export async function sendStatic(response, publicDir, pathname) {
+export async function sendStatic(request, response, pathname) {
   const safePath = path.normalize(decodeURIComponent(pathname)).replace(/^\.{2,}/, '');
-  const filePath = path.join(publicDir, safePath === '/' ? 'maniya-online.js' : safePath);
+  const filePath = path.join(config.publicDir, safePath === '/' ? 'maniya-online.js' : safePath);
 
-  if (!filePath.startsWith(publicDir)) {
-    return sendJson(response, 403, { error: 'forbidden' });
+  if (!filePath.startsWith(config.publicDir)) {
+    return sendJson(request, response, 403, { error: 'forbidden' });
   }
 
   try {
-    const content = await readFile(filePath);
-    const type = contentTypes[path.extname(filePath)] || 'application/octet-stream';
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) return sendJson(request, response, 404, { error: 'not_found' });
+
+    const { headers } = corsHeaders(request.headers.origin);
     response.writeHead(200, {
-      'Content-Type': type,
-      'Access-Control-Allow-Origin': '*',
-      'Content-Length': content.length
+      ...headers,
+      'Content-Type': contentTypes[path.extname(filePath)] || 'application/octet-stream',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'public, max-age=300',
+      'Content-Length': fileStat.size
     });
-    response.end(content);
+    createReadStream(filePath).pipe(response);
   } catch (error) {
-    sendJson(response, 404, { error: 'not_found' });
+    sendJson(request, response, 404, { error: 'not_found' });
   }
 }

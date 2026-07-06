@@ -68,3 +68,7 @@ https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
 ## Проверка удалённого деплоя
 
 После запуска деплоя используйте `scripts/verify-remote.sh`, чтобы проверить `/health`, файл плагина, API подписки, `nginx -t` и состояние `systemd`-сервиса. Текущий статус и команды собраны в `docs/deployment-status.md`.
+
+## Production-аудит и эксплуатация
+
+Для публичного релиза добавлены `.env.example`, structured JSON logging, CORS allowlist, rate limiting, graceful shutdown, `/health` и `/ready`, unit/smoke tests, Dockerfile, docker-compose и GitHub Actions deploy workflow. Подробности эксплуатации находятся в `docs/operations.md`.

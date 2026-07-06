@@ -27,7 +27,18 @@ rsync -az --delete \
 ssh "${SERVER_USER}@${SERVER_HOST}" bash -s <<REMOTE
 set -euo pipefail
 apt update
-apt install -y nginx nodejs npm
+apt install -y nginx nodejs npm certbot python3-certbot-nginx
+cat > ${SERVER_PATH}/server/.env <<ENVFILE
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=${PORT}
+PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
+CORS_ORIGINS=${PUBLIC_BASE_URL}
+RATE_LIMIT_WINDOW_MS=60000
+RATE_LIMIT_MAX=120
+TOKEN_MIN_LENGTH=8
+SHUTDOWN_TIMEOUT_MS=10000
+ENVFILE
 cat > /etc/systemd/system/maniya-online.service <<SERVICE
 [Unit]
 Description=Maniya Online Lampa server
@@ -35,11 +46,14 @@ After=network.target
 
 [Service]
 WorkingDirectory=${SERVER_PATH}/server
-Environment=PORT=${PORT}
-Environment=PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
+EnvironmentFile=${SERVER_PATH}/server/.env
 ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target
@@ -65,6 +79,9 @@ systemctl daemon-reload
 systemctl enable --now maniya-online
 systemctl restart maniya-online
 systemctl reload nginx
+if command -v certbot >/dev/null 2>&1; then
+  certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos --register-unsafely-without-email || true
+fi
 REMOTE
 
 echo "Deployment completed. Check: ${PUBLIC_BASE_URL}/health"

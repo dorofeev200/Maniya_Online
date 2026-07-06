@@ -1,0 +1,68 @@
+import { after, before, describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+process.env.NODE_ENV = 'test';
+process.env.CORS_ORIGINS = '*';
+process.env.RATE_LIMIT_MAX = '1000';
+process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:3199';
+
+const { server } = await import('../src/index.js');
+
+const base = 'http://127.0.0.1:3199';
+
+before(async () => {
+  await new Promise((resolve) => server.listen(3199, '127.0.0.1', resolve));
+});
+
+after(async () => {
+  await new Promise((resolve) => server.close(resolve));
+});
+
+describe('Maniya Online API', () => {
+  it('returns health', async () => {
+    const response = await fetch(`${base}/health`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, service: 'maniya-online-lampa' });
+  });
+
+  it('returns readiness', async () => {
+    const response = await fetch(`${base}/ready`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.ready, true);
+  });
+
+  it('accepts demo token', async () => {
+    const response = await fetch(`${base}/api/lampa/subscription/check?token=demo-token`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.active, true);
+    assert.equal(body.plan, 'demo');
+  });
+
+  it('rejects missing subscription for sources', async () => {
+    const response = await fetch(`${base}/api/lampa/sources`);
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.error, 'subscription_required');
+  });
+
+  it('returns sources and videos for demo token', async () => {
+    const sourcesResponse = await fetch(`${base}/api/lampa/sources?token=demo-token`);
+    assert.equal(sourcesResponse.status, 200);
+    const sources = await sourcesResponse.json();
+    assert.equal(sources.sources[0].id, 'main');
+
+    const videosResponse = await fetch(`${base}/api/lampa/videos?token=demo-token`);
+    assert.equal(videosResponse.status, 200);
+    const videos = await videosResponse.json();
+    assert.ok(videos.items.length > 0);
+  });
+
+  it('validates stream url', async () => {
+    const response = await fetch(`${base}/api/lampa/stream?token=demo-token&url=ftp://bad`);
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, 'invalid_url');
+  });
+});

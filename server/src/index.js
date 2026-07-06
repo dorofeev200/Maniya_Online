@@ -1,54 +1,59 @@
+import crypto from 'node:crypto';
 import http from 'node:http';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { findUserByRequest, isSubscriptionActive, getVideosForRequest } from './store.js';
+import { config } from './config.js';
+import { HttpError, toHttpError } from './errors.js';
 import { sendJson, sendStatic } from './http.js';
+import { logger } from './logger.js';
+import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
+import { findUserByRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = path.join(__dirname, '..', '..');
-const publicDir = path.join(rootDir, 'public');
-const port = Number(process.env.PORT || 3000);
-const publicBaseUrl = process.env.PUBLIC_BASE_URL || 'https://plugin.maniya-kvn.online';
+const startedAt = Date.now();
+let ready = true;
 
 function requestContext(request) {
-  const url = new URL(request.url, publicBaseUrl);
+  const url = new URL(request.url, config.publicBaseUrl);
   return {
+    request,
     url,
-    query: Object.fromEntries(url.searchParams.entries())
+    query: Object.fromEntries(url.searchParams.entries()),
+    requestId: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
   };
 }
 
-async function requireSubscription(context, response) {
-  const user = await findUserByRequest(context);
-
-  if (!isSubscriptionActive(user)) {
-    sendJson(response, 403, {
-      error: 'subscription_required',
-      active: false,
-      message: 'Нужна активная подписка Maniya Online'
-    });
-    return null;
-  }
-
-  return user;
+function sourceUrl(context) {
+  const url = new URL('/api/lampa/videos', config.publicBaseUrl);
+  url.searchParams.set('source', String(context.query.source || 'main'));
+  return url.toString();
 }
 
-async function route(request, response) {
-  if (request.method === 'OPTIONS') return sendJson(response, 204, {});
-  if (request.method !== 'GET') return sendJson(response, 405, { error: 'method_not_allowed' });
+async function route(context, response) {
+  const { request, url } = context;
+  const pathname = url.pathname;
 
-  const context = requestContext(request);
-  const pathname = context.url.pathname;
+  assertCorsAllowed(request);
+
+  if (request.method === 'OPTIONS') return sendJson(request, response, 204, {});
+  if (request.method !== 'GET') throw new HttpError(405, 'method_not_allowed', 'Method not allowed');
 
   if (pathname === '/health') {
-    return sendJson(response, 200, { ok: true, service: 'maniya-online-lampa' });
+    return sendJson(request, response, 200, { ok: true, service: 'maniya-online-lampa' });
   }
+
+  if (pathname === '/ready') {
+    return sendJson(request, response, ready ? 200 : 503, {
+      ready,
+      service: 'maniya-online-lampa',
+      uptime_ms: Date.now() - startedAt
+    });
+  }
+
+  assertRateLimit(request);
 
   if (pathname === '/api/lampa/subscription/check') {
     const user = await findUserByRequest(context);
     const active = isSubscriptionActive(user);
 
-    return sendJson(response, 200, {
+    return sendJson(request, response, 200, {
       active,
       plan: user?.plan || null,
       expires_at: user?.expires_at || null,
@@ -57,15 +62,14 @@ async function route(request, response) {
   }
 
   if (pathname === '/api/lampa/sources') {
-    const user = await requireSubscription(context, response);
-    if (!user) return;
+    await requireSubscription(context);
 
-    return sendJson(response, 200, {
+    return sendJson(request, response, 200, {
       sources: [
         {
           id: 'main',
           name: 'Maniya Online',
-          url: `${publicBaseUrl}/api/lampa/videos?source=main`,
+          url: sourceUrl(context),
           show: true
         }
       ]
@@ -73,32 +77,77 @@ async function route(request, response) {
   }
 
   if (pathname === '/api/lampa/videos') {
-    const user = await requireSubscription(context, response);
-    if (!user) return;
-
-    return sendJson(response, 200, { items: await getVideosForRequest(context) });
+    await requireSubscription(context);
+    return sendJson(request, response, 200, { items: await getVideosForRequest(context) });
   }
 
   if (pathname === '/api/lampa/stream') {
-    const user = await requireSubscription(context, response);
-    if (!user) return;
+    await requireSubscription(context);
+    const streamUrl = String(context.query.url || '').trim();
 
-    const url = String(context.query.url || '').trim();
-    if (!url) return sendJson(response, 400, { error: 'missing_url', message: 'Не передана ссылка потока' });
+    if (!streamUrl) throw new HttpError(400, 'missing_url', 'Не передана ссылка потока');
+    if (!/^https?:\/\//i.test(streamUrl)) throw new HttpError(400, 'invalid_url', 'Ссылка потока должна быть http или https');
 
-    return sendJson(response, 200, { url, headers: {}, subtitles: [] });
+    return sendJson(request, response, 200, { url: streamUrl, headers: {}, subtitles: [] });
   }
 
-  return sendStatic(response, publicDir, pathname);
+  return sendStatic(request, response, pathname);
 }
 
-const server = http.createServer((request, response) => {
-  route(request, response).catch((error) => {
-    console.error(error);
-    sendJson(response, 500, { error: 'internal_error' });
+export const server = http.createServer((request, response) => {
+  const started = Date.now();
+  const context = requestContext(request);
+
+  route(context, response).catch((error) => {
+    const httpError = toHttpError(error);
+    if (!(error instanceof HttpError)) logger.error('request_failed', { requestId: context.requestId, error: error.stack || error.message });
+    sendJson(request, response, httpError.statusCode, {
+      error: httpError.code,
+      message: httpError.message,
+      details: httpError.details
+    });
+  }).finally(() => {
+    logger.info('request_completed', {
+      requestId: context.requestId,
+      method: request.method,
+      path: context.url.pathname,
+      statusCode: response.statusCode,
+      durationMs: Date.now() - started,
+      ip: clientIp(request)
+    });
   });
 });
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`Maniya Online Lampa server listening on port ${port}`);
-});
+function shutdown(signal) {
+  ready = false;
+  logger.warn('shutdown_started', { signal });
+
+  const timeout = setTimeout(() => {
+    logger.error('shutdown_timeout', { timeoutMs: config.shutdownTimeoutMs });
+    process.exit(1);
+  }, config.shutdownTimeoutMs);
+
+  server.close((error) => {
+    clearTimeout(timeout);
+    if (error) {
+      logger.error('shutdown_failed', { error: error.message });
+      process.exit(1);
+    }
+    logger.info('shutdown_completed');
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+if (process.env.NODE_ENV !== 'test') {
+  server.listen(config.port, config.host, () => {
+    logger.info('server_started', {
+      host: config.host,
+      port: config.port,
+      publicBaseUrl: config.publicBaseUrl,
+      corsOrigins: config.corsOrigins
+    });
+  });
+}
