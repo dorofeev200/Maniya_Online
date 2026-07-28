@@ -1,0 +1,17 @@
+[Unit]
+Description=Maniya Online Lampa server
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/maniya-online/server
+EnvironmentFile=/opt/maniya-online/server/.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
