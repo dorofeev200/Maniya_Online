@@ -2,8 +2,10 @@ import { readFile } from 'node:fs/promises';
 import { config } from './config.js';
 import { HttpError } from './errors.js';
 import { validateToken } from './security.js';
+import { registeredProviders } from './providers/registry.js';
 
 async function readJson(filePath, fallback) {
+  if (!filePath) return fallback;
   try {
     const content = await readFile(filePath, 'utf8');
     return JSON.parse(content);
@@ -48,7 +50,18 @@ export async function requireSubscription(context) {
 }
 
 export async function getVideosForRequest(context) {
+  const providerItems = await getProviderVideos(context);
+  if (providerItems.length > 0) return providerItems;
+  if (!config.videosFile) return [];
+
   const videos = await readJson(config.videosFile, { default: [] });
   const key = String(context.query.tmdb_id || context.query.id || '').trim();
   return videos[key] || videos.default || [];
+}
+
+async function getProviderVideos(context) {
+  const selected = String(context.query.provider || '').trim().toLowerCase();
+  const providers = registeredProviders().filter((provider) => !selected || provider.id === selected);
+  const groups = await Promise.all(providers.map(async (provider) => provider.search(context)));
+  return groups.flat();
 }

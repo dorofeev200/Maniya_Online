@@ -13,9 +13,9 @@
 Если всё хорошо, увидите 4 проверки:
 
 1. `health` — сервер живой.
-2. `subscription` — токен `demo-token` активен.
+2. `subscription` — явно переданный токен активен.
 3. `sources` — сервер отдаёт источник `Maniya Online`.
-4. `videos` — сервер отдаёт тестовый HLS-поток.
+4. `videos` — сервер отдаёт реальные provider/static источники или пустой список.
 
 Если этот шаг не проходит, деплой на VPS делать рано.
 
@@ -25,8 +25,8 @@
 | --- | --- |
 | `public/maniya-online.js` | Сам плагин, который подключается в Lampa |
 | `server/src/index.js` | Мини-сервер: API подписок, источников и видео |
-| `server/data/users.json` | Тестовые пользователи и подписки |
-| `server/data/videos.json` | Тестовые видео/потоки |
+| `USERS_FILE` | Явно настроенное хранилище пользователей и подписок |
+| `VIDEOS_FILE` | Опциональное явно настроенное статическое хранилище видео |
 | `scripts/deploy.sh` | Автоматический деплой на VPS |
 | `docs/wtch-sample-analysis.md` | Что вытянуто из старого WTCH-кода |
 
@@ -92,13 +92,13 @@ curl http://plugin.maniya-kvn.online/health
 Потом проверить токен:
 
 ```bash
-curl "http://plugin.maniya-kvn.online/api/lampa/subscription/check?token=demo-token"
+TOKEN=YOUR_REAL_TOKEN curl "http://plugin.maniya-kvn.online/api/lampa/subscription/check?token=${TOKEN}"
 ```
 
 Ожидаемый ответ:
 
 ```json
-{"active":true,"plan":"demo","expires_at":"2099-12-31T23:59:59Z","message":"Подписка Maniya Online активна"}
+{"active":true,"plan":"paid","expires_at":"<ISO_DATE>","message":"Подписка Maniya Online активна"}
 ```
 
 ## Шаг 7. Подключить HTTPS
@@ -122,7 +122,7 @@ curl https://plugin.maniya-kvn.online/health
 В Lampa добавить плагин:
 
 ```text
-https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
+https://plugin.maniya-kvn.online/maniya-online.js?token=YOUR_REAL_TOKEN
 ```
 
 Потом открыть карточку фильма/сериала. Должна появиться кнопка **Maniya Online**.
@@ -134,16 +134,16 @@ https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
 Файл:
 
 ```text
-server/data/users.json
+USERS_FILE
 ```
 
-Сейчас там тестовый пользователь:
+Файл должен содержать реальных пользователей:
 
 ```json
 {
-  "token": "demo-token",
-  "email": "demo@example.com",
-  "plan": "demo",
+  "token": "USER_TOKEN",
+  "email": "user@example.com",
+  "plan": "paid",
   "active": true,
   "expires_at": "2099-12-31T23:59:59Z"
 }
@@ -156,14 +156,14 @@ server/data/users.json
 Файл:
 
 ```text
-server/data/videos.json
+VIDEOS_FILE
 ```
 
-Сейчас там тестовый поток. Его нужно заменить на ваши реальные легальные HLS/MP4-ссылки.
+Статическое хранилище видео опционально. Если используете его, храните только реальные разрешённые HLS/MP4-ссылки.
 
 ## Шаг 10. Что делать после первой проверки
 
-После того как плагин откроется в Lampa и запустит тестовый поток, следующий этап:
+После того как плагин откроется в Lampa и получит реальные источники, следующий этап:
 
 1. сделать добавление пользователей без ручного редактирования JSON;
 2. добавить Telegram-бота или простую админку;

@@ -5,6 +5,8 @@ process.env.NODE_ENV = 'test';
 process.env.CORS_ORIGINS = '*';
 process.env.RATE_LIMIT_MAX = '1000';
 process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:3199';
+process.env.USERS_FILE = new URL('./fixtures/users.json', import.meta.url).pathname;
+process.env.VIDEOS_FILE = new URL('./fixtures/videos.json', import.meta.url).pathname;
 
 const { server } = await import('../src/index.js');
 
@@ -52,19 +54,19 @@ describe('Maniya Online API', () => {
     assert.equal(response.status, 204);
   });
 
-  it('accepts demo token', async () => {
-    const response = await fetch(`${base}/api/lampa/subscription/check?token=demo-token`);
+  it('accepts fixture token', async () => {
+    const response = await fetch(`${base}/api/lampa/subscription/check?token=unit-test-token`);
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.active, true);
-    assert.equal(body.plan, 'demo');
+    assert.equal(body.plan, 'test-fixture');
   });
 
 
 
   it('accepts bearer token header', async () => {
     const response = await fetch(`${base}/api/lampa/subscription/check`, {
-      headers: { Authorization: 'Bearer demo-token' }
+      headers: { Authorization: 'Bearer unit-test-token' }
     });
     assert.equal(response.status, 200);
     const body = await response.json();
@@ -78,20 +80,20 @@ describe('Maniya Online API', () => {
     assert.equal(body.error, 'subscription_required');
   });
 
-  it('returns sources and videos for demo token', async () => {
-    const sourcesResponse = await fetch(`${base}/api/lampa/sources?token=demo-token`);
+  it('returns sources and videos for fixture token', async () => {
+    const sourcesResponse = await fetch(`${base}/api/lampa/sources?token=unit-test-token`);
     assert.equal(sourcesResponse.status, 200);
     const sources = await sourcesResponse.json();
     assert.equal(sources.sources[0].id, 'main');
 
-    const videosResponse = await fetch(`${base}/api/lampa/videos?token=demo-token`);
+    const videosResponse = await fetch(`${base}/api/lampa/videos?token=unit-test-token`);
     assert.equal(videosResponse.status, 200);
     const videos = await videosResponse.json();
     assert.ok(videos.items.length > 0);
   });
 
   it('validates stream url', async () => {
-    const response = await fetch(`${base}/api/lampa/stream?token=demo-token&url=ftp://bad`);
+    const response = await fetch(`${base}/api/lampa/stream?token=unit-test-token&url=ftp://bad`);
     assert.equal(response.status, 400);
     const body = await response.json();
     assert.equal(body.error, 'invalid_url');

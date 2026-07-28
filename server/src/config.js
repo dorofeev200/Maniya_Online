@@ -40,6 +40,13 @@ function list(name, fallback = []) {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function resolvePath(value) {
+  if (!value) return '';
+  if (/^file:\/\//i.test(value)) return fileURLToPath(value);
+  if (/^\/[A-Za-z]:\//.test(value)) return value.replace(/^\/([A-Za-z]:)/, '$1');
+  return value;
+}
+
 export const config = {
   env: process.env.NODE_ENV || 'production',
   host: process.env.HOST || '0.0.0.0',
@@ -49,9 +56,9 @@ export const config = {
   rateLimitWindowMs: integer('RATE_LIMIT_WINDOW_MS', 60_000),
   rateLimitMax: integer('RATE_LIMIT_MAX', 120),
   tokenMinLength: integer('TOKEN_MIN_LENGTH', 8),
-  usersFile: process.env.USERS_FILE || path.join(serverDir, 'data', 'users.json'),
-  videosFile: process.env.VIDEOS_FILE || path.join(serverDir, 'data', 'videos.json'),
-  publicDir: process.env.PUBLIC_DIR || path.join(rootDir, 'public'),
+  usersFile: resolvePath(process.env.USERS_FILE || ''),
+  videosFile: resolvePath(process.env.VIDEOS_FILE || ''),
+  publicDir: resolvePath(process.env.PUBLIC_DIR || path.join(rootDir, 'public')),
   shutdownTimeoutMs: integer('SHUTDOWN_TIMEOUT_MS', 10_000)
 };
 

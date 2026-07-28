@@ -4,7 +4,7 @@ set -euo pipefail
 DOMAIN="${DOMAIN:-plugin.maniya-kvn.online}"
 SERVER_HOST="${SERVER_HOST:-95.85.241.121}"
 SERVER_USER="${SERVER_USER:-root}"
-TOKEN="${TOKEN:-demo-token}"
+: "${TOKEN:?TOKEN must be set explicitly}"
 
 HTTPS_BASE="https://${DOMAIN}"
 
