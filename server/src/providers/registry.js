@@ -1,7 +1,8 @@
+import { AllohaProvider } from './alloha/AllohaProvider.js';
 import { KodikProvider } from './kodik/KodikProvider.js';
 import { RezkaProvider } from './rezka/RezkaProvider.js';
 
-const providers = [new KodikProvider(), new RezkaProvider()];
+const providers = [new KodikProvider(), new RezkaProvider(), new AllohaProvider()];
 
 export function registeredProviders() {
   return providers;
