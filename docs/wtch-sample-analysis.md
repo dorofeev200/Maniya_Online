@@ -109,8 +109,8 @@ var token = '';
 3. Подключить плагин в Lampa:
 
 ```text
-https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
+https://plugin.maniya-kvn.online/maniya-online.js?token=USER_TOKEN
 ```
 
-4. Заменить `demo-token` и тестовый поток на реальные данные.
+4. Настроить реальные токены пользователей и реальные provider/static источники.
 5. Добавить вашу систему выдачи подписок: админка, Telegram-бот или ручной JSON/БД.

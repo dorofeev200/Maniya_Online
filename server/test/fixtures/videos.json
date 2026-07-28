@@ -1,0 +1,13 @@
+{
+  "default": [
+    {
+      "title": "Unit fixture stream",
+      "method": "play",
+      "url": "https://media.example.test/unit/master.m3u8",
+      "quality": {
+        "1080": "https://media.example.test/unit/1080.m3u8"
+      },
+      "subtitles": []
+    }
+  ]
+}

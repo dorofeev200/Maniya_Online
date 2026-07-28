@@ -6,6 +6,7 @@ import { sendJson, sendStatic } from './http.js';
 import { logger } from './logger.js';
 import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
 import { findUserByRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
+import { providerById } from './providers/registry.js';
 
 const startedAt = Date.now();
 let ready = true;
@@ -90,6 +91,9 @@ async function route(context, response) {
 
   if (pathname === '/api/lampa/stream') {
     await requireSubscription(context);
+    const provider = providerById(String(context.query.provider || '').trim().toLowerCase());
+    if (provider) return sendJson(request, response, 200, await provider.streams(context));
+
     const streamUrl = String(context.query.url || '').trim();
 
     if (!streamUrl) throw new HttpError(400, 'missing_url', 'Не передана ссылка потока');

@@ -85,5 +85,5 @@ certbot --nginx -d plugin.maniya-kvn.online
 
 ```bash
 curl https://plugin.maniya-kvn.online/health
-curl "https://plugin.maniya-kvn.online/api/lampa/subscription/check?token=demo-token"
+TOKEN=YOUR_REAL_TOKEN curl "https://plugin.maniya-kvn.online/api/lampa/subscription/check?token=${TOKEN}"
 ```

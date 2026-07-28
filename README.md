@@ -1,74 +1,71 @@
 # Maniya Online Lampa Plugin
 
-Стартовый шаблон плагина Lampa для Maniya Online. Плагин добавляет кнопку **Maniya Online** в карточку фильма/сериала, проверяет подписку пользователя через ваш API и получает список легально доступных источников воспроизведения.
+Production-ready Lampa plugin and Node.js API shell for Maniya Online. The plugin adds a **Maniya Online** button to movie and series cards, checks the user's subscription through your API, and requests provider-backed playback sources.
 
-> В шаблоне нет привязки к сторонним балансерам и нет выполнения кода через `eval`. Сервер Maniya Online должен отдавать только те ссылки и источники, на которые у вас есть право распространения.
+> The repository does not ship built-in test access or sample playback streams. Configure real subscription data and provider credentials before exposing the service to users.
 
-## Файлы
+## Files
 
-- `public/maniya-online.js` — клиентский плагин для Lampa.
-- `docs/maniya-online-api.md` — контракт API, который должен реализовать сервер.
+- `public/maniya-online.js` — client-side Lampa plugin.
+- `server/src` — Node.js API server.
+- `docs/maniya-online-api.md` — API contract.
+- `docs/operations.md` — production operations notes.
 
-## Быстрый запуск
+## Plugin setup
 
-1. Разместите `public/maniya-online.js` на своём HTTPS-домене.
-2. В файле замените `https://maniya.online/api/lampa` на адрес вашего API.
-3. Реализуйте API по контракту из `docs/maniya-online-api.md`.
-4. Добавьте URL плагина в Lampa.
+Host `public/maniya-online.js` on your HTTPS domain and set `PUBLIC_BASE_URL` for the API origin used by the server.
 
-## Настройка подписки
-
-Плагин хранит локальный идентификатор устройства `maniya_unic_id` и токен `maniya_token`. Токен можно передать через URL плагина:
+A user token can be passed in the plugin URL:
 
 ```text
 https://your-domain.com/maniya-online.js?token=USER_TOKEN
 ```
 
-Или сохранить в Lampa Storage из другого вашего модуля:
+Or saved in Lampa Storage by your own account module:
 
 ```js
 Lampa.Storage.set('maniya_token', 'USER_TOKEN')
 ```
 
-## Сервер Maniya Online
+## Server setup
 
-В репозиторий добавлен минимальный Node.js-сервер для домена `plugin.maniya-kvn.online`.
-
-### Локальный запуск
+Create production subscription storage and point the server to it explicitly:
 
 ```bash
-cd server
-PUBLIC_BASE_URL=https://plugin.maniya-kvn.online PORT=3000 npm start
+USERS_FILE=/secure/maniya/users.json \
+VIDEOS_FILE=/secure/maniya/videos.json \
+PUBLIC_BASE_URL=https://plugin.maniya-kvn.online \
+PORT=3000 \
+npm --prefix server start
 ```
 
-### Тестовый доступ
+`USERS_FILE` is required for subscription-based endpoints to authorize real users. `VIDEOS_FILE` is optional legacy/static source storage; provider results are returned first, and an empty provider result returns an empty list unless you explicitly configure a real `VIDEOS_FILE`.
 
-По умолчанию в `server/data/users.json` есть тестовый токен:
+## Checks
 
-```text
-demo-token
+Run automated tests:
+
+```bash
+npm --prefix server test
 ```
 
-Плагин можно подключить так:
+Run local smoke checks with an explicit production/test token:
 
-```text
-https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token
+```bash
+TOKEN=YOUR_REAL_TOKEN ./scripts/smoke-local.sh
 ```
 
-Перед production-запуском замените тестового пользователя и тестовый HLS-поток в `server/data/` на вашу реальную базу подписок и легальные источники.
+Run remote checks with an explicit token:
 
-## Что уже извлечено из исходного WTCH-кода
+```bash
+TOKEN=YOUR_REAL_TOKEN ./scripts/verify-remote.sh
+```
 
-Разбор присланного примера находится в `docs/wtch-sample-analysis.md`. Там перечислены найденные storage-ключи, endpoint-ы, query-параметры, форматы ответа и то, что не стоит переносить в Maniya Online.
+## Production notes
 
-## Пошаговая инструкция для новичка
+Before publishing:
 
-Если вы не знаете, что делать дальше, откройте `docs/novice-next-steps.md`. Там расписаны шаги: локальная проверка, DNS, SSH, деплой, HTTPS, подключение плагина в Lampa и замена тестовых данных.
-
-## Проверка удалённого деплоя
-
-После запуска деплоя используйте `scripts/verify-remote.sh`, чтобы проверить `/health`, файл плагина, API подписки, `nginx -t` и состояние `systemd`-сервиса. Текущий статус и команды собраны в `docs/deployment-status.md`.
-
-## Production-аудит и эксплуатация
-
-Для публичного релиза добавлены `.env.example`, structured JSON logging, CORS allowlist, rate limiting, graceful shutdown, `/health` и `/ready`, unit/smoke tests, Dockerfile, docker-compose и GitHub Actions deploy workflow. Подробности эксплуатации находятся в `docs/operations.md`.
+1. configure real `USERS_FILE` data or replace JSON storage with your subscription backend;
+2. configure real provider credentials;
+3. do not rely on repository `server/data` files for production access;
+4. keep CORS, rate limits, health checks, and reverse proxy settings aligned with `docs/operations.md`.

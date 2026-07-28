@@ -3,7 +3,7 @@ set -euo pipefail
 
 PORT="${PORT:-3100}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-http://127.0.0.1:${PORT}}"
-TOKEN="${TOKEN:-demo-token}"
+: "${TOKEN:?TOKEN must be set explicitly}"
 LOG_FILE="${LOG_FILE:-/tmp/maniya-online-smoke.log}"
 PID_FILE="${PID_FILE:-/tmp/maniya-online-smoke.pid}"
 

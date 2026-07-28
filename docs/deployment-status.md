@@ -6,7 +6,7 @@
 
 ```bash
 curl https://plugin.maniya-kvn.online/health
-curl -I "https://plugin.maniya-kvn.online/maniya-online.js?token=demo-token"
+TOKEN=YOUR_REAL_TOKEN curl -I "https://plugin.maniya-kvn.online/maniya-online.js?token=${TOKEN}"
 ssh root@95.85.241.121 'nginx -t'
 ssh root@95.85.241.121 'systemctl is-enabled maniya-online && systemctl is-active maniya-online'
 ```

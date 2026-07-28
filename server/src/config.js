@@ -49,8 +49,8 @@ export const config = {
   rateLimitWindowMs: integer('RATE_LIMIT_WINDOW_MS', 60_000),
   rateLimitMax: integer('RATE_LIMIT_MAX', 120),
   tokenMinLength: integer('TOKEN_MIN_LENGTH', 8),
-  usersFile: process.env.USERS_FILE || path.join(serverDir, 'data', 'users.json'),
-  videosFile: process.env.VIDEOS_FILE || path.join(serverDir, 'data', 'videos.json'),
+  usersFile: process.env.USERS_FILE || '',
+  videosFile: process.env.VIDEOS_FILE || '',
   publicDir: process.env.PUBLIC_DIR || path.join(rootDir, 'public'),
   shutdownTimeoutMs: integer('SHUTDOWN_TIMEOUT_MS', 10_000)
 };

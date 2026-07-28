@@ -1,0 +1,9 @@
+[
+  {
+    "token": "unit-test-token",
+    "email": "unit-test@example.com",
+    "plan": "test-fixture",
+    "active": true,
+    "expires_at": "2099-12-31T23:59:59Z"
+  }
+]
