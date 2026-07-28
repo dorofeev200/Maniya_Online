@@ -62,6 +62,12 @@ export async function getVideosForRequest(context) {
 async function getProviderVideos(context) {
   const selected = String(context.query.provider || '').trim().toLowerCase();
   const providers = registeredProviders().filter((provider) => !selected || provider.id === selected);
-  const groups = await Promise.all(providers.map(async (provider) => provider.search(context)));
+  const groups = await Promise.all(providers.map(async (provider) => {
+    try {
+      return await provider.search(context);
+    } catch {
+      return [];
+    }
+  }));
   return groups.flat();
 }

@@ -27,15 +27,19 @@ export class KodikProvider extends Provider {
     const requestContext = context || (queryOrContext?.request ? queryOrContext : undefined);
     const query = requestContext?.query || queryOrContext || {};
 
-    const raw = await this.client.search({
-      title: query.title,
-      original_title: query.original_title,
-      kinopoisk_id: query.kinopoisk_id || query.kp,
-      imdb_id: query.imdb_id || query.imdb,
-      season: query.season || query.s
-    });
+    try {
+      const raw = await this.client.search({
+        title: query.title,
+        original_title: query.original_title,
+        kinopoisk_id: query.kinopoisk_id || query.kp,
+        imdb_id: query.imdb_id || query.imdb,
+        season: query.season || query.s
+      });
 
-    return this.normalizer.search(raw);
+      return this.normalizer.search(raw);
+    } catch {
+      return [];
+    }
   }
 
   async movie() {

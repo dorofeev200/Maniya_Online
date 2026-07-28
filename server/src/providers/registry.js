@@ -1,6 +1,7 @@
 import { KodikProvider } from './kodik/KodikProvider.js';
+import { RezkaProvider } from './rezka/RezkaProvider.js';
 
-const providers = [new KodikProvider()];
+const providers = [new KodikProvider(), new RezkaProvider()];
 
 export function registeredProviders() {
   return providers;
