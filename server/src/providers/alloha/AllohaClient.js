@@ -27,7 +27,7 @@ export class AllohaClient {
     });
   }
 
-  async search({ title, originalTitle, year, type, imdb, kp } = {}) {
+  async search({ title, originalTitle, year, type, imdb, kp, fallback = false } = {}) {
     const query = normalizeQuery({
       name: title || originalTitle || '',
       imdb,
@@ -44,7 +44,29 @@ export class AllohaClient {
       }
     });
 
-    return this.parseSearchResponse(response, query);
+    const payload = await response.json();
+    const normalized = this.parseSearchResponse(payload, query);
+    if (fallback && !normalized.items.length && title) {
+      const fallbackQuery = normalizeQuery({
+        name: originalTitle || title || '',
+        imdb,
+        kp,
+        year,
+        serial: type === 'serial' ? 1 : 0
+      });
+      if (JSON.stringify(fallbackQuery) !== JSON.stringify(query)) {
+        const fallbackPath = buildUrl('/movies/search', fallbackQuery);
+        const fallbackResponse = await this.httpClient.get(fallbackPath, {
+          headers: {
+            accept: 'application/json',
+            authorization: this.token ? `Bearer ${this.token}` : undefined
+          }
+        });
+        const fallbackPayload = await fallbackResponse.json();
+        return this.parseSearchResponse(fallbackPayload, fallbackQuery);
+      }
+    }
+    return normalized;
   }
 
   async details(token) {
@@ -79,7 +101,7 @@ export class AllohaClient {
   }
 
   async parseSearchResponse(response, query) {
-    const payload = await response.json();
+    const payload = response && typeof response === 'object' && !Array.isArray(response) ? response : await response.json();
     const items = Array.isArray(payload?.data) ? payload.data : [];
     return {
       query,

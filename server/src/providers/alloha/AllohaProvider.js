@@ -21,8 +21,17 @@ export class AllohaProvider extends Provider {
   }
 
   async search(query = {}) {
-    const { title, original_title: originalTitle, year, type, imdb, kp, id } = query || {};
-    const response = await this.client.search({ title, originalTitle, year, type, imdb, kp });
+    const { title, original_title: originalTitle, year, type, imdb, kp, id, request } = query || {};
+    const normalizedQuery = {
+      title: title || request?.query?.title || '',
+      originalTitle: originalTitle || request?.query?.original_title || '',
+      year: year || request?.query?.year || '',
+      type,
+      imdb: imdb || request?.query?.imdb_id || request?.query?.imdb || '',
+      kp: kp || request?.query?.kinopoisk_id || request?.query?.kp || '',
+      id
+    };
+    const response = await this.client.search({ ...normalizedQuery, fallback: true });
     return response.items.map((item) => this.normalizer.normalizeSearchItem({ ...item, id: item.id || id }));
   }
 
@@ -69,7 +78,8 @@ export class AllohaProvider extends Provider {
       episode: item.episode || item.e || null,
       directorsCut: Boolean(item.directorsCut)
     });
-    return this.normalizer.normalizeStreams(payload).map((stream) => this.streamItem({
+    const streams = this.normalizer.normalizeStreams(payload);
+    return streams.map((stream) => this.streamItem({
       id: String(item.id || item.token || ''),
       title: item.title || item.original_title || this.id,
       type: item.type || 'movie',
@@ -79,7 +89,7 @@ export class AllohaProvider extends Provider {
         url: stream.url,
         headers: stream.headers
       },
-      subtitles: stream.subtitles || []
+      subtitles: item.subtitles || []
     }));
   }
 }

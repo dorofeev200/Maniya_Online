@@ -67,16 +67,23 @@ export class AllohaNormalizer {
       language: normalizeLanguage(entry.language || entry.lang),
       quality: normalizeQuality(entry.quality || ''),
       uhd: Boolean(entry.uhd)
-    }));
+    })).sort((a, b) => {
+      const aRank = a.uhd ? 1 : 0;
+      const bRank = b.uhd ? 1 : 0;
+      return bRank - aRank || String(a.title || '').localeCompare(String(b.title || ''));
+    });
   }
 
   normalizeQualities(payload = {}) {
     const source = payload?.item || payload?.data || payload || {};
     const translations = Array.isArray(source.translations) ? source.translations : [];
-    const qualities = translations
+    const explicit = translations
       .map((entry) => normalizeQuality(entry.quality || ''))
       .filter(Boolean);
-    return [...new Set(qualities)];
+    const fallback = translations
+      .map((entry) => entry.uhd ? '2160p' : null)
+      .filter(Boolean);
+    return [...new Set([...explicit, ...fallback])];
   }
 
   normalizeStreams(payload = {}) {
@@ -90,7 +97,18 @@ export class AllohaNormalizer {
 
     for (const source of hlsSources) {
       const qualities = source?.quality || {};
+      const reserve = source?.reserve || {};
       for (const [quality, url] of Object.entries(qualities)) {
+        const normalized = new StreamBuilder()
+          .url(String(url || ''))
+          .title(source.title || '')
+          .quality(normalizeQuality(quality))
+          .voice(source.voice || '')
+          .header('Referer', 'https://apbugall.org/')
+          .build();
+        if (normalized.url) streams.push(normalized);
+      }
+      for (const [quality, url] of Object.entries(reserve)) {
         const normalized = new StreamBuilder()
           .url(String(url || ''))
           .title(source.title || '')

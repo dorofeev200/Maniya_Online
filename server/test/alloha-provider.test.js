@@ -5,13 +5,15 @@ import { AllohaProvider } from '../src/providers/alloha/AllohaProvider.js';
 class FakeAllohaClient {
   constructor() {
     this.calls = [];
+    this.searchResponses = [
+      { items: [{ id: 'movie-1', title: 'Test Movie', original_title: 'Test Movie', type: 'movie', poster: 'x' }] },
+      { items: [{ id: 'serial-1', title: 'Test Serial', original_title: 'Test Serial', type: 'serial', poster: 'x' }] }
+    ];
   }
 
   async search(payload) {
     this.calls.push(['search', payload]);
-    return {
-      items: [{ id: 'movie-1', title: 'Test Movie', original_title: 'Test Movie', type: 'movie', poster: 'x' }]
-    };
+    return this.searchResponses.shift() || { items: [] };
   }
 
   async details(token) {
@@ -37,10 +39,10 @@ class FakeAllohaClient {
           {
             default: true,
             quality: { 1080: 'https://cdn.example/stream.m3u8' },
-            reserve: {}
+            reserve: { 1080: 'https://cdn.example/stream-reserve.m3u8' }
           }
         ],
-        tracks: []
+        tracks: [{ label: 'English', src: 'https://cdn.example/subs.vtt' }]
       }
     };
   }
