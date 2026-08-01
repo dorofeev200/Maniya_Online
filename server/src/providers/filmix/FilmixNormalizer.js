@@ -35,6 +35,59 @@ function expandEpisodeLink(link, quality, { hls = false } = {}) {
   return hls ? toHlsUrl(expanded) : expanded;
 }
 
+function normalizeGenres(item = {}) {
+  const value = item.genres || item.genre || item.categories || item.category;
+  const genres = Array.isArray(value) ? value : String(value || '').split(/[,/|]+/);
+  return [...new Set(genres
+    .map((genre) => (typeof genre === 'string' ? genre : genre?.title || genre?.name || genre?.label || genre?.value))
+    .map((genre) => String(genre || '').trim())
+    .filter(Boolean))];
+}
+
+function normalizeRuntime(item = {}) {
+  const value = item.runtime ?? item.duration ?? item.time ?? item.duration_minutes ?? item.durationMinutes;
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const text = String(value).trim();
+  const timeMatch = text.match(/^(?:(\d+)\s*:\s*)?(\d+)\s*:\s*(\d+)$/);
+  if (timeMatch) {
+    const hours = Number(timeMatch[1] || 0);
+    const minutes = Number(timeMatch[2]);
+    const seconds = Number(timeMatch[3]);
+    return hours * 60 + minutes + (seconds >= 30 ? 1 : 0);
+  }
+  const hoursMatch = text.match(/(\d+)\s*(?:h|час|ч)/i);
+  const minutesMatch = text.match(/(\d+)\s*(?:m|min|мин)/i);
+  if (hoursMatch || minutesMatch) {
+    return Number(hoursMatch?.[1] || 0) * 60 + Number(minutesMatch?.[1] || 0);
+  }
+  const number = Number.parseInt(text, 10);
+  return Number.isFinite(number) ? number : null;
+}
+
+function subtitleEntries(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map((entry) => [null, entry]);
+  if (typeof value === 'object' && (value.url || value.link || value.src || value.file)) return [[null, value]];
+  if (typeof value === 'object') return Object.entries(value);
+  return [[null, value]];
+}
+
+function normalizeSubtitles(source = {}) {
+  const value = source.subtitles || source.subtitle || source.subs || source.cc || source.captions;
+  return subtitleEntries(value).map(([key, entry]) => {
+    const subtitle = typeof entry === 'string' ? { url: entry } : entry;
+    const url = subtitle?.url || subtitle?.link || subtitle?.src || subtitle?.file;
+    if (!isHttpUrl(url)) return null;
+    const language = subtitle.language || subtitle.lang || subtitle.code || key || null;
+    return {
+      url,
+      title: subtitle.title || subtitle.label || subtitle.name || language || null,
+      language
+    };
+  }).filter(Boolean);
+}
+
 function episodeMapFromToken(token) {
   if (!token) return {};
   if (Array.isArray(token)) {
@@ -58,7 +111,9 @@ export class FilmixNormalizer {
       original_title: item.original_title || item.original_name || null,
       year: item.year ? Number(item.year) : null,
       poster: item.poster || null,
-      language: normalizeLanguage(item.language || 'ru')
+      language: normalizeLanguage(item.language || 'ru'),
+      genres: normalizeGenres(item),
+      runtime: normalizeRuntime(item)
     };
   }
 
@@ -114,7 +169,8 @@ export class FilmixNormalizer {
       .map((quality) => this.buildStream({
         url: expandMovieLink(movie.link, quality, this),
         quality,
-        voice: movie.translation
+        voice: movie.translation,
+        subtitles: normalizeSubtitles(movie)
       }))
       .filter(Boolean);
   }
@@ -127,6 +183,7 @@ export class FilmixNormalizer {
         url: expandEpisodeLink(episode.link, quality, this),
         quality,
         voice: episode.translation,
+        subtitles: normalizeSubtitles(episode),
         title,
         season: seasonNumber === '-1' ? 1 : Number(seasonNumber),
         episode: Number(number)
@@ -143,14 +200,19 @@ export class FilmixNormalizer {
     }));
   }
 
-  buildStream({ url, quality, voice, title, season, episode }) {
+  buildStream({ url, quality, voice, subtitles = [], title, season, episode }) {
     if (!isHttpUrl(url)) return null;
-    return new StreamBuilder()
+    const builder = new StreamBuilder()
       .url(this.streamProxy(url))
       .title(title)
       .quality(`${quality}p`)
       .voice(voice)
-      .header('Referer', 'https://filmix.my/')
-      .build();
+      .header('Referer', 'https://filmix.my/');
+
+    for (const subtitle of subtitles) {
+      builder.subtitle(subtitle);
+    }
+
+    return builder.build();
   }
 }
