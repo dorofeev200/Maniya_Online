@@ -21,24 +21,38 @@ export class RezkaProvider extends Provider {
   }
 
   async search(query = {}) {
-    const { title, original_title: originalTitle, year, type, id } = query || {};
-    const response = await this.client.search({ title, originalTitle, year, type });
-    return response.items.map((item) => this.normalizer.normalizeSearchItem({ ...item, id: item.id || id }));
+    const { title, original_title: originalTitle, originalTitle: camelOriginalTitle, year, type, id } = query || {};
+    const response = await this.safeProviderCall(
+      () => this.client.search({ title, originalTitle: camelOriginalTitle || originalTitle, year, type }),
+      { items: [], selected: null }
+    );
+    return (Array.isArray(response.items) ? response.items : [])
+      .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      .map((item) => this.normalizer.normalizeSearchItem({ ...item, id: item.id || id }));
   }
 
   async movie(item = {}) {
-    return this.search({ ...item, type: 'movie' });
+    return this.resolveCard({ ...item, type: 'movie' });
   }
 
   async serial(item = {}) {
-    return this.search({ ...item, type: 'serial' });
+    return this.resolveCard({ ...item, type: 'serial' });
+  }
+
+  async resolveCard(item = {}) {
+    const id = item?.id || item?.post_id || item?.postId;
+    if (!id) return null;
+    const card = await this.safeProviderCall(() => this.client.card(id), null);
+    if (!card) return null;
+    return this.normalizer.normalizeCard({ ...item, ...card, id: card.id || id, type: card.type || item.type });
   }
 
   async streams(item = {}) {
-    if (!item?.id) return [];
-    const payload = await this.client.streams(item.id);
-    return this.normalizer.normalizeStreams(payload).map((stream) => this.streamItem({
-      id: String(item.id),
+    const id = item?.id || item?.post_id || item?.postId;
+    if (!id) return [];
+    const payload = await this.safeProviderCall(() => this.client.streams(id, item), null);
+    return this.normalizer.normalizeStreams(payload, item).map((stream) => this.streamItem({
+      id: String(id),
       title: item.title || item.original_title || this.id,
       type: item.type || 'movie',
       quality: stream.quality || 'auto',
@@ -49,6 +63,15 @@ export class RezkaProvider extends Provider {
       },
       subtitles: stream.subtitles || []
     }));
+  }
+
+  async safeProviderCall(callback, fallback) {
+    try {
+      const result = await callback();
+      return result ?? fallback;
+    } catch {
+      return fallback;
+    }
   }
 }
 
