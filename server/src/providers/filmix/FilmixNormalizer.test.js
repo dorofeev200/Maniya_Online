@@ -131,3 +131,41 @@ describe('Filmix malformed responses', () => {
     assert.deepEqual(await provider.getStreams('1'), []);
   });
 });
+
+describe('FilmixNormalizer stream parity', () => {
+  it('normalizes backup streams', () => {
+    const streams = new FilmixNormalizer({ pro: true }).normalizeMovie({
+      link: movieLink,
+      translation: 'Dub',
+      backup: [{ link: 'https://backup.example/s/hash/movie_backup_[480].mp4', translation: 'Backup Dub' }]
+    });
+
+    assert.ok(streams.some((stream) => stream.url === 'https://backup.example/s/hash/movie_backup_480.mp4'));
+    assert.ok(streams.some((stream) => stream.voice === 'Backup Dub'));
+  });
+
+  it('normalizes reserve streams', () => {
+    const streams = new FilmixNormalizer({ pro: true }).normalizeMovie({
+      link: movieLink,
+      translation: 'Dub',
+      reserve: {
+        ru: { url: 'https://reserve.example/video.mp4', quality: '720p', voice: 'Reserve Dub' }
+      }
+    });
+
+    assert.ok(streams.some((stream) => stream.url === 'https://reserve.example/video.mp4'));
+    assert.ok(streams.some((stream) => stream.quality === '720p'));
+    assert.ok(streams.some((stream) => stream.voice === 'Reserve Dub'));
+  });
+
+  it('normalizes DASH streams', () => {
+    const streams = new FilmixNormalizer({ pro: true }).normalizeMovie({
+      link: movieLink,
+      translation: 'Dub',
+      dash: 'https://dash.example/manifest.mpd'
+    });
+
+    assert.ok(streams.some((stream) => stream.url === 'https://dash.example/manifest.mpd'));
+    assert.ok(streams.some((stream) => stream.quality === 'DASH'));
+  });
+});

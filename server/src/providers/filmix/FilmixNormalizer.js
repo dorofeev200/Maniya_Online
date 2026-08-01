@@ -7,6 +7,9 @@ import { StreamBuilder } from '../shared/streams/StreamBuilder.js';
 import { isHttpUrl } from '../shared/utils/Url.js';
 
 const movieQualities = [2160, 1440, 1080, 720, 480];
+const backupKeys = ['backup', 'backups', 'backup_streams', 'backupStreams', 'backup_links', 'backupLinks'];
+const reserveKeys = ['reserve', 'reserves', 'reserve_streams', 'reserveStreams', 'reserve_links', 'reserveLinks'];
+const dashKeys = ['dash', 'dash_stream', 'dashStream', 'dash_streams', 'dashStreams', 'dash_url', 'dashUrl'];
 
 function toHlsUrl(url) {
   const match = String(url || '').match(/^(https?:\/\/[^/]+)\/s\/([^/]+)\/(.*)$/);
@@ -22,7 +25,7 @@ function qualityAllowed(quality, { pro = false, hideFree720 = false } = {}) {
 
 function parseMovieQualities(link) {
   const text = String(link || '');
-  return movieQualities.filter((quality) => text.includes(`${quality},`));
+  return movieQualities.filter((quality) => new RegExp(`(?:^|\\[|,)${quality}(?:,|\\])`).test(text));
 }
 
 function expandMovieLink(link, quality, { hls = false } = {}) {
@@ -86,6 +89,64 @@ function normalizeSubtitles(source = {}) {
       language
     };
   }).filter(Boolean);
+}
+
+function isObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function streamEntryList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (isObject(value) && !(value.url || value.link || value.src || value.file)) return Object.values(value).flatMap((entry) => streamEntryList(entry));
+  return [value];
+}
+
+function streamsFromKeys(source = {}, keys = []) {
+  return keys.flatMap((key) => streamEntryList(source[key]));
+}
+
+function streamUrl(entry) {
+  if (typeof entry === 'string') return entry;
+  return entry?.url || entry?.link || entry?.src || entry?.file || '';
+}
+
+function streamVoice(entry, fallback) {
+  if (!isObject(entry)) return fallback;
+  return entry.translation || entry.voice || fallback;
+}
+
+function streamQuality(entry, fallback = null) {
+  if (!isObject(entry)) return fallback;
+  return entry.quality || entry.q || entry.label || entry.title || fallback;
+}
+
+function formatQuality(quality) {
+  const text = String(quality || '').trim();
+  if (!text) return '';
+  return /^\d+$/.test(text) ? `${text}p` : text;
+}
+
+function streamQualities(entry, url) {
+  const parsed = parseMovieQualities(url);
+  if (parsed.length) return parsed;
+  if (Array.isArray(entry?.qualities)) return entry.qualities;
+  return [];
+}
+
+function normalizeAuxiliaryStreams(source = {}, { keys = [], fallbackVoice = null, fallbackQuality = null, dash = false, hlsContext = null, expandLink = expandMovieLink } = {}) {
+  return streamsFromKeys(source, keys).flatMap((entry) => {
+    const url = streamUrl(entry);
+    const voice = streamVoice(entry, fallbackVoice);
+    const subtitles = normalizeSubtitles(isObject(entry) ? entry : source);
+    const qualities = dash ? [] : streamQualities(entry, url);
+    if (qualities.length) {
+      return qualities
+        .filter((quality) => qualityAllowed(quality, hlsContext || {}))
+        .map((quality) => ({ url: expandLink(url, quality, hlsContext || {}), quality, voice, subtitles }));
+    }
+    return [{ url: dash ? url : (hlsContext?.hls ? toHlsUrl(url) : url), quality: streamQuality(entry, fallbackQuality || (dash ? 'DASH' : 'auto')), voice, subtitles }];
+  });
 }
 
 function episodeMapFromToken(token) {
@@ -164,26 +225,43 @@ export class FilmixNormalizer {
   }
 
   normalizeMovie(movie = {}) {
-    return parseMovieQualities(movie.link)
+    const primaryStreams = parseMovieQualities(movie.link)
       .filter((quality) => qualityAllowed(quality, this))
-      .map((quality) => this.buildStream({
+      .map((quality) => ({
         url: expandMovieLink(movie.link, quality, this),
         quality,
         voice: movie.translation,
         subtitles: normalizeSubtitles(movie)
-      }))
-      .filter(Boolean);
+      }));
+
+    return [
+      ...primaryStreams,
+      ...normalizeAuxiliaryStreams(movie, { keys: backupKeys, fallbackVoice: movie.translation, hlsContext: this }),
+      ...normalizeAuxiliaryStreams(movie, { keys: reserveKeys, fallbackVoice: movie.translation, hlsContext: this }),
+      ...normalizeAuxiliaryStreams(movie, { keys: dashKeys, fallbackVoice: movie.translation, fallbackQuality: 'DASH', dash: true, hlsContext: this })
+    ].map((stream) => this.buildStream(stream)).filter(Boolean);
   }
 
   normalizeEpisode(number, episode = {}, seasonNumber, title = null) {
     const builder = new EpisodeBuilder().number(Number(number)).title(`${number} серия`);
-    for (const quality of [...(episode.qualities || [])].sort((a, b) => Number(b) - Number(a))) {
-      if (!qualityAllowed(Number(quality), this)) continue;
-      builder.stream(this.buildStream({
+    const primaryStreams = [...(episode.qualities || [])]
+      .sort((a, b) => Number(b) - Number(a))
+      .filter((quality) => qualityAllowed(Number(quality), this))
+      .map((quality) => ({
         url: expandEpisodeLink(episode.link, quality, this),
         quality,
         voice: episode.translation,
-        subtitles: normalizeSubtitles(episode),
+        subtitles: normalizeSubtitles(episode)
+      }));
+
+    for (const stream of [
+      ...primaryStreams,
+      ...normalizeAuxiliaryStreams(episode, { keys: backupKeys, fallbackVoice: episode.translation, hlsContext: this, expandLink: expandEpisodeLink }),
+      ...normalizeAuxiliaryStreams(episode, { keys: reserveKeys, fallbackVoice: episode.translation, hlsContext: this, expandLink: expandEpisodeLink }),
+      ...normalizeAuxiliaryStreams(episode, { keys: dashKeys, fallbackVoice: episode.translation, fallbackQuality: 'DASH', dash: true, hlsContext: this })
+    ]) {
+      builder.stream(this.buildStream({
+        ...stream,
         title,
         season: seasonNumber === '-1' ? 1 : Number(seasonNumber),
         episode: Number(number)
@@ -205,7 +283,7 @@ export class FilmixNormalizer {
     const builder = new StreamBuilder()
       .url(this.streamProxy(url))
       .title(title)
-      .quality(`${quality}p`)
+      .quality(formatQuality(quality))
       .voice(voice)
       .header('Referer', 'https://filmix.my/');
 
