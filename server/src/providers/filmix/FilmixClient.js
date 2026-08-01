@@ -4,6 +4,28 @@ import { RetryPolicy } from '../shared/http/RetryPolicy.js';
 import { buildHeaders } from '../shared/utils/Headers.js';
 import { buildUrl } from '../shared/utils/Url.js';
 
+async function safeJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function safeParseCard(text) {
+  if (!text) return null;
+  try {
+    const payload = JSON.parse(text.replace('"playlist":[],', '"playlist":null,'));
+    return isRecord(payload) ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
 function randomDeviceId(length = 16) {
   const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   return Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
@@ -62,17 +84,25 @@ export class FilmixClient {
 
   async searchApi(story) {
     if (!story) return [];
-    const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/search`, { story, ...this.appArgs }));
-    const root = await response.json();
-    return Array.isArray(root) ? root : [];
+    try {
+      const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/search`, { story, ...this.appArgs }));
+      const root = await safeJson(response);
+      return Array.isArray(root) ? root.filter(isRecord) : [];
+    } catch {
+      return [];
+    }
   }
 
   async searchFallback(primary, secondary) {
     for (const story of [primary, secondary]) {
       if (!story) continue;
-      const response = await this.httpClient.get(buildUrl(`${this.tvHost}/api-fx/list`, { search: story, limit: 48 }));
-      const root = await response.json();
-      if (Array.isArray(root?.items) && root.items.length) return root.items;
+      try {
+        const response = await this.httpClient.get(buildUrl(`${this.tvHost}/api-fx/list`, { search: story, limit: 48 }));
+        const root = await safeJson(response);
+        if (Array.isArray(root?.items) && root.items.length) return root.items.filter(isRecord);
+      } catch {
+        continue;
+      }
     }
     return [];
   }
@@ -90,10 +120,13 @@ export class FilmixClient {
   }
 
   async card(postId) {
-    const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/post/${postId}`, this.appArgs));
-    const text = await response.text();
-    if (!text) return null;
-    return JSON.parse(text.replace('"playlist":[],', '"playlist":null,'));
+    try {
+      const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/post/${postId}`, this.appArgs));
+      const text = await response.text();
+      return safeParseCard(text);
+    } catch {
+      return null;
+    }
   }
 
   normalizeSearchName(value) {

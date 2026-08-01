@@ -29,15 +29,28 @@ export class FilmixProvider extends Provider {
   }
 
   async search({ title, original_title: originalTitle, originalTitle: camelOriginalTitle, kp, imdb, year, clarification = 0, similar = false } = {}) {
-    const byTitle = await this.client.search({ title, originalTitle: camelOriginalTitle || originalTitle, clarification, year, similar });
-    const byIds = await this.client.searchByExternalIds({ kp, imdb, year });
-    const items = [...byTitle.items, ...byIds].map((item) => this.normalizer.normalizeSearchItem(item));
-    const selected = byTitle.selected ? this.normalizer.normalizeSearchItem(byTitle.selected) : null;
+    const byTitle = await this.safeProviderCall(() => this.client.search({ title, originalTitle: camelOriginalTitle || originalTitle, clarification, year, similar }), { items: [], selected: null });
+    const byIds = await this.safeProviderCall(() => this.client.searchByExternalIds({ kp, imdb, year }), []);
+    const items = [...(Array.isArray(byTitle?.items) ? byTitle.items : []), ...(Array.isArray(byIds) ? byIds : [])]
+      .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      .map((item) => this.normalizer.normalizeSearchItem(item));
+    const selected = byTitle?.selected && typeof byTitle.selected === 'object' && !Array.isArray(byTitle.selected)
+      ? this.normalizer.normalizeSearchItem(byTitle.selected)
+      : null;
     return { selected, items: this.uniqueById(items) };
   }
 
   getCard(postId) {
-    return this.client.card(postId);
+    return this.safeProviderCall(() => this.client.card(postId), null);
+  }
+
+  async safeProviderCall(callback, fallback) {
+    try {
+      const result = await callback();
+      return result ?? fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   async getStreams(postId, metadata = {}) {
