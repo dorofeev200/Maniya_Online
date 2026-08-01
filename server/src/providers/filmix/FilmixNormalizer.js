@@ -95,6 +95,20 @@ function isObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function normalizeCookie(source = {}) {
+  const value = source.cookie || source.cookies || source.headers?.Cookie || source.headers?.cookie;
+  if (!value) return null;
+  if (Array.isArray(value)) return value.map((cookie) => String(cookie || '').trim()).filter(Boolean).join('; ');
+  if (isObject(value)) {
+    const cookies = Object.entries(value)
+      .filter(([, cookieValue]) => cookieValue !== undefined && cookieValue !== null && cookieValue !== '')
+      .map(([name, cookieValue]) => `${name}=${cookieValue}`);
+    return cookies.length ? cookies.join('; ') : null;
+  }
+  const cookie = String(value).trim();
+  return cookie || null;
+}
+
 function streamEntryList(value) {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -143,9 +157,9 @@ function normalizeAuxiliaryStreams(source = {}, { keys = [], fallbackVoice = nul
     if (qualities.length) {
       return qualities
         .filter((quality) => qualityAllowed(quality, hlsContext || {}))
-        .map((quality) => ({ url: expandLink(url, quality, hlsContext || {}), quality, voice, subtitles }));
+        .map((quality) => ({ url: expandLink(url, quality, hlsContext || {}), quality, voice, subtitles, cookie: normalizeCookie(isObject(entry) ? entry : source) }));
     }
-    return [{ url: dash ? url : (hlsContext?.hls ? toHlsUrl(url) : url), quality: streamQuality(entry, fallbackQuality || (dash ? 'DASH' : 'auto')), voice, subtitles }];
+    return [{ url: dash ? url : (hlsContext?.hls ? toHlsUrl(url) : url), quality: streamQuality(entry, fallbackQuality || (dash ? 'DASH' : 'auto')), voice, subtitles, cookie: normalizeCookie(isObject(entry) ? entry : source) }];
   });
 }
 
@@ -231,7 +245,8 @@ export class FilmixNormalizer {
         url: expandMovieLink(movie.link, quality, this),
         quality,
         voice: movie.translation,
-        subtitles: normalizeSubtitles(movie)
+        subtitles: normalizeSubtitles(movie),
+        cookie: normalizeCookie(movie)
       }));
 
     return [
@@ -251,7 +266,8 @@ export class FilmixNormalizer {
         url: expandEpisodeLink(episode.link, quality, this),
         quality,
         voice: episode.translation,
-        subtitles: normalizeSubtitles(episode)
+        subtitles: normalizeSubtitles(episode),
+        cookie: normalizeCookie(episode)
       }));
 
     for (const stream of [
@@ -278,14 +294,15 @@ export class FilmixNormalizer {
     }));
   }
 
-  buildStream({ url, quality, voice, subtitles = [], title, season, episode }) {
+  buildStream({ url, quality, voice, subtitles = [], cookie = null, title, season, episode }) {
     if (!isHttpUrl(url)) return null;
     const builder = new StreamBuilder()
       .url(this.streamProxy(url))
       .title(title)
       .quality(formatQuality(quality))
       .voice(voice)
-      .header('Referer', 'https://filmix.my/');
+      .header('Referer', 'https://filmix.my/')
+      .header('Cookie', cookie);
 
     for (const subtitle of subtitles) {
       builder.subtitle(subtitle);

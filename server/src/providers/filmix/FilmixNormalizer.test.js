@@ -169,3 +169,81 @@ describe('FilmixNormalizer stream parity', () => {
     assert.ok(streams.some((stream) => stream.quality === 'DASH'));
   });
 });
+
+describe('FilmixNormalizer acceptance coverage', () => {
+  it('normalizes search metadata', () => {
+    const item = new FilmixNormalizer().normalizeSearchItem({
+      id: '42',
+      title: 'Заголовок',
+      original_name: 'Original',
+      year: '2024',
+      poster: 'https://image.example/poster.jpg',
+      genre: 'драма, комедия',
+      duration: '1 ч 35 мин'
+    });
+
+    assert.deepEqual(item, {
+      id: '42',
+      title: 'Заголовок',
+      original_title: 'Original',
+      year: 2024,
+      poster: 'https://image.example/poster.jpg',
+      language: 'ru',
+      genres: ['драма', 'комедия'],
+      runtime: 95
+    });
+  });
+
+  it('normalizes movie streams', () => {
+    const streams = new FilmixNormalizer({ pro: true }).normalizeMovie({
+      link: movieLink,
+      translation: 'Dub'
+    });
+
+    assert.deepEqual(streams.map((stream) => stream.quality), ['1080p', '720p']);
+    assert.ok(streams.every((stream) => stream.headers.Referer === 'https://filmix.my/'));
+  });
+
+  it('normalizes serial streams', () => {
+    const [season] = new FilmixNormalizer({ pro: true }).toStreamItems({
+      player_links: {
+        playlist: {
+          1: {
+            Dub: {
+              1: { link: 'https://cdn.example/s/hash/episode_%s.mp4', qualities: [720], translation: 'Dub' }
+            }
+          }
+        }
+      }
+    });
+
+    assert.equal(season.number, 1);
+    assert.equal(season.episodes[0].number, 1);
+    assert.equal(season.episodes[0].streams[0].url, 'https://cdn.example/s/hash/episode_720.mp4');
+    assert.equal(season.episodes[0].streams[0].quality, '720p');
+  });
+
+  it('propagates cookies to Filmix stream headers', () => {
+    const [stream] = new FilmixNormalizer({ pro: true }).normalizeMovie({
+      link: movieLink,
+      translation: 'Dub',
+      cookies: { session: 'abc', uid: '42' }
+    });
+
+    assert.equal(stream.headers.Cookie, 'session=abc; uid=42');
+  });
+
+  it('returns safe client results for HTTP failures', async () => {
+    const client = new FilmixClient({
+      httpClient: {
+        async get() {
+          throw new Error('network failed');
+        }
+      }
+    });
+
+    assert.deepEqual(await client.searchApi('movie'), []);
+    assert.deepEqual(await client.searchFallback('movie'), []);
+    assert.equal(await client.card('1'), null);
+  });
+});

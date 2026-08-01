@@ -84,17 +84,25 @@ export class FilmixClient {
 
   async searchApi(story) {
     if (!story) return [];
-    const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/search`, { story, ...this.appArgs }));
-    const root = await safeJson(response);
-    return Array.isArray(root) ? root.filter(isRecord) : [];
+    try {
+      const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/search`, { story, ...this.appArgs }));
+      const root = await safeJson(response);
+      return Array.isArray(root) ? root.filter(isRecord) : [];
+    } catch {
+      return [];
+    }
   }
 
   async searchFallback(primary, secondary) {
     for (const story of [primary, secondary]) {
       if (!story) continue;
-      const response = await this.httpClient.get(buildUrl(`${this.tvHost}/api-fx/list`, { search: story, limit: 48 }));
-      const root = await safeJson(response);
-      if (Array.isArray(root?.items) && root.items.length) return root.items.filter(isRecord);
+      try {
+        const response = await this.httpClient.get(buildUrl(`${this.tvHost}/api-fx/list`, { search: story, limit: 48 }));
+        const root = await safeJson(response);
+        if (Array.isArray(root?.items) && root.items.length) return root.items.filter(isRecord);
+      } catch {
+        continue;
+      }
     }
     return [];
   }
@@ -112,9 +120,13 @@ export class FilmixClient {
   }
 
   async card(postId) {
-    const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/post/${postId}`, this.appArgs));
-    const text = await response.text();
-    return safeParseCard(text);
+    try {
+      const response = await this.httpClient.get(buildUrl(`${this.host}/api/v2/post/${postId}`, this.appArgs));
+      const text = await response.text();
+      return safeParseCard(text);
+    } catch {
+      return null;
+    }
   }
 
   normalizeSearchName(value) {
