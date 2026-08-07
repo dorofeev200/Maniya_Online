@@ -37,11 +37,16 @@ systemd `maniya-online` (node 3000) + nginx 443; docker-контейнер `lamp
 (код) + `backup/*` (состояние) + `restore-vps.sh` (сборка всего на новый VPS). Remote на GitHub:
 origin → код продублирован.
 
-## ▲ Текущая точка (2026-08-07, сессия 4: волна CDNvideohub)
-- **WAVE CDNVIDEOHUB ∎ ВЫПОЛНЕН (код+тесты+live, ждёт деплоя VPS):** клиент (`playlist`/`videoHls`, hlsUrl-срез), нормализатор (records kp-only, seasons/episodes/voices), провайдер (search/movie/serial/videos/streams, фильм по озвучкам, сериал по сериям×озвучкам). Registry+config+`.env.example`+proxy allowHosts (`vkuser.net`,`okcdn.ru`). Локально **135 тестов / 134 pass + 1 skip, 0 fail**. Live: search(Интерстеллар 462682)→movie, videos→1 play-item (voice Неизвестный) через прокси. Следующий шаг: деплой VPS + verify.
+## ⏸ Точка остановки (2026-08-07, сессия 4: волна CDNvideohub ЗАКРЫТА)
+- **WAVE CDNVIDEOHUB ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (код+тесты+деплой+live):** клиент (`playlist`/`videoHls`, hlsUrl-срез),
+  нормализатор (records kp-only, seasons/episodes/voices), провайдер (search/movie/serial/videos/streams,
+  фильм по озвучкам, сериал по сериям×озвучкам). Registry+config+`.env.example`+proxy allowHosts (`vkuser.net`,`okcdn.ru`).
+  Локально **135 тестов / 134 pass + 1 skip, 0 fail**. Деплой VPS ✓, verify-remote 5/5, sources включает `cdnvideohub`.
+  Live через HTTPS: videos(kp=462682, Интерстеллар) → 1 play-item (voice «Неизвестный»), прокси отдаёт HLS
+  (HTTP 200, 2175 B, `application/x-mpegURL`) с `vd293.okcdn.ru` (okcdn.ru в allowHosts). Следующая волна: **Collaps**.
 
 ## ⏸ Точка остановки (2026-08-07, сессия 3: durability + волна Rutube закрыта)
-- **WAVE? RUTUBE ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (деплой VPS + верификация):** локально 122 теста / 121 pass + 1 skip;
+- **WAVE RUTUBE ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (деплой VPS + верификация):** локально 122 теста / 121 pass + 1 skip;
   деплой VPS из tar-over-SSH в `/opt/maniya-online` (`.env` и `data/users.json` сохранены); `verify-remote.sh` 5/5;
   live Rutube через HTTPS: sources `rutubemovie:true`, videos (Интерстеллар 2014) → играбельный item quality auto.
 - **DURABILITY ✅:** `deploy.sh` починен (tar вместо rsync, `.env` не перезаписывает — heredoc только при отсутствии;
@@ -97,8 +102,8 @@ origin → код продублирован.
 2. [x] Базовый коммит restore-point — сделано (0316e2e)
 3. [ ] Фундамент движка (FetchService + IframeCodec + IframeProviderBase) — понадобится при провайдерах с iframe/JS-декодом
 4. [x] Первый Tier-1 провайдер (RutubeMovie) — ✅ live (локально + VPS)
-5. [x] CDNvideohub (Tier 1, чистый HTTP) — код+тесты+live готовы, ждёт деплоя VPS
-5b. [ ] После деплоя CDNvideohub: Collaps (Tier 1, HTML+JSON, зашитый токен)
+5. [x] CDNvideohub (Tier 1, чистый HTTP) — ✅ завершён (деплой VPS + live)
+5b. [ ] Collaps (Tier 1, HTML+JSON, зашитый токен)
 6. [ ] Live-валидация на VPS + деплой после каждой волны
 
 ## Итоговый чекбокс «плагин работает»
