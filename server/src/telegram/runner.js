@@ -40,19 +40,23 @@ export function createTelegramRunner(config, deps = {}) {
   }
 
   // Разослать администраторам: текстовое adminNote и/или фото квитанции adminNotePhoto.
+  // adminNotePhoto.replyMarkup — кнопка выдачи подписки (вместо /grant).
   async function notifyAdmins(reply, chatId) {
     const admins = Array.isArray(config.telegram.admins) ? config.telegram.admins : [];
     for (const adminId of admins) {
       if (String(adminId) === String(chatId)) continue;
       if (reply.adminNotePhoto) {
+        const photoMarkup = reply.adminNotePhoto.replyMarkup
+          ? { reply_markup: reply.adminNotePhoto.replyMarkup } : {};
         try {
-          await client.sendPhoto(adminId, reply.adminNotePhoto.fileId, reply.adminNotePhoto.caption);
+          await client.sendPhoto(adminId, reply.adminNotePhoto.fileId, reply.adminNotePhoto.caption, photoMarkup);
         } catch (error) {
           logger.error('telegram_admin_photo_failed', { admin: adminId, error: error.message });
           try { await send(adminId, { text: (reply.adminNotePhoto.caption || '') }); } catch (e) {}
         }
-      } else {
-        await send(adminId, { text: reply.adminNote });
+      } else if (reply.adminNote) {
+        // adminNote — { text, replyMarkup } (кнопка выдачи) или строка совместимости.
+        await send(adminId, typeof reply.adminNote === 'string' ? { text: reply.adminNote } : reply.adminNote);
       }
     }
   }

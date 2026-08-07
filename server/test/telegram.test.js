@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, normalizePlan, parseDateArg, parseGrantArgs, paymentReply, pluginUrl, shortId, slugFrom, splitGrantArgs } from '../src/telegram/bot.js';
+import { adminGrantMarkup, daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, paymentReply, pluginUrl, shortId, slugFrom } from '../src/telegram/bot.js';
 import { TelegramBotClient } from '../src/telegram/BotClient.js';
 import { createTelegramRunner } from '../src/telegram/runner.js';
 
@@ -118,32 +118,43 @@ test('/status: триал активен, потом протухает', async 
   assert.match(expired.text, /🔴 не активна/);
 });
 
-test('/grant (админ): бессрочно или продлевает по токену', async () => {
-  const store = memStore();
-  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  const token = store.users[0].token;
-
-  const grant7 = await handleCommand({ text: `/grant ${token} 7`, chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.match(grant7.text, /🟢 активна/);
+test('кнопка выдачи (админ): выдача на месяц, план full, ссылка', async () => {
+  const store = memStore([{ telegram_id: '222', token: 'mo-222', slug: 'vasya', active: true, expires_at: null, plan: 'trial' }]);
+  const r = await handleCallback({ data: 'grant_issue:222:30', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /🟢 активна/);
   assert.equal(store.users[0].plan, 'full');
-  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 7 * 24 * 3600 * 1000);
-
-  const forever = await handleCommand({ text: `/grant ${token}`, chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.equal(store.users[0].expires_at, null);
+  assert.equal(store.users[0].active, true);
+  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 30 * 24 * 3600 * 1000);
+  assert.match(r.text, /Ссылка плагина/);
 });
 
-test('/grant не-админ: отклоняется', async () => {
+test('кнопка выдачи: продлевает от текущего срока, а не заново от now', async () => {
+  const store = memStore([{ telegram_id: '222', token: 'mo-222', slug: 'vasya', active: true, plan: 'full', expires_at: new Date(NOW + 100 * 24 * 3600 * 1000).toISOString() }]);
+  const r = await handleCallback({ data: 'grant_issue:222:30', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /🟢 активна/);
+  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 130 * 24 * 3600 * 1000);
+});
+
+test('кнопка выдачи — не-админ: отклоняется, подписка не меняется', async () => {
   const store = memStore();
   await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  const token = store.users[0].token;
-  const reply = await handleCommand({ text: `/grant ${token} 7`, chatId: 777, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.match(reply.text, /только для админ/);
+  const before = store.users[0].expires_at;
+  const r = await handleCallback({ data: 'grant_issue:222:30', chatId: 777, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /только для админ/);
+  assert.equal(store.users[0].plan, 'trial');
+  assert.equal(store.users[0].expires_at, before);
 });
 
-test('/grant по неизвестному токену: сообщение об ошибке', async () => {
-  const store = memStore();
-  const reply = await handleCommand({ text: '/grant nope-123 7', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.match(reply.text, /Не найден пользователь/);
+test('кнопка выдачи несуществующего пользователя: подсказка с /list', async () => {
+  const r = await handleCallback({ data: 'grant_issue:999:30', chatId: 111, config: cfg, getUsers: () => Promise.resolve([]), setUsers: () => Promise.resolve() });
+  assert.match(r.text, /Пользователь не найден/);
+});
+
+test('adminGrantMarkup: callback grant_issue:<id>:<месяц>', () => {
+  const mk = adminGrantMarkup(222);
+  const btn = mk.inline_keyboard[0][0];
+  assert.match(btn.text, /Выдать подписку/);
+  assert.equal(btn.callback_data, 'grant_issue:222:30');
 });
 
 test('/revoke (админ): отключает подписку', async () => {
@@ -259,11 +270,16 @@ test('handleCallback неизвестный data → null (только ack)', a
   assert.equal(reply, null);
 });
 
-test('/start нового пользователя: adminNote для продления админом (новый формат)', async () => {
+test('/start нового пользователя: adminNote с кнопкой выдачи (без /grant)', async () => {
   const store = memStore();
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'vitya' } });
-  assert.ok(reply.adminNote.includes('/grant @vitya 08.08.26 P'));
-  assert.ok(reply.adminNote.includes('@vitya'));
+  assert.ok(reply.adminNote, 'adminNote есть');
+  assert.equal(typeof reply.adminNote, 'object');
+  assert.match(reply.adminNote.text, /Новый пользователь/);
+  assert.ok(reply.adminNote.text.includes('@vitya'));
+  const btn = reply.adminNote.replyMarkup.inline_keyboard[0][0];
+  assert.equal(btn.callback_data, 'grant_issue:222:30');
+  assert.match(btn.text, /Выдать подписку/);
 });
 
 test('/list (админ): перечисляет пользователей с токеном; не-админ — отклонение', async () => {
@@ -276,86 +292,24 @@ test('/list (админ): перечисляет пользователей с �
   assert.match(denied.text, /только для админ/);
 });
 
-test('/grant по @ник: выдаёт полную подписку и прилагает ссылку', async () => {
+test('/revoke по нику: поиск устойчив — кириллица, регистр, пробелы/дефисы', async () => {
+  const store = memStore([{ telegram_id: '222', token: 'mo-222', slug: 'ivan-ivanov', active: true, expires_at: null, plan: 'full' }]);
+  const r = await handleCommand({ text: '/revoke @ИВАН ИВАНОВ', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /отключена/);
+  assert.equal(store.users[0].active, false);
+});
+
+test('/revoke по старому слитному slug (без дефисов): тоже находит', async () => {
+  const store = memStore([{ telegram_id: '333', token: 'mo-333', slug: 'ivanivanov', active: true, expires_at: null, plan: 'full' }]);
+  const r = await handleCommand({ text: '/revoke @Иван Иванов', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.equal(store.users[0].active, false);
+});
+
+test('handleCommand /revoke несуществующий ник: понятная ошибка', async () => {
   const store = memStore();
-  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
-  const r = await handleCommand({ text: '/grant @vasya 5', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.match(r.text, /🟢 активна/);
-  assert.ok(r.text.includes('vasya_'));
-  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 5 * 24 * 3600 * 1000);
-});
-
-test('parseDateArg: ДД.ММ.ГГ → ISO конца дня; мусор и невозможные даты → null', () => {
-  assert.equal(parseDateArg('08.08.26'), new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
-  assert.equal(parseDateArg('08/08/26'), new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
-  assert.equal(parseDateArg('1-3-2027'), new Date(2027, 2, 1, 23, 59, 59, 999).toISOString());
-  assert.equal(parseDateArg('08.08.2026'), new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
-  assert.equal(parseDateArg('31.02.2026'), null);
-  assert.equal(parseDateArg('32.13.26'), null);
-  assert.equal(parseDateArg('not-a-date'), null);
-  assert.equal(parseDateArg(''), null);
-});
-
-test('parseGrantArgs: дата + P; дни; без даты → бессрочно; невалидная дата → бессрочно', () => {
-  const endOfDay = new Date(2026, 7, 8, 23, 59, 59, 999).toISOString();
-  assert.deepEqual(parseGrantArgs(['08.08.26', 'P'], NOW), { expires_at: endOfDay, plan: 'full' });
-  assert.deepEqual(parseGrantArgs(['08.08.26'], NOW), { expires_at: endOfDay, plan: 'full' });
-  assert.deepEqual(parseGrantArgs(['30'], NOW), { expires_at: new Date(NOW + 30 * 24 * 3600 * 1000).toISOString(), plan: 'full' });
-  assert.deepEqual(parseGrantArgs([], NOW), { expires_at: null, plan: 'full' });
-  assert.deepEqual(parseGrantArgs(['31.02.2026'], NOW), { expires_at: null, plan: 'full' });
-});
-
-test('normalizePlan: P/plugin → full; прочее — как написано; пусто → full', () => {
-  assert.equal(normalizePlan('P'), 'full');
-  assert.equal(normalizePlan('p'), 'full');
-  assert.equal(normalizePlan('plugin'), 'full');
-  assert.equal(normalizePlan('pro'), 'pro');
-  assert.equal(normalizePlan(''), 'full');
-});
-
-test('/grant @ник ДД.ММ.ГГ P: продление до даты, план полный', async () => {
-  const store = memStore();
-  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
-  const r = await handleCommand({ text: '/grant @vasya 08.08.26 P', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.match(r.text, /🟢 активна/);
-  assert.ok(r.text.includes('vasya_'));
-  assert.equal(store.users[0].plan, 'full');
-  assert.equal(store.users[0].active, true);
-  assert.equal(store.users[0].expires_at, new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
-});
-
-test('/grant @ник 08.08.2026: 4-значный год и без P', async () => {
-  const store = memStore();
-  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
-  await handleCommand({ text: '/grant @vasya 08.08.2026', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.equal(store.users[0].plan, 'full');
-  assert.equal(store.users[0].expires_at, new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
-});
-
-test('splitGrantArgs: субъект (можно с пробелами) + дата/дни + план с хвоста', () => {
-  assert.deepEqual(splitGrantArgs('@vasya 08.08.26 P'), { subject: '@vasya', expiry: '08.08.26', plan: 'P' });
-  assert.deepEqual(splitGrantArgs('@Иван Петров 08.08.26 P'), { subject: '@Иван Петров', expiry: '08.08.26', plan: 'P' });
-  assert.deepEqual(splitGrantArgs('@vasya 30'), { subject: '@vasya', expiry: '30', plan: null });
-  assert.deepEqual(splitGrantArgs('mo-abcdef'), { subject: 'mo-abcdef', expiry: null, plan: null });
-  assert.deepEqual(splitGrantArgs('@vasya P'), { subject: '@vasya', expiry: null, plan: 'P' });
-});
-
-test('/grant по нику: транслит кириллицы, регистр, подчёркивания/дефисы', async () => {
-  const store = memStore([{ telegram_id: '222', token: 'mo-222', slug: 'ivan-ivanov', active: true, expires_at: null, plan: 'trial' }]);
-  const r = await handleCommand({ text: '/grant @ИВАН ИВАНОВ 08.08.26 P', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.match(r.text, /🟢 активна/);
-  assert.equal(store.users[0].plan, 'full');
-  assert.equal(store.users[0].expires_at, new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
-  const u = await handleCommand({ text: '/grant @ivan_ivanov 30', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.equal(store.users[0].plan, 'full');
-  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 30 * 24 * 3600 * 1000);
-});
-
-test('/grant несуществующий ник: понятная подсказка с /list', async () => {
-  const store = memStore([{ telegram_id: '222', token: 'mo-2222', slug: 'vasya', active: true, expires_at: null, plan: 'trial' }]);
-  const r = await handleCommand({ text: '/grant @некто 08.08.26 P', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  const r = await handleCommand({ text: '/revoke @некто', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(r.text, /Не найден пользователь/);
-  assert.match(r.text, /\/list/);
+  assert.match(r.text, /@ник \/ id \/ токен/);
 });
 
 test('paymentReply: реквизиты + кнопки прикрепить/отправить', () => {
@@ -385,7 +339,8 @@ test('handleCallback send_receipt без квитанции → просьба �
   assert.match(r.text, /✅ Квитанция отправлена/);
   assert.equal(r.adminNotePhoto.fileId, 'AgRECEIPT123');
   assert.match(r.adminNotePhoto.caption, /@vasya/);
-  assert.match(r.adminNotePhoto.caption, /\/grant 222/);
+  assert.ok(!/\/grant/.test(r.adminNotePhoto.caption), 'в квитанции больше нет /grant');
+  assert.equal(r.adminNotePhoto.replyMarkup.inline_keyboard[0][0].callback_data, 'grant_issue:222:30');
   assert.equal(store.users[0].receipt_file_id, '');
 });
 
