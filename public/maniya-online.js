@@ -528,18 +528,17 @@
     button = $(Lampa.Lang.translate(button.prop('outerHTML')));
     button.on('hover:enter', function () { openOnline(event.movie); });
 
-    // М-кнопку ставим РЯДОМ С «В избранное» в карточке фильма.
-    // Кнопка избранного в Lampa исчёт по data-action="favorite".
-    var host = event.render;
-    var scope = (host && host.length)
-      ? host.closest('.fullstart_uvod, .fullview, .full-start, .view, .fullview-info, .ctx-menu')
-      : null;
-    if ((!scope || !scope.length) && host && host.length) scope = host.parent();
+    // М-кнопку ставим ПЕРВОЙ в ряду кнопок карточки фильма:
+    // [М] [▶→Плей] [В избранное] [Реакции] [Оценить]. Ряд — .full-start-new__buttons,
+    // его первый элемент — кружок play (.button--play). Над ним — Огоньки/Лайки
+    // (.full-start__icons), они вертикальные и нас не трогают.
+    var root = event.render;
+    var row = (root && root.length) ? root.find('.full-start-new__buttons, .fullstart__buttons').first() : $();
+    var play = (row && row.length) ? row.find('.button--play').first() : $();
 
-    var fav = (scope && scope.length) ? scope.find('[data-action="favorite"]').first() : $();
-    if (fav && fav.length) fav.after(button);
-    else if (host && host.length) host.before(button);
-    else if (scope && scope.length) scope.append(button);
+    if (play && play.length) play.before(button);
+    else if (row && row.length) row.prepend(button);
+    else if (root && root.length) root.find('.full-start__button, .full-start-new__button').first().before(button);
   }
 
   function startPlugin() {
@@ -571,7 +570,7 @@
     Lampa.Listener.follow('full', function (event) {
       if (event.type === 'complite') {
         addButton({
-          render: event.object.activity.render().find('.view--torrent'),
+          render: event.object.activity.render(),
           movie: event.data.movie
         });
       }
@@ -580,7 +579,7 @@
     try {
       if (Lampa.Activity.active().component === 'full') {
         addButton({
-          render: Lampa.Activity.active().activity.render().find('.view--torrent'),
+          render: Lampa.Activity.active().activity.render(),
           movie: Lampa.Activity.active().card
         });
       }
