@@ -80,7 +80,7 @@ export function slugFrom(...names) {
   for (const ch of raw.toLowerCase()) {
     if (/[a-z0-9]/.test(ch)) out += ch;
     else if (TRANSLIT[ch]) out += TRANSLIT[ch].toLowerCase();
-    else if (ch === '_' || ch === '-') out += '-';
+    else if (ch === '_' || ch === '-' || /\s/.test(ch)) out += '-';
   }
   return out.replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '').slice(0, 20);
 }
@@ -252,10 +252,42 @@ function helpReply(config) {
 }
 
 function findBySubject(users, subject) {
-  const s = String(subject || '').trim().replace(/^@/, '').toLowerCase();
-  return users.find((u) => u.token && u.token.toLowerCase() === s) ||
-    users.find((u) => String(u.telegram_id) === String(s).replace(/^@/, '')) ||
-    users.find((u) => u.slug && String(u.slug).toLowerCase() === s);
+  const s = String(subject || '').trim().replace(/^@/, '');
+  if (!s) return null;
+  const lower = s.toLowerCase();
+  const byToken = users.find((u) => u.token && u.token.toLowerCase() === lower);
+  if (byToken) return byToken;
+  const byId = users.find((u) => String(u.telegram_id) === s);
+  if (byId) return byId;
+  // По нику: slug, транслит, или слитая (без дефисов) форма — админ пишет ник
+  // как в Telegram: кириллица, регистр, «ё»→«е», подчёркивания/дефисы/пробелы.
+  const asSlug = slugFrom(s).toLowerCase();
+  const clamped = lower.replace(/-/g, '');
+  return users.find((u) => u.slug && (String(u.slug).toLowerCase() === asSlug ||
+    String(u.slug).toLowerCase().replace(/-/g, '') === clamped ||
+    String(u.slug).toLowerCase() === lower)) || null;
+}
+
+/**
+ * Разбор хвоста /grant: "<субъект> [дата|дни] [план]".
+ * План — последний токен, если это не дата и не число; срок — токен перед ним.
+ * Субъект (начинается с @) может быть с пробелами: всё, что осталось до срока.
+ */
+export function splitGrantArgs(args) {
+  const tokens = String(args || '').trim().split(/\s+/).filter(Boolean);
+  let plan = null;
+  let expiry = null;
+  const last = tokens[tokens.length - 1];
+  if (last && /^[a-zA-Z]{1,12}$/.test(last)) {
+    plan = last;
+    tokens.pop();
+  }
+  const prev = tokens[tokens.length - 1];
+  if (prev && (parseDateArg(prev) || /^\d+$/.test(prev))) {
+    expiry = prev;
+    tokens.pop();
+  }
+  return { subject: tokens.join(' '), expiry, plan };
 }
 
 /**
@@ -335,12 +367,18 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
     case '/extend':
     case '/give': {
       if (!admin) return { text: 'Команда только для админ‑чата.' };
-      const grantArgs = args.trim().split(/\s+/);
-      const target = findBySubject(users, grantArgs[0]);
-      if (!target) return { text: 'Не найден пользователь. Укажи @ник, id или токен. Пример: /grant @vasya 08.08.26 P' };
-      const { expires_at, plan } = parseGrantArgs(grantArgs.slice(1), now);
+      const { subject, expiry, plan } = splitGrantArgs(args);
+      const target = findBySubject(users, subject);
+      if (!target) {
+        return {
+          text: `Не найден пользователь для «${escapeHtml(subject)}».\n` +
+            `Точный @ник смотри в <b>/list</b>, или используй id/токен.\n` +
+            `Пример: /grant @vasya 08.08.26 P`
+        };
+      }
+      const { expires_at, plan: defaultPlan } = parseGrantArgs([expiry], now);
       target.expires_at = expires_at;
-      target.plan = plan;
+      target.plan = plan ? normalizePlan(plan) : defaultPlan;
       target.active = true;
       await setUsers(users);
       const granted = statusText(config, target, now);
