@@ -55,22 +55,25 @@ test('pluginUrl: короткая ссылка /{prefix}_{short}.js; стары�
   assert.equal(pluginUrl(old, 'mo-abc'), 'https://x.test/?token=mo-abc');
 });
 
-test('pluginUrl: ник пользователя попадает в ссылку, ссылки разных юзеров уникальны', () => {
+test('pluginUrl: ссылка с ником БЕЗ общего префикса; разные юзеры уникальны', () => {
   const a = pluginUrl(cfg, 'mo-abcdef1234567890abcdef1234567890', { slug: 'vasya' });
   const b = pluginUrl(cfg, 'mo-11112222333344445555666677778888', { slug: 'anya' });
-  assert.equal(a, 'https://plugin.maniya-kvn.online/dorofeev200_vasya_ef1234567890.js');
-  assert.ok(b.includes('dorofeev200_anya_'));
+  assert.equal(a, 'https://plugin.maniya-kvn.online/vasya_ef1234567890.js');
+  assert.equal(b, 'https://plugin.maniya-kvn.online/anya_666677778888.js');
   assert.notEqual(a, b);
 
-  // Шаблон с {slug}.
-  const withSlug = { telegram: { pluginUrlTemplate: 'https://x.test/{prefix}_{slug}_{short}.js' } };
+  // Без ника — префикс.
+  assert.equal(pluginUrl(cfg, 'mo-abcdef1234567890abcdef1234567890', {}), 'https://plugin.maniya-kvn.online/dorofeev200_ef1234567890.js');
+
+  // Шаблон с {slug} тоже без префикса при использовании {slug}.
+  const withSlug = { publicBaseUrl: 'https://x.test', telegram: { pluginUrlTemplate: 'https://x.test/{prefix}_{slug}_{short}.js' } };
   assert.equal(pluginUrl(withSlug, 'mo-aabbccddeeff00112233445566778899', { slug: 'kate' }), 'https://x.test/dorofeev200_kate_445566778899.js');
 
-  // Ник уже транслитерован (translit делает slugFrom при создании пользователя).
-  assert.equal(pluginUrl({ publicBaseUrl: 'https://x.test', telegram: {} }, 'mo-aabbccddeeff00112233445566778899', { slug: 'ivan' }), 'https://x.test/dorofeev200_ivan_445566778899.js');
+  // Ник уже транслитован (translit делает slugFrom при создании пользователя).
+  assert.equal(pluginUrl({ publicBaseUrl: 'https://x.test', telegram: {} }, 'mo-aabbccddeeff00112233445566778899', { slug: 'ivan' }), 'https://x.test/ivan_445566778899.js');
 });
 
-test('/start: разные аккаунты получают разные ссылки с учётом их ника', async () => {
+test('/start: разные аккаунты получают разные ссылки с учётом их ника (без префикса)', async () => {
   const store = memStore();
   const a = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
   const b = await handleCommand({ text: '/start', chatId: 333, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { first_name: 'Аня' } });
@@ -78,8 +81,8 @@ test('/start: разные аккаунты получают разные ссы
   assert.equal(store.users[1].slug, 'anya');
   assert.notEqual(store.users[0].token, store.users[1].token);
   assert.notEqual(a.text, b.text);
-  assert.match(a.text, /dorofeev200_vasya_[0-9a-f]{12}\.js/);
-  assert.match(b.text, /dorofeev200_anya_[0-9a-f]{12}\.js/);
+  assert.match(a.text, /vasya_[0-9a-f]{12}\.js/);
+  assert.match(b.text, /anya_[0-9a-f]{12}\.js/);
 });
 
 test('/start выдает триал новому чату и создаёт пользователя', async () => {
@@ -87,7 +90,7 @@ test('/start выдает триал новому чату и создаёт п�
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
   assert.match(reply.text, /Осталось/);
-  assert.match(reply.text, /dorofeev200_[a-z0-9_-]+_[0-9a-f]{12}\.js/);
+  assert.match(reply.text, /dorofeev200_[0-9a-f]{12}\.js/);
   assert.ok(!/🔑 Токен:/.test(reply.text));
   assert.equal(store.users.length, 1);
   assert.equal(store.users[0].telegram_id, '222');

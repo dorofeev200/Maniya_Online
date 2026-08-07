@@ -63,29 +63,30 @@ export function pluginUrl(config, token, user) {
   const slug = (user && user.slug ? String(user.slug) : '').replace(/[^a-z0-9_-]/g, '').slice(0, 20);
   const tokenEnc = encodeURIComponent(token);
   const prefixEnc = encodeURIComponent(prefix);
+  const base = config?.publicBaseUrl || '';
 
-  let template = config?.telegram?.pluginUrlTemplate;
-  if (template) {
-    if (template.includes('{slug}')) {
+  // Уникальная ссылка пользователя — по его нику, БЕЗ общего префикса.
+  if (slug) {
+    const template = config?.telegram?.pluginUrlTemplate;
+    if (template && template.includes('{slug}')) {
       return String(template)
         .replaceAll('{token}', tokenEnc)
         .replaceAll('{short}', short)
         .replaceAll('{slug}', slug)
         .replaceAll('{prefix}', prefixEnc);
     }
-    if (slug) {
-      // В шаблоне нет {slug} → внедряем ник перед суффиксом токена.
-      template = String(template).replace('{short}', `{slug}_${'{short}'}`);
-    }
+    return `${base}/${slug}_${short}.js`;
+  }
+
+  // Без ника — используем префикс (или шаблон).
+  const template = config?.telegram?.pluginUrlTemplate;
+  if (template) {
     return String(template)
       .replaceAll('{token}', tokenEnc)
-      .replaceAll('{slug}', slug)
       .replaceAll('{short}', short)
       .replaceAll('{prefix}', prefixEnc);
   }
-
-  const name = slug ? `${slug}_${short}` : short;
-  return `${config?.publicBaseUrl || ''}/${prefix}_${name}.js`;
+  return `${base}/${prefix}_${short}.js`;
 }
 
 function escapeHtml(text) {
@@ -207,7 +208,7 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
           telegram_id: String(chatId),
           email: '',
           token: makeToken(),
-          slug: slugFrom(nick) || shortId(makeToken()),
+          slug: slugFrom(nick) || undefined,
           active: true,
           plan: config?.telegram?.trialPlan || 'trial',
           expires_at: new Date(now + trialDays * DAY_MS).toISOString()
@@ -215,9 +216,9 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
         users.push(target);
         await setUsers(users);
         fresh = true;
-      } else if (!target.slug) {
+      } else if (!target.slug && nick) {
         // У старых пользователей проставляем ник при следующем /start.
-        target.slug = slugFrom(nick) || shortId(target.token);
+        target.slug = slugFrom(nick) || undefined;
         await setUsers(users);
       }
       return linkReply(config, target, fresh, now);

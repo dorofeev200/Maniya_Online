@@ -528,16 +528,18 @@
     button = $(Lampa.Lang.translate(button.prop('outerHTML')));
     button.on('hover:enter', function () { openOnline(event.movie); });
 
-    // М-кнопку вставляем ПЕРЕД кружком «Смотреть» (view--torrent), чтобы она
-    // лежала рядом с ним в ряду действий карточки фильма, а не в конце экрана.
+    // М-кнопку ставим РЯДОМ С «В избранное» в карточке фильма.
+    // Кнопка избранного в Lampa исчёт по data-action="favorite".
     var host = event.render;
-    if (host && host.length) {
-      host.before(button);
-    } else {
-      // Фолбэк: если кружка-«Смотреть» нет, вставим в поле кнопок, если найдём.
-      var actions = $('.fullstart__buttons, .fullview-director, .full-start__button').parent();
-      actions.first().append(button);
-    }
+    var scope = (host && host.length)
+      ? host.closest('.fullstart_uvod, .fullview, .full-start, .view, .fullview-info, .ctx-menu')
+      : null;
+    if ((!scope || !scope.length) && host && host.length) scope = host.parent();
+
+    var fav = (scope && scope.length) ? scope.find('[data-action="favorite"]').first() : $();
+    if (fav && fav.length) fav.after(button);
+    else if (host && host.length) host.before(button);
+    else if (scope && scope.length) scope.append(button);
   }
 
   function startPlugin() {
