@@ -3,6 +3,7 @@ import { AllohaProvider } from './alloha/AllohaProvider.js';
 import { FilmixProvider } from './filmix/FilmixProvider.js';
 import { KodikProvider } from './kodik/KodikProvider.js';
 import { RezkaProvider } from './rezka/RezkaProvider.js';
+import { RutubeProvider } from './rutube/RutubeProvider.js';
 
 const providers = [
   new FilmixProvider({ token: config.filmix.token }),
@@ -28,6 +29,10 @@ const providers = [
     linkHost: config.alloha.linkHost,
     token: config.alloha.token,
     secretToken: config.alloha.secretToken
+  }),
+  new RutubeProvider({
+    enabled: config.rutubemovie.enabled,
+    host: config.rutubemovie.host
   })
 ];
 

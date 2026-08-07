@@ -2,6 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { config } from './config.js';
 import { HttpError } from './errors.js';
+import { defaultUserAgent } from './providers/shared/utils/UserAgent.js';
 
 export const MANIFEST_MAX_BYTES = 4 * 1024 * 1024;
 
@@ -150,7 +151,7 @@ export async function proxyMedia(targetUrl, request, response, options = {}) {
   let redirects = 0;
 
   for (;;) {
-    const headers = { 'User-Agent': 'ManiyaOnline/1.0', 'Accept': '*/*' };
+    const headers = { 'User-Agent': defaultUserAgent(), 'Accept': '*/*' };
     if (range) headers.Range = range;
     if (referer) headers.Referer = referer;
 

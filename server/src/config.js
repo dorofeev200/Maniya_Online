@@ -108,8 +108,13 @@ export const config = {
     // Секретный ключ для /direct. Если не задан — берётся тот же token.
     secretToken: (process.env.ALLOHA_SECRET_TOKEN || '').trim()
   },
+  rutubemovie: {
+    enabled: bool('RUTUBEMOVIE_ENABLED', true),
+    // Без токена — открытый Rutube-поиск фильмов.
+    host: (process.env.RUTUBE_HOST || 'https://rutube.ru').replace(/\/+$/, '')
+  },
   proxy: {
-    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live']),
+    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru']),
     timeoutMs: integer('PROXY_TIMEOUT_MS', 15_000),
     maxRedirects: integer('PROXY_MAX_REDIRECTS', 4)
   }

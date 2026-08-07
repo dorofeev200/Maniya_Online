@@ -29,7 +29,7 @@ SSH_ASKPASS_REQUIRE=force с временным askpass-скриптом), пр�
 
 ### Tier 1 — чистый HTTP (без браузера/внешних инфр.)
 - [x] Kodik, Rezka, Filmix, Alloha(код) — см. выше
-- [ ] RutubeMovie — JSON API rutube, простой HLS/MP4
+- [x] RutubeMovie — JSON API rutube, простой HLS/MP4; ✅ live (e2e: videos→м3u8→балансер)
 - [ ] CDNvideohub — JSON API (`{host}/api/v1/player/sv/...`), hlsUrl
 - [ ] Collaps — HTML+JSON, зашитый токен, кастомный URL-кодировщик
 - [ ] HDVB — JSON+POST playlist (csrf), зашитый токен
@@ -54,11 +54,11 @@ SSH_ASKPASS_REQUIRE=force с временным askpass-скриптом), пр�
 - [ ] OnlineRUS браузерные: FanCDN, FlixCDN, Kinobase, Kinogo, PizdatoeHD, Mirage, Phantom, Spectre, Vibix, Videoseed
 
 ## Очередь (ближайшие волны)
-1. [x] Инфраструктура возобновления (action-plan+память+CLAUDE.md) — сделано
-2. [ ] Базовый коммит restore-point
-3. [ ] Фундамент движка (FetchService + IframeCodec + IframeProviderBase)
-4. [ ] Первый Tier-1 провайдер (Rutubez) — доказать движок
-5. [ ] Дальше по очереди см. статусы выше
+1. [x] Инфраструктура возобновления (README+память+CLAUDE.md) — сделано
+2. [x] Базовый коммит restore-point — сделано (0316e2e)
+3. [ ] Фундамент движка (FetchService + IframeCodec + IframeProviderBase) — понадобится при провайдерах с iframe/JS-декодом
+4. [x] Первый Tier-1 провайдер (RutubeMovie) — ✅ live
+5. [ ] Дальше по очереди см. статусы выше (следующий: CDNvideohub)
 6. [ ] Live-валидация на VPS + деплой после каждой волны
 
 ## Итоговый чекбокс «плагин работает»
