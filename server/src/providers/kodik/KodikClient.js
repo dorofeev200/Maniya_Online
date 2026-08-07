@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import { HttpError } from '../../errors.js';
 
-const DEFAULT_API_HOST = 'https://kodikapi.com';
-const DEFAULT_LINK_HOST = 'https://kodik.biz';
-const DEFAULT_PLAYER_HOST = 'https://kodik.info';
+const DEFAULT_API_HOST = 'https://kodik-api.com';
+const DEFAULT_LINK_HOST = 'https://kodikres.com';
+const DEFAULT_PLAYER_HOST = 'https://kodikplayer.com';
 
 export class KodikClient {
   constructor(options = {}) {
@@ -19,20 +19,60 @@ export class KodikClient {
     return Boolean(this.token);
   }
 
-  async search(query) {
+  /**
+   * Поиск по внешним id — аналог KodikInvoke.Embed(imdb_id, kinopoisk_id, s).
+   * Отдельный запрос на kinopoisk_id и/или imdb_id, результаты склеиваются
+   * и дедуплицируются по id. season добавляется только в id-запрос.
+   */
+  async searchByIds({ kinopoiskId = 0, imdbId = '', season = 0 } = {}) {
     if (!this.token) throw new HttpError(503, 'kodik_token_required', 'Kodik token is not configured');
+
+    const normalizedKp = Number(kinopoiskId) || 0;
+    const normalizedImdb = String(imdbId || '').trim();
+    if (!normalizedKp && !normalizedImdb) return [];
+
+    const base = new URL('/search', `${this.apiHost}/`);
+    base.searchParams.set('token', this.token);
+    base.searchParams.set('limit', '100');
+    base.searchParams.set('with_episodes', 'true');
+    if (Number(season) > 0) base.searchParams.set('season', String(season));
+
+    const results = [];
+    if (normalizedKp) results.push(...await this.searchUrl(this.withParam(base, 'kinopoisk_id', normalizedKp)));
+    if (normalizedImdb) results.push(...await this.searchUrl(this.withParam(base, 'imdb_id', normalizedImdb)));
+
+    return dedupeById(results);
+  }
+
+  /**
+   * Поиск по названию — аналог KodikInvoke.Embed(title, original_title, clarification):
+   * title-параметр берёт original_title первым, with_material_data=true для постеров.
+   */
+  async searchByTitle({ title = '', originalTitle = '' } = {}) {
+    if (!this.token) throw new HttpError(503, 'kodik_token_required', 'Kodik token is not configured');
+
+    const query = String(originalTitle || title || '').trim();
+    if (!query) return [];
+
     const url = new URL('/search', `${this.apiHost}/`);
     url.searchParams.set('token', this.token);
     url.searchParams.set('limit', '100');
+    url.searchParams.set('title', query);
     url.searchParams.set('with_episodes', 'true');
+    url.searchParams.set('with_material_data', 'true');
 
-    setIfPresent(url, 'title', query.title);
-    setIfPresent(url, 'title_orig', query.original_title);
-    setIfPresent(url, 'kinopoisk_id', query.kinopoisk_id);
-    setIfPresent(url, 'imdb_id', query.imdb_id);
-    setIfPresent(url, 'season', query.season);
+    return this.searchUrl(url);
+  }
 
-    return this.getJson(url);
+  async searchUrl(url) {
+    const data = await this.getJson(url);
+    return Array.isArray(data?.results) ? data.results : [];
+  }
+
+  withParam(url, key, value) {
+    const copy = new URL(url);
+    copy.searchParams.set(key, String(value));
+    return copy;
   }
 
   async streams(link, { ip = '127.0.0.1' } = {}) {
@@ -42,13 +82,15 @@ export class KodikClient {
   }
 
   async directStreams(link, ip) {
-    const deadline = Math.floor(Date.now() / 1000) + 3600;
+    // d — как в Lampac Controller.cs: AddHours(4).ToString("yyyyMMddHH"),
+    // HMAC-сообщение: link:ip:d.
+    const deadline = deadlineFormat(new Date(Date.now() + 4 * 3600 * 1000));
     const signature = crypto.createHmac('sha256', this.secretToken).update(`${link}:${ip}:${deadline}`).digest('hex');
     const url = new URL('/api/video-links', `${this.linkHost}/`);
     url.searchParams.set('link', link);
     url.searchParams.set('p', this.token);
     url.searchParams.set('ip', ip);
-    url.searchParams.set('d', String(deadline));
+    url.searchParams.set('d', deadline);
     url.searchParams.set('s', signature);
     url.searchParams.set('auto_proxy', 'true');
     url.searchParams.set('skip_segments', 'true');
@@ -96,9 +138,18 @@ function trimSlash(value) {
   return String(value).replace(/\/+$/, '');
 }
 
-function setIfPresent(url, key, value) {
-  const normalized = String(value || '').trim();
-  if (normalized) url.searchParams.set(key, normalized);
+function deadlineFormat(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}${pad(date.getHours())}`;
+}
+
+function dedupeById(results) {
+  const seen = new Set();
+  return results.filter((item) => {
+    if (!item || item.id == null || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
 }
 
 function absoluteUrl(link, base) {

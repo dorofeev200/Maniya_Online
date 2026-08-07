@@ -1,0 +1,76 @@
+[
+  {
+    "season": null,
+    "episode": null,
+    "ad_skip": 0,
+    "title": null,
+    "released": null,
+    "files": [
+      {
+        "url": "https://nl109.werkecdn.me/s/FH_toK3N_abc/HD_45/The-Lord-of-the-Rings2160p.SDR_2160.mp4",
+        "duration": null,
+        "quality": 2160,
+        "proPlus": true
+      },
+      {
+        "url": "https://nl109.werkecdn.me/s/FH_toK3N_abc/HD_45/The-Lord-of-the-Rings2160p.SDR_1440.mp4",
+        "duration": null,
+        "quality": 1440,
+        "proPlus": true
+      },
+      {
+        "url": "https://nl109.werkecdn.me/s/FH_toK3N_abc/HD_45/The-Lord-of-the-Rings2160p.SDR_1080.mp4",
+        "duration": null,
+        "quality": 1080,
+        "proPlus": true
+      },
+      {
+        "url": "https://nl109.werkecdn.me/s/FH_toK3N_abc/HD_45/The-Lord-of-the-Rings2160p.SDR_720.mp4",
+        "duration": null,
+        "quality": 720,
+        "proPlus": false
+      },
+      {
+        "url": "https://nl109.werkecdn.me/s/FH_toK3N_abc/HD_45/The-Lord-of-the-Rings2160p.SDR_480.mp4",
+        "duration": null,
+        "quality": 480,
+        "proPlus": false
+      }
+    ],
+    "voiceover": "Дубляж [4K, SDR, ru, Movie Dubbing]",
+    "updated": 1737103092,
+    "uk": false,
+    "type": "video"
+  },
+  {
+    "season": null,
+    "episode": null,
+    "ad_skip": 0,
+    "title": null,
+    "released": null,
+    "files": [
+      {
+        "url": "https://nl215.werkecdn.me/hls/hd_018_ukr/Postmodern_1080.mp4/index.m3u8?hash=FH_toK3N_abc",
+        "duration": null,
+        "quality": 1080,
+        "proPlus": true
+      },
+      {
+        "url": "https://nl215.werkecdn.me/hls/hd_018_ukr/Postmodern_720.mp4/index.m3u8?hash=FH_toK3N_abc",
+        "duration": null,
+        "quality": 720,
+        "proPlus": false
+      },
+      {
+        "url": "https://nl215.werkecdn.me/hls/hd_018_ukr/Postmodern_480.mp4/index.m3u8?hash=FH_toK3N_abc",
+        "duration": null,
+        "quality": 480,
+        "proPlus": false
+      }
+    ],
+    "voiceover": "Дубляж [1080+, Ukr, Postmodern]",
+    "updated": 1737103092,
+    "uk": false,
+    "type": "video"
+  }
+]

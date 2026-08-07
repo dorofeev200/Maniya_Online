@@ -1,0 +1,37 @@
+{
+  "id": 59708,
+  "title": "6-ой раунд",
+  "original_title": "Round 6",
+  "original_name": "Round 6",
+  "year": 2010,
+  "quality": "720",
+  "poster": "https://cdn.filmix.tv/cdn/posters/220/6-oy-raund-round-6-2010_59708.jpg",
+  "player_links": {
+    "movie": [
+      {
+        "translation": "Дублированный",
+        "link": "https://vip.filmix.tv/s/a1b2c3d4e5f6h8i0/film1_480,720,1080,_[480,720,1080].mp4"
+      },
+      {
+        "translation": "Оригинальный",
+        "link": "https://vip.filmix.tv/s/a1b2c3d4e5f6h8i0/film2_480,720,1080,_[480,720,1080].mp4"
+      }
+    ],
+    "playlist": {
+      "1": {
+        "Дублированный": {
+          "1": { "qualities": [720, 480], "link": "https://vip.filmix.tv/s/a1b2c3d4e5f6h8i0/serial_s1e1_%s.mp4" },
+          "2": { "qualities": [720, 480], "link": "https://vip.filmix.tv/s/a1b2c3d4e5f6h8i0/serial_s1e2_%s.mp4" }
+        },
+        "Оригинальный": {
+          "1": { "qualities": [480], "link": "https://vip.filmix.tv/s/a1b2c3d4e5f6h8i0/orig_s1e1_%s.mp4" }
+        }
+      },
+      "2": {
+        "Дублированный": {
+          "1": { "qualities": [1080, 720], "link": "https://vip.filmix.tv/s/a1b2c3d4e5f6h8i0/serial_s2e1_%s.mp4" }
+        }
+      }
+    }
+  }
+}

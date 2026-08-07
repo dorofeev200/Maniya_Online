@@ -50,24 +50,49 @@ export async function requireSubscription(context) {
 }
 
 export async function getVideosForRequest(context) {
-  const providerItems = await getProviderVideos(context);
-  if (providerItems.length > 0) return providerItems;
-  if (!config.videosFile) return [];
-
-  const videos = await readJson(config.videosFile, { default: [] });
-  const key = String(context.query.tmdb_id || context.query.id || '').trim();
-  return videos[key] || videos.default || [];
-}
-
-async function getProviderVideos(context) {
   const selected = String(context.query.provider || '').trim().toLowerCase();
-  const providers = registeredProviders().filter((provider) => !selected || provider.id === selected);
-  const groups = await Promise.all(providers.map(async (provider) => {
+  const providers = registeredProviders().filter((provider) => provider.enabled() && (!selected || provider.id === selected));
+  const videoProviders = providers.filter((provider) => typeof provider.videos === 'function');
+
+  // Один провайдер с расширенным контрактом videos() — отдаём payload
+  // с играбельными items и фильтрами сезонов/озвучек.
+  if (providers.length === 1 && videoProviders.length === 1) {
+    try {
+      const payload = await providers[0].videos(context);
+      if (payload && Array.isArray(payload.items) && payload.items.length) {
+        return { items: payload.items, seasons: payload.seasons || [], voices: payload.voices || [] };
+      }
+    } catch {
+      // Ломается конкретный провайдер — не рвём весь запрос,
+      // а уходим на поисковые записи/файл-фолбэк ниже.
+    }
+  } else if (videoProviders.length > 0) {
+    // Несколько провайдеров (или источник без videos()): склеиваем играбельные
+    // items со всех, кто умеет videos(). Фильтры не общие — отдаём пустыми.
+    const payloads = await Promise.all(videoProviders.map(async (provider) => {
+      try {
+        return await provider.videos(context);
+      } catch {
+        return null;
+      }
+    }));
+    const items = payloads.filter(Boolean).flatMap((payload) => (Array.isArray(payload.items) ? payload.items : []));
+    if (items.length) return { items, seasons: [], voices: [] };
+  }
+
+  const searchProviders = providers.length ? providers : registeredProviders().filter((provider) => provider.enabled());
+  const groups = await Promise.all(searchProviders.map(async (provider) => {
     try {
       return await provider.search(context);
     } catch {
       return [];
     }
   }));
-  return groups.flat();
+  const providerItems = groups.flat();
+  if (providerItems.length > 0) return { items: providerItems, seasons: [], voices: [] };
+  if (!config.videosFile) return { items: [], seasons: [], voices: [] };
+
+  const videos = await readJson(config.videosFile, { default: [] });
+  const key = String(context.query.tmdb_id || context.query.id || '').trim();
+  return { items: videos[key] || videos.default || [], seasons: [], voices: [] };
 }

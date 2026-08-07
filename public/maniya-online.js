@@ -186,6 +186,8 @@
     var activeUrl = '';
     var initialized = false;
     var last;
+    var activeSeason = null;
+    var activeVoice = null;
 
     this.create = function () {
       return this.render();
@@ -245,6 +247,12 @@
         if (type === 'sort') {
           Lampa.Select.close();
           self.changeSource(item.source);
+        } else if (type === 'season') {
+          activeSeason = item.value;
+          self.loadVideos();
+        } else if (type === 'voice') {
+          activeVoice = item.value;
+          self.loadVideos();
         }
       };
 
@@ -320,12 +328,41 @@
       var self = this;
       this.reset();
       var url = addMovieParams(activeUrl || trimSlash(MANIYA_API_BASE) + '/videos', object.movie, object);
+      if (activeSeason) url = Lampa.Utils.addUrlComponent(url, 'season=' + encodeURIComponent(activeSeason));
+      if (activeVoice) url = Lampa.Utils.addUrlComponent(url, 'voice=' + encodeURIComponent(activeVoice));
       requestJson(network, url, function (json) {
-        if (json.error === 'subscription_required') return self.subscriptionRequired(json.message);
+        if (json.error === 'subscription_required') return self.empty(json.message);
+        self.setFilters(json);
         self.draw(normalizeItems(json));
       }, function () {
         self.empty(Lampa.Lang.translate('maniya_no_results'));
       });
+    };
+
+    this.setFilters = function (json) {
+      if (json && json.seasons && json.seasons.length) {
+        var seasons = json.seasons.map(function (season) {
+          return {
+            title: season.title || Lampa.Lang.translate('maniya_season') + ' ' + season.number,
+            value: season.number,
+            selected: activeSeason !== null && String(season.number) === String(activeSeason)
+          };
+        });
+        if (activeSeason === null) seasons[0].selected = true;
+        filter.set('season', seasons);
+      }
+
+      if (json && json.voices && json.voices.length) {
+        var voices = json.voices.map(function (voice) {
+          return {
+            title: voice.name,
+            value: voice.index,
+            selected: activeVoice !== null && String(voice.index) === String(activeVoice)
+          };
+        });
+        if (activeVoice === null) voices[0].selected = true;
+        filter.set('voice', voices);
+      }
     };
 
     this.reset = function () {
@@ -434,6 +471,8 @@
       title_maniya: { ru: 'Maniya Online', en: 'Maniya Online' },
       maniya_watch: { ru: 'Смотреть в Maniya Online', en: 'Watch in Maniya Online' },
       maniya_source: { ru: 'Источник', en: 'Source' },
+      maniya_season: { ru: 'Сезон', en: 'Season' },
+      maniya_voice: { ru: 'Озвучка', en: 'Voice' },
       maniya_episode: { ru: 'Серия', en: 'Episode' },
       maniya_no_results: { ru: 'Видео не найдено', en: 'Video not found' },
       maniya_nolink: { ru: 'Не удалось получить ссылку', en: 'Failed to fetch link' },

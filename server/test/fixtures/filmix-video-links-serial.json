@@ -1,0 +1,125 @@
+{
+  "Дубляж [RHS]": {
+    "season-1": {
+      "season": 1,
+      "episodes": {
+        "e1": {
+          "episode": 1,
+          "ad_skip": 0,
+          "title": "Refined Aggression",
+          "released": "2024-03-07",
+          "files": [
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s01e01_1080.mp4",
+              "duration": null,
+              "quality": 1080,
+              "proPlus": true
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s01e01_720.mp4",
+              "duration": null,
+              "quality": 720,
+              "proPlus": false
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s01e01_480.mp4",
+              "duration": null,
+              "quality": 480,
+              "proPlus": false
+            }
+          ]
+        },
+        "e2": {
+          "episode": 2,
+          "ad_skip": 0,
+          "title": "Tackle Tommy Woo Woo",
+          "released": "2024-03-07",
+          "files": [
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s01e02_1080.mp4",
+              "duration": null,
+              "quality": 1080,
+              "proPlus": true
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s01e02_720.mp4",
+              "duration": null,
+              "quality": 720,
+              "proPlus": false
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s01e02_480.mp4",
+              "duration": null,
+              "quality": 480,
+              "proPlus": false
+            }
+          ]
+        }
+      }
+    },
+    "season-2": {
+      "season": 2,
+      "episodes": {
+        "e1": {
+          "episode": 1,
+          "ad_skip": 0,
+          "title": "Second Season Opener",
+          "released": "2025-01-01",
+          "files": [
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s02e01_1080.mp4",
+              "duration": null,
+              "quality": 1080,
+              "proPlus": true
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s02e01_720.mp4",
+              "duration": null,
+              "quality": 720,
+              "proPlus": false
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO/s02e01_480.mp4",
+              "duration": null,
+              "quality": 480,
+              "proPlus": false
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Оригинальный [Английский]": {
+    "season-1": {
+      "season": 1,
+      "episodes": {
+        "e1": {
+          "episode": 1,
+          "ad_skip": 0,
+          "title": "Refined Aggression",
+          "released": "2024-03-07",
+          "files": [
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO_eng/s01e01_1080.mp4",
+              "duration": null,
+              "quality": 1080,
+              "proPlus": true
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO_eng/s01e01_720.mp4",
+              "duration": null,
+              "quality": 720,
+              "proPlus": false
+            },
+            {
+              "url": "https://chache08.werkecdn.me/s/FHRE_aHfFpXO_eng/s01e01_480.mp4",
+              "duration": null,
+              "quality": 480,
+              "proPlus": false
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,95 +1,118 @@
 import { normalizeLanguage } from '../shared/normalize/LanguageNormalizer.js';
-import { normalizeQuality } from '../shared/normalize/QualityNormalizer.js';
-import { normalizeVoice } from '../shared/normalize/VoiceNormalizer.js';
 import { EpisodeBuilder } from '../shared/streams/EpisodeBuilder.js';
 import { SeasonBuilder } from '../shared/streams/SeasonBuilder.js';
 import { StreamBuilder } from '../shared/streams/StreamBuilder.js';
+import {
+  extractItemId,
+  getStreamLink,
+  parseEmbedHtml,
+  parseSearchHtml,
+  parseSubtitleHtml
+} from './RezkaCodec.js';
 
-function asNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function normalizeType(value) {
-  const text = String(value || '').toLowerCase();
-  if (text.includes('serial') || text.includes('series') || text.includes('show')) return 'serial';
-  return 'movie';
-}
-
+/**
+ * Чистый слой преобразования сырых данных HDRezka → модели SDK провайдера.
+ *
+ * Вход — только то, что возвращает RezkaClient:
+ * - `searchHtml()` → HTML поиска;
+ * - `page()` → HTML карточки/embed;
+ * - `getEpisodes()` → `{ seasons, episodes }`;
+ * - `getStreamMovie()/getStreamEpisode()` → `{ success, url, subtitle, premium, ... }`.
+ *
+ * Никакой сети, Anubis, cookies, ретраев, конфига. Парсинг идёт через чистые
+ * функции RezkaCodec; наружу отдаются модели SDK (записи поиска,
+ * SeasonBuilder/EpisodeBuilder/StreamBuilder, переводы).
+ */
 export class RezkaNormalizer {
+  /** HTML поиска → записи поиска (id, href, title, year, poster, type). */
+  normalizeSearchItems(searchHtml) {
+    return parseSearchHtml(searchHtml).map((item) => this.normalizeSearchItem(item));
+  }
+
   normalizeSearchItem(item = {}) {
+    const href = item.href || null;
     return {
-      id: item.id || item.slug || item.link || null,
-      title: item.title || item.name || null,
-      original_title: item.original_title || item.originalTitle || item.original_name || null,
+      id: extractItemId(href) || item.id || null,
+      href,
+      title: item.title || null,
+      original_title: item.original_title || item.originalTitle || null,
       year: item.year ? Number(item.year) : null,
-      type: normalizeType(item.type || item.kind || item.category),
-      language: normalizeLanguage(item.language || item.lang),
       poster: item.poster || null,
-      translation: item.translation || null
+      type: item.serial ? 'serial' : 'movie',
+      language: normalizeLanguage(item.language || 'ru')
     };
   }
 
-  normalizeSeason(season = {}) {
-    const builder = new SeasonBuilder()
-      .number(asNumber(season.number || season.season || season.id))
-      .title(season.title || season.name || '');
+  /** Embed HTML → `{ id, isSerial, translators, cdnStreams }`. */
+  normalizeEmbed(embedHtml) {
+    const embed = parseEmbedHtml(embedHtml);
+    return {
+      id: embed.id || null,
+      isSerial: Boolean(embed.isSerial),
+      translators: this.normalizeTranslations(embed.translators),
+      cdnStreams: embed.cdnStreams || null
+    };
+  }
 
-    for (const episode of season.episodes || []) {
-      builder.episode(this.normalizeEpisode(episode));
-    }
-    return builder.build();
+  /** `{ name: id }` переводчиков → `[{ name, id }]`. */
+  normalizeTranslations(translators = {}) {
+    return Object.entries(translators)
+      .map(([name, id]) => ({ name: String(name).trim(), id: String(id) }))
+      .filter((translation) => translation.name && translation.id);
+  }
+
+  /** get_episodes → сезоны с вложенными сериями (SeasonBuilder/EpisodeBuilder). */
+  normalizeSeasons(data = {}) {
+    const episodes = Array.isArray(data?.episodes) ? data.episodes : [];
+    const seasons = Array.isArray(data?.seasons) ? data.seasons : [];
+    return seasons.map((season) => {
+      const builder = new SeasonBuilder()
+        .number(Number(season.number))
+        .title(season.title || `${season.number} сезон`);
+      for (const episode of episodes) {
+        if (String(episode.season) !== String(season.number)) continue;
+        builder.episode(this.normalizeEpisode(episode));
+      }
+      return builder.build();
+    });
   }
 
   normalizeEpisode(episode = {}) {
-    const builder = new EpisodeBuilder()
-      .number(asNumber(episode.number || episode.episode || episode.id))
-      .title(episode.title || episode.name || '');
-
-    for (const stream of episode.streams || []) {
-      builder.stream(this.normalizeStream(stream));
-    }
-    return builder.build();
-  }
-
-  normalizeStream(stream = {}) {
-    return new StreamBuilder()
-      .url(stream.url || stream.link || stream.src || '')
-      .title(stream.title || stream.translation || '')
-      .quality(stream.quality || stream.q || '')
-      .voice(stream.voice || stream.translation || '')
-      .header('Referer', 'https://rezka.ag/')
+    return new EpisodeBuilder()
+      .number(Number(episode.episode))
+      .title(episode.title || `${episode.episode} серия`)
       .build();
   }
 
-  normalizeStreams(payload = {}) {
-    const streams = [];
-    for (const entry of Array.isArray(payload?.streams) ? payload.streams : []) {
-      const normalized = this.normalizeStream(entry);
-      if (normalized.url) streams.push(normalized);
-    }
-    return streams;
+  /**
+   * Ответ get_movie/get_stream → StreamModel[] (StreamBuilder).
+   * Каждая ссылка — Header Referer (для обращений плеера) и общие субтитры.
+   */
+  resolveStreams(payload = {}, { premium = false, hls = true, referer = '', voice = '', title = '' } = {}) {
+    if (!payload || payload.success !== true) return [];
+    const subtitles = parseSubtitleHtml(payload.subtitle).map((subtitle) => ({ label: subtitle.label, url: subtitle.url }));
+    const links = getStreamLink(payload.url, { premium, hls });
+    return links.map((link) => {
+      const builder = new StreamBuilder()
+        .url(link.url)
+        .title(title)
+        .quality(link.quality)
+        .voice(voice);
+      if (referer) builder.header('Referer', referer);
+      for (const subtitle of subtitles) builder.subtitle(subtitle);
+      return builder.build();
+    });
   }
 
-  normalizeTranslations(payload = {}) {
-    const translations = [];
-    for (const entry of Array.isArray(payload?.translations) ? payload.translations : []) {
-      translations.push({
-        id: entry.id || entry.slug || null,
-        title: entry.title || entry.name || entry.translation || null,
-        voice: normalizeVoice(entry.voice || entry.translation || entry.title || ''),
-        language: normalizeLanguage(entry.language || entry.lang)
-      });
+  /** Ответ get_movie/get_stream → `{ quality: url }` (для item.quality в videos()). */
+  resolveQualities(payload, { premium = false, hls = true } = {}) {
+    if (!payload || payload.success !== true) return {};
+    const qualities = {};
+    for (const link of getStreamLink(payload.url, { premium, hls })) {
+      qualities[link.quality] = link.url;
     }
-    return translations;
-  }
-
-  normalizeQualities(payload = {}) {
-    const qualities = [];
-    for (const entry of Array.isArray(payload?.qualities) ? payload.qualities : []) {
-      const quality = normalizeQuality(entry.quality || entry.label || entry.name || '');
-      if (quality) qualities.push(quality);
-    }
-    return [...new Set(qualities)];
+    return qualities;
   }
 }
+
+export default RezkaNormalizer;

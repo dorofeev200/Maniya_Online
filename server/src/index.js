@@ -6,7 +6,8 @@ import { sendJson, sendStatic } from './http.js';
 import { logger } from './logger.js';
 import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
 import { findUserByRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
-import { providerById } from './providers/registry.js';
+import { providerById, registeredProviders } from './providers/registry.js';
+import { buildProxyUrl, proxyMedia } from './proxy.js';
 
 const startedAt = Date.now();
 let ready = true;
@@ -24,6 +25,12 @@ function requestContext(request) {
 function sourceUrl(context) {
   const url = new URL('/api/lampa/videos', config.publicBaseUrl);
   url.searchParams.set('source', String(context.query.source || 'main'));
+  return url.toString();
+}
+
+function videosUrl(context, provider) {
+  const url = new URL('/api/lampa/videos', config.publicBaseUrl);
+  url.searchParams.set('provider', String(provider));
   return url.toString();
 }
 
@@ -55,6 +62,17 @@ async function route(context, response) {
   }
 
   assertCorsAllowed(request);
+
+  if (pathname === '/api/lampa/proxy') {
+    // Медиа-прокси: проверяем подписку, но не лимит запросов — иначе нативные
+    // запросы сегментов HLS мгновенно упрутся в rate-limit.
+    await requireSubscription(context);
+    return proxyMedia(context.query.url, request, response, {
+      makeProxyUrl: (target) => buildProxyUrl(context, target),
+      referer: context.query.ref || null
+    });
+  }
+
   assertRateLimit(request);
 
   if (pathname === '/api/lampa/subscription/check') {
@@ -72,21 +90,32 @@ async function route(context, response) {
   if (pathname === '/api/lampa/sources') {
     await requireSubscription(context);
 
-    return sendJson(request, response, 200, {
-      sources: [
-        {
-          id: 'main',
-          name: 'Maniya Online',
-          url: sourceUrl(context),
-          show: true
-        }
-      ]
-    });
+    const providers = registeredProviders().filter((provider) => provider.enabled());
+    const sources = [
+      {
+        id: 'main',
+        name: 'Maniya Online',
+        url: sourceUrl(context),
+        show: true
+      },
+      ...providers.map((provider) => ({
+        id: provider.id,
+        name: provider.title || provider.id,
+        url: videosUrl(context, provider.id),
+        show: true
+      }))
+    ];
+
+    return sendJson(request, response, 200, { sources });
   }
 
   if (pathname === '/api/lampa/videos') {
     await requireSubscription(context);
-    return sendJson(request, response, 200, { items: await getVideosForRequest(context) });
+    const payload = await getVideosForRequest(context);
+    const body = { items: payload.items };
+    if (Array.isArray(payload.seasons) && payload.seasons.length) body.seasons = payload.seasons;
+    if (Array.isArray(payload.voices) && payload.voices.length) body.voices = payload.voices;
+    return sendJson(request, response, 200, body);
   }
 
   if (pathname === '/api/lampa/stream') {

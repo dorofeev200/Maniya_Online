@@ -7,6 +7,8 @@ process.env.RATE_LIMIT_MAX = '1000';
 process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:3199';
 process.env.USERS_FILE = new URL('./fixtures/users.json', import.meta.url).pathname;
 process.env.VIDEOS_FILE = new URL('./fixtures/videos.json', import.meta.url).pathname;
+// Не дёргать реальную сеть filmix.my в тестах API.
+process.env.FILMIX_ENABLED = '0';
 
 const { server } = await import('../src/index.js');
 

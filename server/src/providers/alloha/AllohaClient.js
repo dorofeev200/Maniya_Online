@@ -3,10 +3,16 @@ import { RateLimiter } from '../shared/http/RateLimiter.js';
 import { RetryPolicy } from '../shared/http/RetryPolicy.js';
 import { buildUrl } from '../shared/utils/Url.js';
 
-const DEFAULT_BASE_URL = 'https://apbugall.org/v2';
+// API-хост Alloha (поиск/детали). То же значение, что жёстко зашито в Lampac
+// (Modules/OnlinePaid/Alloha/ModInit.cs). Оставаться актуальным: может меняться.
+const DEFAULT_API_HOST = 'https://apbugall.org/v2';
+
+// Linkhost Alloha — отдельный хост для /direct (стримы). На api-хосте /direct
+// отсутствует (404); реальный эндпоинт живёт на linkhost (401 без secret_token).
+const DEFAULT_LINK_HOST = 'https://torso-as.stloadi.live';
 
 function normalizeBaseUrl(value) {
-  return String(value || DEFAULT_BASE_URL).trim().replace(/\/+$/, '');
+  return String(value || '').trim().replace(/\/+$/, '');
 }
 
 function normalizeQuery(value) {
@@ -15,98 +21,118 @@ function normalizeQuery(value) {
 }
 
 export class AllohaClient {
-  constructor({ baseUrl = DEFAULT_BASE_URL, httpClient = null, timeoutMs = 10000, token = '' } = {}) {
-    this.baseUrl = normalizeBaseUrl(baseUrl);
+  constructor({ baseUrl, apiHost, linkHost, token = '', secretToken = '', httpClient = null, timeoutMs = 10000 } = {}) {
+    const resolvedApi = normalizeBaseUrl(apiHost || baseUrl) || DEFAULT_API_HOST;
+    const resolvedLink = normalizeBaseUrl(linkHost) || DEFAULT_LINK_HOST;
+
+    // HttpClient резолвит относительный путь через new URL(): абсолютный путь
+    // (/movies/…) съедает базовый pathname (/v2). Чтобы префикс пути сохранился,
+    // baseUrl-ом делаем чистый origin, а pathname хоста добавляем к пути сами.
+    const apiUrl = new URL(resolvedApi);
+    const linkUrl = new URL(resolvedLink);
+    this.apiPathBase = apiUrl.pathname.replace(/\/+$/, '');
+    this.linkPathBase = linkUrl.pathname.replace(/\/+$/, '');
+
+    // Bearer-токен для API (поиск/детали). Требуется, иначе TOKEN_REQUIRED 401.
     this.token = String(token || '').trim();
+    // secret_token для /direct; если не задан отдельно — считаем его тем же токеном.
+    this.secretToken = String(secretToken || this.token || '').trim();
+
+    const retryPolicy = new RetryPolicy({ retries: 2, baseDelayMs: 300, maxDelayMs: 1500 });
+    const rateLimiter = new RateLimiter({ intervalMs: 250, maxConcurrent: 2 });
+
     this.httpClient = httpClient || new HttpClient({
-      baseUrl: this.baseUrl,
+      baseUrl: apiUrl.origin,
       provider: 'alloha',
       timeoutMs,
-      retryPolicy: new RetryPolicy({ retries: 2, baseDelayMs: 300, maxDelayMs: 1500 }),
-      rateLimiter: new RateLimiter({ intervalMs: 250, maxConcurrent: 2 })
+      retryPolicy,
+      rateLimiter
+    });
+    // Отдельный пул на linkhost: /direct идёт с другого хоста.
+    this.linkClient = new HttpClient({
+      baseUrl: linkUrl.origin,
+      provider: 'alloha',
+      timeoutMs,
+      retryPolicy,
+      rateLimiter
     });
   }
 
-  async search({ title, originalTitle, year, type, imdb, kp, fallback = false } = {}) {
-    const query = normalizeQuery({
-      name: title || originalTitle || '',
-      imdb,
-      kp,
-      year,
-      serial: type === 'serial' ? 1 : 0
-    });
+  apiPath(subpath, params) {
+    return `${this.apiPathBase}${buildUrl(subpath, params)}`;
+  }
 
-    const path = buildUrl('/movies/search', query);
-    const response = await this.httpClient.get(path, {
-      headers: {
-        accept: 'application/json',
-        authorization: this.token ? `Bearer ${this.token}` : undefined
-      }
-    });
+  linkPath(subpath, params) {
+    return `${this.linkPathBase}${buildUrl(subpath, params)}`;
+  }
 
-    const payload = await response.json();
-    const normalized = this.parseSearchResponse(payload, query);
-    if (fallback && !normalized.items.length && title) {
-      const fallbackQuery = normalizeQuery({
-        name: originalTitle || title || '',
-        imdb,
-        kp,
-        year,
-        serial: type === 'serial' ? 1 : 0
-      });
-      if (JSON.stringify(fallbackQuery) !== JSON.stringify(query)) {
-        const fallbackPath = buildUrl('/movies/search', fallbackQuery);
-        const fallbackResponse = await this.httpClient.get(fallbackPath, {
-          headers: {
-            accept: 'application/json',
-            authorization: this.token ? `Bearer ${this.token}` : undefined
-          }
-        });
-        const fallbackPayload = await fallbackResponse.json();
-        return this.parseSearchResponse(fallbackPayload, fallbackQuery);
+  apiHeaders() {
+    return {
+      accept: 'application/json',
+      authorization: this.token ? `Bearer ${this.token}` : undefined
+    };
+  }
+
+  async search({ title, originalTitle, year, type, imdb, kp, id, fallback = false } = {}) {
+    const query = { year, type };
+
+    let items = [];
+    if (imdb || kp || id) {
+      items = await this.searchByIds({ imdb, kp, year });
+    } else {
+      items = await this.searchByName(title || originalTitle, year);
+      // Фолбэк original_title → title при пустой выдаче (как в Lampac Controller).
+      if (fallback && !items.length && originalTitle && title && originalTitle !== title) {
+        items = await this.searchByName(originalTitle, year);
       }
     }
-    return normalized;
+
+    return { query, items };
+  }
+
+  async searchByName(name, year) {
+    if (!name) return [];
+    const path = this.apiPath('/movies/name/list', normalizeQuery({ name, ...(year ? { year } : {}) }));
+    const response = await this.httpClient.get(path, { headers: this.apiHeaders() });
+    return this.parseSearchResponse(await response.json());
+  }
+
+  async searchByIds({ imdb, kp, year }) {
+    const path = this.apiPath('/movies/search', normalizeQuery({ imdb, kp, year }));
+    const response = await this.httpClient.get(path, { headers: this.apiHeaders() });
+    return this.parseSearchResponse(await response.json());
   }
 
   async details(token) {
-    const response = await this.httpClient.get(`/movies/token/${encodeURIComponent(String(token))}`, {
-      headers: {
-        accept: 'application/json',
-        authorization: this.token ? `Bearer ${this.token}` : undefined
-      }
-    });
-
-    const payload = await response.json();
-    return payload || {};
+    const path = this.apiPath(`/movies/token/${encodeURIComponent(String(token))}`);
+    const response = await this.httpClient.get(path, { headers: this.apiHeaders() });
+    return (await response.json()) || {};
   }
 
-  async streams({ token, translationId, season, episode, directorsCut = false, ip = '127.0.0.1' } = {}) {
-    const path = buildUrl('/direct', normalizeQuery({
-      secret_token: this.token,
-      token_movie: token,
-      translation: translationId,
-      season,
-      episode,
+  async streams({ token, token_movie: tokenMovie, translation, translationId, season, episode, directorsCut = false, ip = '127.0.0.1' } = {}) {
+    const movieToken = token || tokenMovie;
+    if (!movieToken || !this.secretToken) return { file: null, tracks: [], hlsSources: [] };
+
+    const params = normalizeQuery({
+      secret_token: this.secretToken,
+      token_movie: movieToken,
       ip,
-      directors_cut: directorsCut ? 'true' : undefined
-    }));
-    const response = await this.httpClient.get(path, {
-      headers: {
-        accept: 'application/json'
-      }
+      translation: translationId || translation,
+      season: Number(season) > 0 ? season : undefined,
+      episode: Number(episode) > 0 ? episode : undefined,
+      directors_cut: directors ? 'true' : undefined
     });
 
+    const path = this.linkPath('/direct', params);
+    const response = await this.linkClient.get(path, { headers: { accept: 'application/json' } });
     return this.parseStreamsResponse(await response.json());
   }
 
-  async parseSearchResponse(response, query) {
+  async parseSearchResponse(response) {
     const payload = response && typeof response === 'object' && !Array.isArray(response) ? response : await response.json();
-    const items = Array.isArray(payload?.data) ? payload.data : [];
-    return {
-      query,
-      items: items.map((item) => this.normalizeSearchItem(item)).filter(Boolean)
-    };
+    // /movies/name/list → data: MediaItem[]; /movies/search?id= → data: MediaItem (один).
+    const data = Array.isArray(payload?.data) ? payload.data : payload?.data ? [payload.data] : [];
+    return data.map((item) => this.normalizeSearchItem(item)).filter(Boolean);
   }
 
   normalizeSearchItem(item) {
@@ -116,7 +142,7 @@ export class AllohaClient {
       title: item.name || item.original_name || null,
       original_title: item.original_name || item.name || null,
       year: item.year ? Number(item.year) : null,
-      type: item.category?.slug === 'serial' || item.category?.slug === 'series' ? 'serial' : 'movie',
+      type: item.category?.slug === 'serial' || item.category?.slug === 'series' || item.category?.slug === 'anime' ? 'serial' : 'movie',
       poster: item.poster || null,
       category: item.category || null,
       token: item.token || null,
@@ -126,7 +152,7 @@ export class AllohaClient {
   }
 
   parseStreamsResponse(payload) {
-    const data = payload?.data || payload;
+    const data = payload && payload.data && typeof payload.data === 'object' ? payload.data : payload || {};
     const file = data?.file || null;
     return {
       file,
