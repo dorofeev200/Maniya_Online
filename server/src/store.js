@@ -118,7 +118,18 @@ export async function getVideosForRequest(context) {
       return [];
     }
   }));
-  const providerItems = groups.flat();
+  // Поисковые записи — это МЕТАДАННЫЕ (id/title/poster), у них нет url/stream.
+  // Показывать их как «играбельные» items нельзя: клиент получит мёртвые карточки
+  // (Filmix при Cloudflare отдавал список фильмов без ссылок). Оставляем только те,
+  // где реально есть прямой URL или поток (напр. Lampac-прокси).
+  const providerItems = groups.flat().filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    if (typeof item.url === 'string' && item.url) return true;
+    if (item.stream && typeof item.stream === 'object') return true;
+    if (Array.isArray(item.streams) && item.streams.length) return true;
+    if (item.method === 'call' && typeof item.url === 'string') return true;
+    return false;
+  });
   if (providerItems.length > 0) return { items: providerItems, seasons: [], voices: [] };
   if (!config.videosFile) return { items: [], seasons: [], voices: [] };
 

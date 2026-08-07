@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { PassThrough } from 'node:stream';
 import { HttpError } from '../src/errors.js';
-import { isHostAllowed, validateProxyTarget, proxyMedia } from '../src/proxy.js';
+import { isHostAllowed, validateProxyTarget, proxyMedia, isManifestResponse } from '../src/proxy.js';
 
 test('isHostAllowed: корень и поддомены, чужой хост отклонён', () => {
   assert.equal(isHostAllowed('vip.filmix.tv', ['filmix.tv']), true);
@@ -51,6 +51,12 @@ function startTestServer() {
           'Content-Length': String(end - start + 1)
         });
         res.end(body.subarray(start, end + 1));
+      } else if (req.url.startsWith('/seg.ts')) {
+        // TS-сегмент: бинарный payload с content-type video/mp2t.
+        // НЕ должен трактоваться как манифест (регрессия «Не удалось декодировать»).
+        const ts = Buffer.concat([Buffer.from([0x47]), Buffer.from('segdata-segdata-segdata')]);
+        res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Content-Length': String(ts.length) });
+        res.end(ts);
       } else {
         res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': String(body.length) });
         res.end(body);
@@ -127,6 +133,42 @@ test('proxyMedia: пробрасывает Range и отдаёт 206 с Content-
   } finally {
     server.close();
   }
+});
+
+test('proxyMedia: TS-сегмент (video/mp2t) проходит без переписывания (регрессия декода)', async () => {
+  const server = await startTestServer();
+  try {
+    const port = server.address().port;
+    const response = new MockResponse();
+    const request = { headers: {} };
+    const makeProxyUrl = (url) => `https://maniya.test/proxy?url=${encodeURIComponent(url)}`;
+
+    await proxyMedia(`http://127.0.0.1:${port}/seg.ts`, request, response, {
+      allowHosts: ['127.0.0.1'],
+      makeProxyUrl,
+      maxRedirects: 1,
+      timeoutMs: 3000
+    });
+
+    const body = await collect(response);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers['content-type'], 'video/mp2t');
+    // Тело — бинарный TS (0x47 + данные), НЕ URL-каша прокси.
+    assert.equal(body.charCodeAt(0), 0x47);
+    assert.match(body, /segdata-segdata-segdata/);
+    assert.ok(!body.includes('maniya.test/proxy'));
+  } finally {
+    server.close();
+  }
+});
+
+test('isManifestResponse: video/mp2t — это сегмент, а не манифест', () => {
+  assert.equal(isManifestResponse('video/mp2t', 'https://cdn.example/seg.ts'), false);
+  assert.equal(isManifestResponse('application/vnd.apple.mpegurl', 'https://cdn.example/playlist.m3u8'), true);
+  assert.equal(isManifestResponse('application/x-mpegurl', 'https://cdn.example/playlist.m3u8'), true);
+  assert.equal(isManifestResponse('application/dash+xml', 'https://cdn.example/manifest.mpd'), true);
+  assert.equal(isManifestResponse('application/octet-stream', 'https://cdn.example/stream.m3u8'), true);
+  assert.equal(isManifestResponse('text/html', 'https://cdn.example/not-a-manifest'), false);
 });
 
 test('proxyMedia: отклоняет неразрешённый хост', async () => {

@@ -127,8 +127,12 @@ function rewriteMpdManifest(manifest, baseUrl, makeProxy) {
 export function isManifestResponse(contentType, url) {
   const type = String(contentType || '').toLowerCase();
   const pathname = String(url?.pathname || url || '');
+  // ВАЖНО: `video/mp2t` — это TS-сегмент (0x47), а НЕ манифест. Если он попадёт в
+  // список «манифестных» content-type, прокси возьмёт бинарный сегмент за плейлист
+  // и перепишет его в URL-кашу → плеер не сможет декодировать («Не удалось декодировать»).
+  // Манифесты HLS — application/vnd.apple.mpegurl / x-mpegurl / mpegurl; DASH — dash+xml.
   return (
-    /application\/vnd\.apple\.mpegurl|application\/x-mpegurl|audio\/mpegurl|video\/mp2t|dash\+xml/i.test(type) ||
+    /application\/(?:vnd\.apple\.mpegurl|x-mpegurl|mpegurl)|dash\+xml/i.test(type) ||
     /\.(m3u8|mpd)(?:$|\?)/i.test(pathname)
   );
 }
