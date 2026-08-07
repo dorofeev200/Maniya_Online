@@ -113,8 +113,13 @@ export const config = {
     // Без токена — открытый Rutube-поиск фильмов.
     host: (process.env.RUTUBE_HOST || 'https://rutube.ru').replace(/\/+$/, '')
   },
+  cdnvideohub: {
+    enabled: bool('CDNVIDEOHUB_ENABLED', true),
+    // Плеерное API (host по умолчанию — как Lampac ModInit).
+    host: (process.env.CDNVIDEOHUB_HOST || 'https://plapi.cdnvideohub.com').replace(/\/+$/, '')
+  },
   proxy: {
-    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru']),
+    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru']),
     timeoutMs: integer('PROXY_TIMEOUT_MS', 15_000),
     maxRedirects: integer('PROXY_MAX_REDIRECTS', 4)
   }

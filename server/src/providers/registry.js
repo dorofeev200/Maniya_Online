@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { AllohaProvider } from './alloha/AllohaProvider.js';
+import { CDNvideohubProvider } from './cdnvideohub/CDNvideohubProvider.js';
 import { FilmixProvider } from './filmix/FilmixProvider.js';
 import { KodikProvider } from './kodik/KodikProvider.js';
 import { RezkaProvider } from './rezka/RezkaProvider.js';
@@ -33,6 +34,10 @@ const providers = [
   new RutubeProvider({
     enabled: config.rutubemovie.enabled,
     host: config.rutubemovie.host
+  }),
+  new CDNvideohubProvider({
+    enabled: config.cdnvideohub.enabled,
+    host: config.cdnvideohub.host
   })
 ];
 
