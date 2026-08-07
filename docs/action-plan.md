@@ -37,6 +37,19 @@ systemd `maniya-online` (node 3000) + nginx 443; docker-контейнер `lamp
 (код) + `backup/*` (состояние) + `restore-vps.sh` (сборка всего на новый VPS). Remote на GitHub:
 origin → код продублирован.
 
+## ⏸ Точка остановки (2026-08-07, сессия 5: волна Collaps ЗАКРЫТА)
+- **WAVE COLLAPS ✅ ЗАВЕРШЁН (код+тесты+live, деплой см. ниже):** клиент (`/list` поиск + embed-страница),
+  нормализатор (чистый DTO: search → записи, parseEmbed → movie-source / seasons-блок; слайсер parseJsObject —
+  JS-literal с незакавыченными ключами и trailing-commas), провайдер
+  (search без названия → по kp/imdb/orid через embed; movie/serial; videos → фильм один источник/сериал по сериям;
+  streams → StreamItem auto). Registry+config+`.env.example`+proxy allowHosts (`interkh.com`).
+  Локально **150 тестов / 149 pass + 1 skip, 0 fail**. Live с токеном (eedefb54…, из Lampac):
+  search «Интерстеллар» → movie (kp 258687), videos → 1 play-item + 5 субтитров, HLS прокси OK;
+  search «Друзья» → сериал, videos → 17 серий (1 сезон), озвучка «Рус. Оригинальный», субтитры — через прокси.
+  Публичный токен зашит в Lampac = поведенческий реф; на VPS задать `COLLAPS_TOKEN` в server/.env для live
+  (иначе enabled()=false, из источников скрыт). Следующая волна: **HDVB**.
+- Замечание: `sliceJsonArray`/`parseJsObject` — JS-literal парсер (без брейсера): ключи без кавычек + trailing-commas.
+
 ## ⏸ Точка остановки (2026-08-07, сессия 4: волна CDNvideohub ЗАКРЫТА)
 - **WAVE CDNVIDEOHUB ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (код+тесты+деплой+live):** клиент (`playlist`/`videoHls`, hlsUrl-срез),
   нормализатор (records kp-only, seasons/episodes/voices), провайдер (search/movie/serial/videos/streams,
@@ -75,7 +88,7 @@ origin → код продублирован.
 - [x] Kodik, Rezka, Filmix, Alloha(код) — см. выше
 - [x] RutubeMovie — JSON API rutube, простой HLS/MP4; ✅ live (VPS, verify 5/5 + live-videos)
 - [x] CDNvideohub — JSON API (`{host}/api/v1/player/sv/...`), hlsUrl; ✅ реализован (клиент+нормализатор+провайдер, kp-only), 13 тестов, live: search(Интерстеллар 462682)→movie, videos→1 play-item (Неизвестный) через прокси
-- [ ] Collaps — HTML+JSON, зашитый токен, кастомный URL-кодировщик
+- [x] Collaps — HTML+JSON, зашитый токен; ✅ реализован (клиент+нормализатор+провайдер), 15 тестов, live локально (токен Lampac); VPS live после `COLLAPS_TOKEN`
 - [ ] HDVB — JSON+POST playlist (csrf), зашитый токен
 - [ ] Kinotochka — JSON+HTML, plain
 - [ ] LeProduction — HTML iframe `[Qp]url`
@@ -103,7 +116,7 @@ origin → код продублирован.
 3. [ ] Фундамент движка (FetchService + IframeCodec + IframeProviderBase) — понадобится при провайдерах с iframe/JS-декодом
 4. [x] Первый Tier-1 провайдер (RutubeMovie) — ✅ live (локально + VPS)
 5. [x] CDNvideohub (Tier 1, чистый HTTP) — ✅ завершён (деплой VPS + live)
-5b. [ ] Collaps (Tier 1, HTML+JSON, зашитый токен)
+5b. [x] Collaps (Tier 1, HTML+JSON, зашитый токен) — ✅ завершён (тесты+live; VPS live при COLLAPS_TOKEN)
 6. [ ] Live-валидация на VPS + деплой после каждой волны
 
 ## Итоговый чекбокс «плагин работает»

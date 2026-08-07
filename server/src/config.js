@@ -118,8 +118,17 @@ export const config = {
     // Плеерное API (host по умолчанию — как Lampac ModInit).
     host: (process.env.CDNVIDEOHUB_HOST || 'https://plapi.cdnvideohub.com').replace(/\/+$/, '')
   },
+  // Collaps — HTML+JSON (как Lampac OnlineRUS/Collaps).
+  collaps: {
+    enabled: bool('COLLAPS_ENABLED', true),
+    apihost: (process.env.COLLAPS_API_HOST || 'https://api.bhcesh.me').replace(/\/+$/, ''),
+    embedHost: (process.env.COLLAPS_EMBED_HOST || 'https://api.ortified.ws').replace(/\/+$/, ''),
+    // Публичный токен зашит в Lampac = поведенческий реф, но по соглашению
+    // выносим в config. Задать COLLAPS_TOKEN (иначе enabled()=false).
+    token: (process.env.COLLAPS_TOKEN || '').trim()
+  },
   proxy: {
-    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru']),
+    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com']),
     timeoutMs: integer('PROXY_TIMEOUT_MS', 15_000),
     maxRedirects: integer('PROXY_MAX_REDIRECTS', 4)
   }

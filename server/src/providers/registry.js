@@ -5,6 +5,7 @@ import { FilmixProvider } from './filmix/FilmixProvider.js';
 import { KodikProvider } from './kodik/KodikProvider.js';
 import { RezkaProvider } from './rezka/RezkaProvider.js';
 import { RutubeProvider } from './rutube/RutubeProvider.js';
+import { CollapsProvider } from './collaps/CollapsProvider.js';
 
 const providers = [
   new FilmixProvider({ token: config.filmix.token }),
@@ -38,6 +39,12 @@ const providers = [
   new CDNvideohubProvider({
     enabled: config.cdnvideohub.enabled,
     host: config.cdnvideohub.host
+  }),
+  new CollapsProvider({
+    enabled: config.collaps.enabled,
+    apihost: config.collaps.apihost,
+    embedHost: config.collaps.embedHost,
+    token: config.collaps.token
   })
 ];
 
