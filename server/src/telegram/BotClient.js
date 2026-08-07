@@ -60,4 +60,9 @@ export class TelegramBotClient {
   async sendMessage(chatId, text, extra = {}) {
     return this.api('sendMessage', { chat_id: chatId, text: String(text || ''), ...extra });
   }
+
+  /** Отправить фото (file_id) администратору с подписью. */
+  async sendPhoto(chatId, photo, caption = '', extra = {}) {
+    return this.api('sendPhoto', { chat_id: chatId, photo: String(photo), caption: String(caption || ''), ...extra });
+  }
 }

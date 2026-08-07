@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, pluginUrl, shortId, slugFrom } from '../src/telegram/bot.js';
+import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, paymentReply, pluginUrl, shortId, slugFrom } from '../src/telegram/bot.js';
 import { TelegramBotClient } from '../src/telegram/BotClient.js';
 import { createTelegramRunner } from '../src/telegram/runner.js';
 
@@ -283,6 +283,94 @@ test('/grant по @ник: выдаёт полную подписку и при�
   assert.match(r.text, /🟢 активна/);
   assert.ok(r.text.includes('vasya_'));
   assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 5 * 24 * 3600 * 1000);
+});
+
+test('paymentReply: реквизиты + кнопки прикрепить/отправить', () => {
+  const p = paymentReply(cfg);
+  assert.match(p.text, /Оплата подписки Maniya Online/);
+  assert.ok(p.replyMarkup.inline_keyboard[0].some((b) => b.callback_data === 'attach_receipt'));
+  assert.ok(p.replyMarkup.inline_keyboard[0].some((b) => b.callback_data === 'send_receipt'));
+});
+
+test('handleCallback pay: включает режим квитанции и показывает реквизиты', async () => {
+  const store = memStore();
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  const r = await handleCallback({ data: 'pay', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /Оплата/);
+  assert.equal(store.users[0].awaiting_receipt, true);
+});
+
+test('handleCallback send_receipt без квитанции → просьба прикрепить; с фото → adminNotePhoto', async () => {
+  const store = memStore();
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
+  const empty = await handleCallback({ data: 'send_receipt', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(empty.text, /Сначала прикрепите квитанцию/);
+
+  store.users[0].receipt_file_id = 'AgRECEIPT123';
+  store.users[0].receipt_caption = 'оплата';
+  const r = await handleCallback({ data: 'send_receipt', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /✅ Квитанция отправлена/);
+  assert.equal(r.adminNotePhoto.fileId, 'AgRECEIPT123');
+  assert.match(r.adminNotePhoto.caption, /@vasya/);
+  assert.match(r.adminNotePhoto.caption, /\/grant 222/);
+  assert.equal(store.users[0].receipt_file_id, '');
+});
+
+test('runner: фото = квитанция в режиме оплаты; затем «send_receipt» шлёт фото админу', async () => {
+  const store = memStore();
+  // Сначала у пользователя включён режим квитанции.
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'vasya' } });
+  store.users[0].awaiting_receipt = true;
+
+  let sentFilter = null;
+  const fetchImpl = async (m, p) => {
+    if (m === 'getUpdates') return new Response('{"ok":true,"result":[]}', { status: 200, headers: { 'content-type': 'application/json' } });
+    if (m === 'sendPhoto' || m === 'sendMessage' || m === 'answerCallbackQuery') { sentFilter = { m, p }; return new Response('{"ok":true,"result":{}}', { status: 200, headers: { 'content-type': 'application/json' } }); }
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const client = new TelegramBotClient({ botToken: 't', fetchFn: fetchImpl });
+  const runner = createTelegramRunner(cfg, { client, getUsers: store.get, setUsers: store.set, now: NOW });
+
+  // 1) пользователь присылает фото квитанции.
+  store.photoFlag = true;
+  const mediaClient = new TelegramBotClient({
+    botToken: 't',
+    fetchFn: async (m, p) => {
+      if (m === 'getUpdates') {
+        return new Response(JSON.stringify({ ok: true, result: [{ update_id: 5, message: { chat: { id: 222 }, from: { username: 'vasya' }, photo: [{ file_id: 'PHOTO_high' }, { file_id: 'PHOTO_LOW' }, { file_id: 'PHOTO_MED' }] } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (m === 'sendMessage') { sentFilter = { m, p }; return new Response('{"ok":true,"result":{}}', { status: 200, headers: { 'content-type': 'application/json' } }); }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+  });
+  const mediaRunner = createTelegramRunner(cfg, { client: mediaClient, getUsers: store.get, setUsers: store.set, now: NOW });
+  await mediaRunner.pollOnce();
+  assert.equal(store.users[0].receipt_file_id, 'PHOTO_MED');
+  assert.equal(store.users[0].receipt_caption, '');
+  assert.match(sentFilter.p.text, /Квитанция прикреплена/);
+  assert.ok(sentFilter.p.reply_markup.inline_keyboard[0].some((b) => b.callback_data === 'send_receipt'));
+
+  // 2) админ нажимает «Отправить» -> админ получает фото.
+  const cbRunner = createTelegramRunner(cfg, {
+    client: new TelegramBotClient({
+      botToken: 't',
+      fetchFn: async (m, p) => {
+        if (m === 'getUpdates') {
+          return new Response(JSON.stringify({ ok: true, result: [{ update_id: 6, callback_query: { id: 'c1', data: 'send_receipt', from: { id: 222 } } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (m === 'sendPhoto' || m === 'sendMessage') { sentFilter = { m, p }; return new Response('{"ok":true,"result":{}}', { status: 200, headers: { 'content-type': 'application/json' } }); }
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+    }),
+    getUsers: store.get,
+    setUsers: store.set,
+    now: NOW
+  });
+  await cbRunner.pollOnce();
+  assert.equal(sentFilter.m, 'sendPhoto');
+  assert.equal(String(sentFilter.p.chat_id), '111');
+  assert.equal(sentFilter.p.photo, 'PHOTO_MED');
+  assert.match(sentFilter.p.caption, /@vasya/);
 });
 
 test('runner: новый пользователь → уведомление админу (выдача подписки)', async () => {

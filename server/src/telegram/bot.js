@@ -111,13 +111,38 @@ function solutionLine() {
     '(<code>Настройки → Кеш и данные → Только кеш</code>).';
 }
 
-/** Inline-клавиатура: [🎬 Получить ссылку] и [📩 Связь с админом] (если задан контакт). */
+/** Inline-клавиатура: [🎬 Получить ссылку], [💳 Оплатить] (если заданы реквизиты),
+ * [📩 Связь с админом] (если задан контакт). */
 export function inlineKeyboard(config, { getLink = true } = {}) {
   const row = [];
   if (getLink) row.push({ text: '🎬 Получить ссылку', callback_data: 'get_link' });
-  const contact = config?.telegram?.adminContact;
-  if (contact) row.push({ text: '📩 Связь с админом', url: contact });
+  if (config?.telegram?.adminContact) row.push({ text: '📩 Связь с админом', url: config.telegram.adminContact });
+  if (config?.telegram?.paymentDetails) row.push({ text: '💳 Оплатить', callback_data: 'pay' });
   return row.length ? { inline_keyboard: [row] } : null;
+}
+
+/** Клавиатура оплаты/receipt-flow: прикрепить и отправить. */
+export function receiptInlineKeyboard() {
+  return {
+    inline_keyboard: [[
+      { text: '📎 Прикрепить квитанцию', callback_data: 'attach_receipt' },
+      { text: '📨 Отправить', callback_data: 'send_receipt' }
+    ]]
+  };
+}
+
+/** Ответ с реквизитами оплаты и шагами прикладывания квитанции. */
+export function paymentReply(config) {
+  const details = config?.telegram?.paymentDetails || 'Реквизиты не заданы (TELEGRAM_PAYMENT_DETAILS).';
+  const text =
+    '💳 <b>Оплата подписки Maniya Online</b>\n\n' +
+    `Реквизиты для оплаты:\n${details}\n\n` +
+    'Как продлить:\n' +
+    '1) Переведите сумму по реквизитам (укажите срок).\n' +
+    '2) Нажмите «📎 Прикрепить квитанцию».\n' +
+    '3) Отправьте фото/скриншот перевода.\n' +
+    '4) Нажмите «📨 Отправить» — админ подтвердит и продлит подписку.';
+  return { text, replyMarkup: receiptInlineKeyboard() };
 }
 
 /** Главный ответ: приветствие + оставшиеся дни + ссылка для Lampa + кнопки. */
@@ -290,8 +315,47 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
  * @returns {Promise<{text?: string, replyMarkup?: object} | null>} null = только ack
  */
 export async function handleCallback({ data, chatId, config, getUsers = listUsers, setUsers = writeUsers, now = Date.now(), sender }) {
-  if (data === 'get_link') {
-    return handleCommand({ text: '/start', chatId, config, getUsers, setUsers, now, sender });
+  const users = (await getUsers()).slice();
+  const idx = users.findIndex((u) => String(u.telegram_id) === String(chatId));
+  const user = idx >= 0 ? users[idx] : null;
+
+  switch (data) {
+    case 'get_link':
+      return handleCommand({ text: '/start', chatId, config, getUsers, setUsers, now, sender });
+    case 'pay': {
+      if (user) { user.awaiting_receipt = true; await setUsers(users); }
+      return paymentReply(config);
+    }
+    case 'attach_receipt': {
+      if (!user) return { text: 'Отправьте /start, чтобы получить подписку, затем вновь откройте «Оплатить».' };
+      user.awaiting_receipt = true;
+      await setUsers(users);
+      return {
+        text: '📎 Пришлите квитанцию или скриншот перевода (фото или файл).\nЗатем нажмите «📨 Отправить».',
+        replyMarkup: receiptInlineKeyboard()
+      };
+    }
+    case 'send_receipt': {
+      if (!user) return { text: 'Отправьте /start, чтобы получить подписку.' };
+      const fileId = user.receipt_file_id;
+      if (!fileId) {
+        return {
+          text: 'Сначала прикрепите квитанцию: нажмите «📎 Прикрепить квитанцию» и отправьте фото/файл перевода.',
+          replyMarkup: receiptInlineKeyboard()
+        };
+      }
+      const who = user.slug ? `@${user.slug}` : `id ${chatId}`;
+      const caption = `💳 Квитанция от ${who} (chat id ${chatId})\n\nПродлить подписку: /grant ${chatId} [дней]`;
+      user.awaiting_receipt = false;
+      user.receipt_file_id = '';
+      user.receipt_caption = '';
+      await setUsers(users);
+      return {
+        text: '✅ Квитанция отправлена администратору.\nАдмин подтвердит оплату и продлит подписку.',
+        adminNotePhoto: { fileId, caption }
+      };
+    }
+    default:
+      return null;
   }
-  return null;
 }

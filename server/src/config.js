@@ -88,6 +88,8 @@ export const config = {
     bannerText: (process.env.TELEGRAM_BANNER || '').trim(),
     // URL/контакт админа для inline-кнопки «Связь с админом». Пусто → кнопки нет.
     adminContact: (process.env.TELEGRAM_ADMIN_CONTACT || '').trim(),
+    // Реквизиты для оплаты (кнопка «💳 Оплатить»). Пусто → секции оплаты нет.
+    paymentDetails: (process.env.TELEGRAM_PAYMENT_DETAILS || '').trim(),
     maxTrialChats: integer('TELEGRAM_MAX_TRIAL_CHATS', 0)
   },
   filmix: {

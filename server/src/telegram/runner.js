@@ -2,7 +2,8 @@
 // inline-кнопки — в handleCallback, шлёт ответ. Запускается из index.js при TELEGRAM_ENABLED + botToken.
 import { logger } from '../logger.js';
 import { TelegramBotClient } from './BotClient.js';
-import { handleCommand, handleCallback } from './bot.js';
+import { handleCommand, handleCallback, receiptInlineKeyboard } from './bot.js';
+import { listUsers, writeUsers } from '../store.js';
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -38,6 +39,24 @@ export function createTelegramRunner(config, deps = {}) {
     }
   }
 
+  // Разослать администраторам: текстовое adminNote и/или фото квитанции adminNotePhoto.
+  async function notifyAdmins(reply, chatId) {
+    const admins = Array.isArray(config.telegram.admins) ? config.telegram.admins : [];
+    for (const adminId of admins) {
+      if (String(adminId) === String(chatId)) continue;
+      if (reply.adminNotePhoto) {
+        try {
+          await client.sendPhoto(adminId, reply.adminNotePhoto.fileId, reply.adminNotePhoto.caption);
+        } catch (error) {
+          logger.error('telegram_admin_photo_failed', { admin: adminId, error: error.message });
+          try { await send(adminId, { text: (reply.adminNotePhoto.caption || '') }); } catch (e) {}
+        }
+      } else {
+        await send(adminId, { text: reply.adminNote });
+      }
+    }
+  }
+
   async function processUpdate(update) {
     // Inline-кнопка
     if (update.callback_query && update.callback_query.data) {
@@ -61,20 +80,43 @@ export function createTelegramRunner(config, deps = {}) {
           sender
         });
         await send(chatId, reply);
+        await notifyAdmins(reply, chatId);
       } catch (error) {
         logger.error('telegram_callback_failed', { chatId, error: error.message });
       }
       return;
     }
 
-    // Текстовое сообщение
+    // Сообщение (текст или фото/файл — квитанция при оплате).
     const inMessage = update.message || update.edited_message || update.channel_post;
     if (!inMessage) return;
     const chatId = inMessage.chat?.id;
-    const text = inMessage.text || inMessage.caption;
-    if (chatId === undefined || !text) return;
+    if (chatId === undefined) return;
 
     const sender = inMessage.from ? pickSenderName(inMessage.from) : undefined;
+
+    // Фото/документ: если пользователь в режиме оплаты (нажал «Прикрепить квитанцию»)
+    // — сохраняем file_id и предлагаем «Отправить».
+    if (inMessage.photo || inMessage.document) {
+      const users = (await (deps.getUsers || listUsers)()).slice();
+      const u = users.find((x) => String(x.telegram_id) === String(chatId));
+      const fileId = inMessage.photo
+        ? inMessage.photo[inMessage.photo.length - 1].file_id
+        : (inMessage.document && inMessage.document.file_id);
+      if (u && u.awaiting_receipt && fileId) {
+        u.receipt_file_id = fileId;
+        u.receipt_caption = inMessage.caption || '';
+        await (deps.setUsers || writeUsers)(users);
+        await send(chatId, {
+          text: '📎 Квитанция прикреплена. Нажмите «📨 Отправить», чтобы передать её админу.',
+          replyMarkup: receiptInlineKeyboard()
+        });
+      }
+      return;
+    }
+
+    const text = inMessage.text || inMessage.caption;
+    if (!text) return;
 
     let reply;
     try {
@@ -93,12 +135,8 @@ export function createTelegramRunner(config, deps = {}) {
     }
     await send(chatId, reply);
 
-    // Новый пользователь → уведомляем всех админов (выдача подписки админом).
-    if (reply.adminNote && Array.isArray(config.telegram.admins)) {
-      for (const adminId of config.telegram.admins) {
-        if (String(adminId) !== String(chatId)) await send(adminId, { text: reply.adminNote });
-      }
-    }
+    // Новый пользователь / квитанция → уведомляем админов.
+    await notifyAdmins(reply, chatId);
   }
 
   async function pollOnce() {
