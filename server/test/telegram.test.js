@@ -52,8 +52,8 @@ test('/start выдает триал новому чату и создаёт п�
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
   assert.match(reply.text, /Осталось/);
-  assert.match(reply.text, /mo-[0-9a-f]+/);
   assert.match(reply.text, /dorofeev200_[0-9a-f]{12}\.js/);
+  assert.ok(!/🔑 Токен:/.test(reply.text));
   assert.equal(store.users.length, 1);
   assert.equal(store.users[0].telegram_id, '222');
   assert.equal(store.users[0].active, true);
@@ -210,7 +210,7 @@ test('handleCallback get_link: возвращает ссылку существ�
   const reply = await handleCallback({ data: 'get_link', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
   assert.ok(reply.text.includes(`dorofeev200_${shortId(token)}.js`));
-  assert.ok(reply.text.includes(token));
+  assert.ok(!reply.text.includes(token));
   assert.equal(store.users.length, 1);
 });
 

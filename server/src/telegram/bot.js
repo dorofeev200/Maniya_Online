@@ -85,7 +85,6 @@ function linkReply(config, user, isNew, now) {
     `✅ Осталось <b>${daysText(user, now)}</b> до окончания подписки\n\n` +
     `🔗 Ваша ссылка для Lampa:\n` +
     `<code>${escapeHtml(url)}</code>\n\n` +
-    `🔑 Токен: <code>${escapeHtml(user.token)}</code>\n\n` +
     `${solutionLine()}`;
   return { text, replyMarkup: inlineKeyboard(config) };
 }
