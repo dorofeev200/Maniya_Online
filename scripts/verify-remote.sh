@@ -13,8 +13,7 @@ curl -fsS "${HTTPS_BASE}/health"
 printf '\n\n'
 
 echo "2) Plugin file"
-curl -fsSI "${HTTPS_BASE}/maniya-online.js?token=${TOKEN}"
-printf '\n'
+curl -fsS -o /dev/null -w "HTTP %{http_code}, %{size_download} bytes\n" "${HTTPS_BASE}/maniya-online.js?token=${TOKEN}"
 
 echo "3) Subscription check"
 curl -fsS "${HTTPS_BASE}/api/lampa/subscription/check?token=${TOKEN}"

@@ -21,12 +21,22 @@ SSH_ASKPASS_REQUIRE=force DISPLAY=dummy:0`, скрипт печатает пар
 rsync исключает `.git`, `node_modules`, `.env`, `server/data`. Проверка: `scripts/verify-remote.sh`
 (нужен `TOKEN` реального пользователя). Локальный git — источник истины для восстановления с нуля.
 
-## ⏸ Точка остановки (2026-08-07, выключение ПК)
-- Закоммичено `aa2a91b` (RutubeMovie ✅ live, e2e локально зелёный: 122 теста / 121 pass + 1 skip).
-- **НЕ выполнено:** деплой волны Rutube на VPS (локальный e2e прошёл, на VPS код ещё старый —
-  `git log -1` там без Rutube). Следующая сессия: `scripts/deploy.sh`-эквивалент (rsync + restart
-  systemd, сохраняя `.env`/`data`), затем `verify-remote.sh` и live-проверка Rutube через VPS.
-- Локально всё остановлено (node 3000/3100 не слушает); `/tmp/askpass.sh` создать заново при деплое.
+## ⏸ Точка остановки (2026-08-07, после второй сессии)
+- **WAVE RUTUBE ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (включая деплой на VPS):**
+  - Локально зелёный: 122 теста / 121 pass + 1 skip.
+  - Деплой на VPS через tar-over-SSH (rsync недоступен на Windows-стороне):
+    архив `tar czf --exclude .git --exclude server/.env --exclude server/data --exclude node_modules`,
+    распаковка в `/opt/maniya-online`, `systemctl restart maniya-online`. `.env` и `data/users.json`
+    сохранены (проверено). Волна аддитивная, `--delete` не нужен.
+  - `verify-remote.sh` — 5/5 зелёный (health, plugin 200, subscription active, nginx ok, systemd active).
+  - Live-проверка Rutube через публичный HTTPS: `sources` содержит `rutubemovie:true`, `videos`
+    (provider=rutubemovie, title=Интерстеллар, year=2014) вернул играбельный item (quality auto, через прокси).
+  - Правка `scripts/verify-remote.sh`: шаг "Plugin file" переведён с HEAD (сервер даёт 405 —
+    index.js разрешает только GET) на GET + `-w` статус.
+- Закоммичено: `2b9c5ee` (точка остановки) + текущий коммит этого волна.
+- **Следующая волна: CDNvideohub** (Tier 1, чистый HTTP: `{host}/api/v1/player/sv/...`, hlsUrl).
+  См. статусы ниже.
+- Деплой: `/tmp/askpass.sh` создавать заново при каждом деплое (URI-скрипт, пароль 789zxc789).
 
 ## Статус готовности
 
@@ -40,7 +50,7 @@ rsync исключает `.git`, `node_modules`, `.env`, `server/data`. Пров
 
 ### Tier 1 — чистый HTTP (без браузера/внешних инфр.)
 - [x] Kodik, Rezka, Filmix, Alloha(код) — см. выше
-- [x] RutubeMovie — JSON API rutube, простой HLS/MP4; ✅ live локально, ⏳ деплой на VPS не сделан
+- [x] RutubeMovie — JSON API rutube, простой HLS/MP4; ✅ live (VPS, verify 5/5 + live-videos)
 - [ ] CDNvideohub — JSON API (`{host}/api/v1/player/sv/...`), hlsUrl
 - [ ] Collaps — HTML+JSON, зашитый токен, кастомный URL-кодировщик
 - [ ] HDVB — JSON+POST playlist (csrf), зашитый токен
@@ -68,8 +78,8 @@ rsync исключает `.git`, `node_modules`, `.env`, `server/data`. Пров
 1. [x] Инфраструктура возобновления (README+память+CLAUDE.md) — сделано
 2. [x] Базовый коммит restore-point — сделано (0316e2e)
 3. [ ] Фундамент движка (FetchService + IframeCodec + IframeProviderBase) — понадобится при провайдерах с iframe/JS-декодом
-4. [x] Первый Tier-1 провайдер (RutubeMovie) — ✅ live локально; ⏳ деплой VPS (первое действие след. сессии)
-5. [ ] Дальше по очереди см. статусы выше (следующий: CDNvideohub)
+4. [x] Первый Tier-1 провайдер (RutubeMovie) — ✅ live (локально + VPS)
+5. [ ] Следующий провайдер: CDNvideohub (Tier 1, чистый HTTP)
 6. [ ] Live-валидация на VPS + деплой после каждой волны
 
 ## Итоговый чекбокс «плагин работает»
