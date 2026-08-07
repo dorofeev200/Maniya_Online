@@ -166,15 +166,19 @@ function helpReply(config) {
     '/help — справка'
   ];
   if (config?.telegram?.admins?.length) {
-    lines.push('/grant &lt;token&gt; [days] — выдача/продление (админ)');
-    lines.push('/revoke &lt;token&gt; — отключить (админ)');
+    lines.push('/grant &lt;@ник|id|токен&gt; [days] — выдать/продлить (админ)');
+    lines.push('/revoke &lt;ник|id|токен&gt; — отключить (админ)');
+    lines.push('/list — список пользователей (админ)');
+    lines.push('Новый пользователь пишет /start → админ получит уведомление и выдаст /grant id [дней]');
   }
   return { text: lines.join('\n') };
 }
 
 function findBySubject(users, subject) {
-  const s = String(subject || '').trim();
-  return users.find((u) => u.token === s) || users.find((u) => String(u.telegram_id) === s);
+  const s = String(subject || '').trim().replace(/^@/, '').toLowerCase();
+  return users.find((u) => u.token && u.token.toLowerCase() === s) ||
+    users.find((u) => String(u.telegram_id) === String(s).replace(/^@/, '')) ||
+    users.find((u) => u.slug && String(u.slug).toLowerCase() === s);
 }
 
 /**
@@ -221,13 +225,33 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
         target.slug = slugFrom(nick) || undefined;
         await setUsers(users);
       }
-      return linkReply(config, target, fresh, now);
+      const reply = linkReply(config, target, fresh, now);
+      if (fresh) {
+        // Уведомим администраторов: появился запрос на подписку (триал выдан).
+        const who = target.slug ? `@${target.slug}` : (slugFrom(nick) ? `@${slugFrom(nick)}` : `id ${chatId}`);
+        reply.adminNote =
+          `🆕 Новый пользователь: ${who} (chat id ${chatId})\n` +
+          `Триал: ${target.plan} до ${escapeHtml(expiresLabel(target))}\n` +
+          `Выдать полный доступ: /grant ${chatId} [дней]`;
+      }
+      return reply;
     }
     case '/status':
       return statusText(config, user, now);
     case '/help':
     case '/commands':
       return helpReply(config);
+    case '/list':
+    case '/users': {
+      if (!admin) return { text: 'Команда только для админ‑чата.' };
+      if (!users.length) return { text: 'Пока нет пользователей.' };
+      const rows = users.map((u, i) =>
+        `${i + 1}) ${u.slug ? '@' + u.slug : '—'} | id ${u.telegram_id} | ` +
+        `${u.active ? (isUserActive(u, now) ? '🟢 активна' : '🔴 истекла') : '⛔ отключена'} | ` +
+        `${daysText(u, now)} | ${escapeHtml(u.plan || '—')}\n   ${escapeHtml(u.token)}`
+      );
+      return { text: `Пользователей: ${users.length}\n` + rows.join('\n') };
+    }
     case '/grant':
     case '/subscribe':
     case '/extend':
@@ -235,21 +259,23 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
       if (!admin) return { text: 'Команда только для админ‑чата.' };
       const grantArgs = args.trim().split(/\s+/);
       const target = findBySubject(users, grantArgs[0]);
-      if (!target) return { text: 'Не найден пользователь по токену или chat‑id. Использование: /grant &lt;token&gt; [days]' };
+      if (!target) return { text: 'Не найден пользователь. Укажи @ник, id или токен. Пример: /grant @vasya 30' };
       const days = Number.parseInt(grantArgs[1] || '', 10);
       if (Number.isFinite(days) && days > 0) target.expires_at = new Date(now + days * DAY_MS).toISOString();
       else target.expires_at = null;
       target.plan = 'full';
       target.active = true;
       await setUsers(users);
-      return statusText(config, target, now);
+      const granted = statusText(config, target, now);
+      granted.text += `\n\n🔗 Ссылка плагина:\n<code>${escapeHtml(pluginUrl(config, target.token, target))}</code>`;
+      return granted;
     }
     case '/revoke':
     case '/expire':
     case '/suspend': {
       if (!admin) return { text: 'Команда только для админ‑чата.' };
       const target = findBySubject(users, args);
-      if (!target) return { text: 'Не найден пользователь.' };
+      if (!target) return { text: 'Не найден пользователь. Указание: @ник / id / токен' };
       target.active = false;
       await setUsers(users);
       return { text: '⛔ Подписка отключена.' };

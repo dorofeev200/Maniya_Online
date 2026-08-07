@@ -194,7 +194,8 @@ test('runner.pollOnce: /start обрабатывается, отправляет
   const client = new TelegramBotClient({ botToken: 't', fetchFn: fetchImpl });
   const runner = createTelegramRunner(cfg, { client, getUsers: store.get, setUsers: store.set, now: NOW });
   await runner.pollOnce();
-  assert.equal(sent.length, 1);
+  // Ответ пользователю + уведомление админу о новом пользователе.
+  assert.equal(sent.length, 2);
   assert.equal(sent[0].chat_id, 222);
   assert.equal(sent[0].parse_mode, 'HTML');
   assert.equal(runner.offset, 11);
@@ -256,4 +257,49 @@ test('handleCallback get_link: возвращает ссылку существ�
 test('handleCallback неизвестный data → null (только ack)', async () => {
   const reply = await handleCallback({ data: 'something_else', chatId: 222, config: cfg, getUsers: () => Promise.resolve([]), setUsers: () => Promise.resolve() });
   assert.equal(reply, null);
+});
+
+test('/start нового пользователя: adminNote для выдачи подписки админом', async () => {
+  const store = memStore();
+  const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'vitya' } });
+  assert.ok(reply.adminNote.includes('/grant 222'));
+  assert.ok(reply.adminNote.includes('@vitya'));
+});
+
+test('/list (админ): перечисляет пользователей с токеном; не-админ — отклонение', async () => {
+  const store = memStore();
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  const list = await handleCommand({ text: '/list', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(list.text, /Пользователей: 1/);
+  assert.ok(list.text.includes(store.users[0].token));
+  const denied = await handleCommand({ text: '/list', chatId: 777, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(denied.text, /только для админ/);
+});
+
+test('/grant по @ник: выдаёт полную подписку и прилагает ссылку', async () => {
+  const store = memStore();
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
+  const r = await handleCommand({ text: '/grant @vasya 5', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /🟢 активна/);
+  assert.ok(r.text.includes('vasya_'));
+  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 5 * 24 * 3600 * 1000);
+});
+
+test('runner: новый пользователь → уведомление админу (выдача подписки)', async () => {
+  const store = memStore();
+  const sent = [];
+  const fetchImpl = async (m, p) => {
+    if (m === 'getUpdates') {
+      return new Response(JSON.stringify({ ok: true, result: [{ update_id: 1, message: { chat: { id: 222 }, from: { username: 'vitya' }, text: '/start' } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (m === 'sendMessage') { sent.push(p); return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200, headers: { 'content-type': 'application/json' } }); }
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const client = new TelegramBotClient({ botToken: 't', fetchFn: fetchImpl });
+  const runner = createTelegramRunner(cfg, { client, getUsers: store.get, setUsers: store.set, now: NOW });
+  await runner.pollOnce();
+  const admin = sent.find((s) => String(s.chat_id) === '111');
+  assert.ok(admin, 'админ получил уведомление');
+  assert.match(admin.text, /Новый пользователь/);
+  assert.ok(sent.some((s) => s.chat_id === 222));
 });

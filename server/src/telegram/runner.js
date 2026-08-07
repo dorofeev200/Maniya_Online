@@ -92,6 +92,13 @@ export function createTelegramRunner(config, deps = {}) {
       reply = { text: `Ошибка: ${error.message}. Справка: /help` };
     }
     await send(chatId, reply);
+
+    // Новый пользователь → уведомляем всех админов (выдача подписки админом).
+    if (reply.adminNote && Array.isArray(config.telegram.admins)) {
+      for (const adminId of config.telegram.admins) {
+        if (String(adminId) !== String(chatId)) await send(adminId, { text: reply.adminNote });
+      }
+    }
   }
 
   async function pollOnce() {
