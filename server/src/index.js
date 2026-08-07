@@ -8,6 +8,7 @@ import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
 import { findUserByRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
 import { providerById, registeredProviders } from './providers/registry.js';
 import { buildProxyUrl, proxyMedia } from './proxy.js';
+import { createTelegramRunner } from './telegram/runner.js';
 
 const startedAt = Date.now();
 let ready = true;
@@ -181,13 +182,18 @@ function shutdown(signal) {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+const telegramRunner = config.telegram.enabled && config.telegram.botToken
+  ? createTelegramRunner(config).start()
+  : null;
+
 if (process.env.NODE_ENV !== 'test') {
   server.listen(config.port, config.host, () => {
     logger.info('server_started', {
       host: config.host,
       port: config.port,
       publicBaseUrl: config.publicBaseUrl,
-      corsOrigins: config.corsOrigins
+      corsOrigins: config.corsOrigins,
+      telegram: telegramRunner ? 'enabled' : 'disabled'
     });
   });
 }

@@ -61,6 +61,19 @@ origin → код продублирован.
   токена. Замечание: main-балансировщик при title возвращает поисковые карточки со всех включённых — для
   воспроизведения нужен id-путь.
 
+## ⏸ Точка остановки (2026-08-07, сессия 7: Telegram-бот авто-выдачи подписок)
+- **TELEGRAM-БОТ ✅ РЕАЛИЗОВАН (код + 17 тестов, без live — ждём токен от @BotFather).**
+  Модель (выбор пользователя): **триал по /start (TELEGRAM_TRIAL_DAYS дней, план `trial`) + ручная
+  выдача/продление командой /grant <token> [days] из админ-чата (TELEGRAM_ADMINS)**; доставка —
+  **ссылка плагина с токеном** (`<code>`): пользователь добавляет её в расширения Lampa как кастом-плагин.
+  Файлы: `server/src/telegram/BotClient.js` (Bot API, длинный polling, инжектируемый fetch), `bot.js`
+  (команды `/start /status /help /grant|subscribe|extend|give /revoke|expire|suspend`, HTML-escape,
+  makeToken/pluginUrl/isUserActive), `runner.js` (poll-loop, offset-трекинг), `store.js` (`writeUsers`/`listUsers`),
+  `config.js` (блок `telegram`), `.env.example` (секция). Локально **179 pass + 1 skip, 0 fail**. Запуск:
+  `TELEGRAM_ENABLED=1 TELEGRAM_BOT_TOKEN=...` (без токена сервер молчит, polling не стартует).
+  **Чтобы включить live:** создать бота в @BotFather, вписать токен + TELEGRAM_ADMINS + TELEGRAM_PLUGIN_URL
+  в `server/.env` на VPS, перезапустить `maniya-online`. Это единственный недостающий кусок.
+
 ## ⏸ Точка остановки (2026-08-07, сессия 5: волна Collaps ЗАКРЫТА)
 - **WAVE COLLAPS ✅ ЗАВЕРШЁН (код+тесты+live, деплой см. ниже):** клиент (`/list` поиск + embed-страница),
   нормализатор (чистый DTO: search → записи, parseEmbed → movie-source / seasons-блок; слайсер parseJsObject —

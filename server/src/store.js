@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { config } from './config.js';
 import { HttpError } from './errors.js';
 import { validateToken } from './security.js';
@@ -12,6 +13,17 @@ async function readJson(filePath, fallback) {
   } catch (error) {
     return fallback;
   }
+}
+
+export async function writeUsers(users) {
+  if (!config.usersFile) throw new HttpError(500, 'users_file_not_configured', 'USERS_FILE не задан');
+  await mkdir(path.dirname(config.usersFile), { recursive: true });
+  await writeFile(config.usersFile, JSON.stringify(users, null, 2), 'utf8');
+}
+
+export async function listUsers() {
+  const users = await readJson(config.usersFile, []);
+  return Array.isArray(users) ? users : [];
 }
 
 function bearerToken(context) {

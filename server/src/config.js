@@ -66,6 +66,23 @@ export const config = {
   videosFile: resolvePath(process.env.VIDEOS_FILE || ''),
   publicDir: resolvePath(process.env.PUBLIC_DIR || path.join(rootDir, 'public')),
   shutdownTimeoutMs: integer('SHUTDOWN_TIMEOUT_MS', 10_000),
+  // Telegram-бот авто-выдачи подписок (триал + ручная выдача админом).
+  telegram: {
+    enabled: bool('TELEGRAM_ENABLED', false),
+    // Токен бота от @BotFather. Без него polling не стартует (enabled остаётся true,
+    // но клиент молчит, как Lamac при пустом bot_token).
+    botToken: (process.env.TELEGRAM_BOT_TOKEN || '').trim(),
+    apiBase: (process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/+$/, ''),
+    pollTimeoutSeconds: integer('TELEGRAM_POLL_TIMEOUT', 60),
+    trialDays: integer('TELEGRAM_TRIAL_DAYS', 3),
+    // План триал-подписки, выдаваемой по /start.
+    trialPlan: (process.env.TELEGRAM_TRIAL_PLAN || 'trial').trim(),
+    // Chat-id админов (разрешена ручная выдача / продление). Пусто → команд нет.
+    admins: list('TELEGRAM_ADMINS', []),
+    // Ссылка плагина с подстановкой {token} (пользователь добавляет в Lampa).
+    pluginUrlTemplate: (process.env.TELEGRAM_PLUGIN_URL || '').trim(),
+    maxTrialChats: integer('TELEGRAM_MAX_TRIAL_CHATS', 0)
+  },
   filmix: {
     enabled: bool('FILMIX_ENABLED', true),
     pro: bool('FILMIX_PRO', false),
