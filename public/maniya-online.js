@@ -472,12 +472,15 @@
       '.maniya-online-item__title{font-size:1.5em}.maniya-online-item__info{margin-top:.5em;opacity:.75}' +
       '.maniya-online-item.focus::after{content:"";position:absolute;top:-.45em;left:-.45em;right:-.45em;bottom:-.45em;border:.25em solid #fff;border-radius:.6em;pointer-events:none}' +
       '.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}' +
-      '.maniya-online-button{position:relative;overflow:hidden;border-radius:.55em;margin-left:.1em;padding:0 1.15em;background:linear-gradient(155deg,#ffd54a 0%,#ffb300 45%,#f4511e 100%);color:#160d05;font-weight:800;letter-spacing:.03em;text-shadow:0 .04em .12em rgba(255,255,255,.25);box-shadow:0 .12em .5em rgba(0,0,0,.35),0 0 .9em rgba(255,152,0,.45);transition:transform .15s,box-shadow .15s;animation:maniya-glow 2.4s ease-in-out infinite}' +
-      '.maniya-online-button::before{content:"";position:absolute;top:-9%;left:-60%;width:35%;height:150%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);transform:skewX(-20deg);transition:left .4s ease;pointer-events:none}' +
-      '@keyframes maniya-glow{0%,100%{box-shadow:0 .12em .5em rgba(0,0,0,.35),0 0 .6em rgba(255,176,0,.55)}50%{box-shadow:0 .12em .6em rgba(0,0,0,.35),0 0 1.4em rgba(255,152,0,.95)}}' +
-      '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.06);animation-play-state:paused;box-shadow:0 .22em .9em rgba(0,0,0,.45),0 0 1.7em rgba(255,152,0,1)}' +
+      '.maniya-online-button{position:relative;width:2.3em;height:2.3em;margin-left:.1em;border-radius:50%;background:radial-gradient(circle at 33% 30%,#ffe98f 0%,#ffc233 38%,#f07a1f 100%);color:#241005;display:flex;align-items:center;justify-content:center;box-shadow:0 .12em .55em rgba(0,0,0,.45),inset 0 .08em .22em rgba(255,255,255,.55),0 0 1.05em rgba(255,140,0,.55);transition:transform .22s cubic-bezier(.34,1.56,.64,1),box-shadow .22s;animation:maniya-glow 2.6s ease-in-out infinite}' +
+      '.maniya-online-button::before{content:"";position:absolute;top:-8%;left:-55%;width:42%;height:150%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent);transform:rotate(14deg) skewX(-18deg);transition:left .45s ease;pointer-events:none}' +
+      '.maniya-online-button::after{content:"";position:absolute;inset:6%;border-radius:50%;border:.09em solid rgba(255,255,255,.45);box-shadow:inset 0 .05em .4em rgba(255,255,255,.35),inset 0 -.05em .3em rgba(0,0,0,.12);pointer-events:none}' +
+      '@keyframes maniya-glow{0%,100%{box-shadow:0 .12em .5em rgba(0,0,0,.42),inset 0 .08em .22em rgba(255,255,255,.55),0 0 .6em rgba(255,150,0,.5)}50%{box-shadow:0 .14em .7em rgba(0,0,0,.45),inset 0 .08em .22em rgba(255,255,255,.55),0 0 1.55em rgba(255,115,0,.95)}}' +
+      '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.16);animation-play-state:paused;box-shadow:0 .2em .9em rgba(0,0,0,.5),inset 0 .08em .22em rgba(255,255,255,.6),0 0 1.9em rgba(255,110,0,1)}' +
       '.maniya-online-button.focus::before,.maniya-online-button:hover::before{left:130%}' +
-      '.maniya-online-button__m{width:1.75em;height:1.75em;margin-right:.55em;flex:0 0 auto;filter:drop-shadow(0 .06em .18em rgba(0,0,0,.35))}' +
+      '.maniya-online-button__m{width:1.5em;height:1.5em;position:relative;z-index:1;filter:drop-shadow(0 .05em .14em rgba(0,0,0,.3))}' +
+      '.maniya-online-button__ring{fill:none;stroke:rgba(0,0,0,.4);stroke-width:4.5;opacity:.9}' +
+      '.maniya-online-button__glyph{fill:none;stroke:#241005;stroke-width:12.5;stroke-linecap:round;stroke-linejoin:round}' +
     '</style>');
     $('body').append(Lampa.Template.get('maniya_css', {}, true));
     Lampa.Template.add('maniya_content_loading', '<div class="online-empty"><div class="broadcast__scan"><div></div></div></div>');
@@ -517,12 +520,11 @@
     if (event.render.find('.maniya-online-button').length) return;
 
     var button = $(
-      '<div class="full-start__button selector view--online maniya-online-button">' +
-        '<svg class="maniya-online-button__m" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">' +
-          '<circle cx="50" cy="50" r="47" stroke-width="4.5" opacity=".85"></circle>' +
-          '<path d="M22 78V22L50 52L78 22V78"></path>' +
+      '<div class="full-button selector view--online maniya-online-button" title="Maniya Online">' +
+        '<svg class="maniya-online-button__m" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" aria-hidden="true">' +
+          '<circle class="maniya-online-button__ring" cx="50" cy="50" r="47"></circle>' +
+          '<path class="maniya-online-button__glyph" d="M21 80V22l29 33 29-33v58"></path>' +
         '</svg>' +
-        '<span>Maniya</span>' +
       '</div>'
     );
     button = $(Lampa.Lang.translate(button.prop('outerHTML')));
