@@ -86,7 +86,10 @@ describe('Maniya Online API', () => {
     const sourcesResponse = await fetch(`${base}/api/lampa/sources?token=unit-test-token`);
     assert.equal(sourcesResponse.status, 200);
     const sources = await sourcesResponse.json();
-    assert.equal(sources.sources[0].id, 'main');
+    // Балансировщик «Maniya Online» убран — в списке только реальные провайдеры.
+    assert.ok(sources.sources.length > 0);
+    assert.ok(!sources.sources.some((s) => s.id === 'main'));
+    assert.ok(sources.sources.every((s) => s.id && s.url));
 
     const videosResponse = await fetch(`${base}/api/lampa/videos?token=unit-test-token`);
     assert.equal(videosResponse.status, 200);

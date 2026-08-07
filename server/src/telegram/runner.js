@@ -6,6 +6,16 @@ import { handleCommand, handleCallback } from './bot.js';
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+/** Имя/ник отправителя из telegram-user ({username, first_name, last_name}). */
+function pickSenderName(from) {
+  if (!from) return undefined;
+  return {
+    username: from.username,
+    first_name: from.first_name,
+    last_name: from.last_name
+  };
+}
+
 export function createTelegramRunner(config, deps = {}) {
   const client = deps.client || new TelegramBotClient({
     botToken: config.telegram.botToken,
@@ -33,6 +43,7 @@ export function createTelegramRunner(config, deps = {}) {
     if (update.callback_query && update.callback_query.data) {
       const cb = update.callback_query;
       const chatId = cb.from?.id ?? cb.message?.chat?.id;
+      const sender = cb.from ? pickSenderName(cb.from) : undefined;
       try {
         await client.api('answerCallbackQuery', { callback_query_id: cb.id });
       } catch (error) {
@@ -46,7 +57,8 @@ export function createTelegramRunner(config, deps = {}) {
           config,
           getUsers: deps.getUsers,
           setUsers: deps.setUsers,
-          now: deps.now
+          now: deps.now,
+          sender
         });
         await send(chatId, reply);
       } catch (error) {
@@ -62,6 +74,8 @@ export function createTelegramRunner(config, deps = {}) {
     const text = inMessage.text || inMessage.caption;
     if (chatId === undefined || !text) return;
 
+    const sender = inMessage.from ? pickSenderName(inMessage.from) : undefined;
+
     let reply;
     try {
       reply = await handleCommand({
@@ -70,7 +84,8 @@ export function createTelegramRunner(config, deps = {}) {
         config,
         getUsers: deps.getUsers,
         setUsers: deps.setUsers,
-        now: deps.now
+        now: deps.now,
+        sender
       });
     } catch (error) {
       logger.error('telegram_command_failed', { chatId, error: error.message });

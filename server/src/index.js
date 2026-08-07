@@ -103,12 +103,6 @@ async function route(context, response) {
 
     const providers = registeredProviders().filter((provider) => provider.enabled());
     const sources = [
-      {
-        id: 'main',
-        name: 'Maniya Online',
-        url: sourceUrl(context),
-        show: true
-      },
       ...providers.map((provider) => ({
         id: provider.id,
         name: provider.title || provider.id,

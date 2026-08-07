@@ -378,7 +378,15 @@
 
       scroll.clear();
       items.forEach(function (item, index) {
-        item.title = item.title || item.text || Lampa.Lang.translate('maniya_episode') + ' ' + (item.episode || index + 1);
+        if (!item.title) {
+          if (item.episode || item.series) {
+            item.title = Lampa.Lang.translate('maniya_episode') + ' ' + (item.episode || index + 1);
+          } else {
+            // Фильм, серий нет — не рисуем «Серия N», что при отсутствии title
+            // вводит пользователя в заблуждение. Показываем озвучку/качество/индекс.
+            item.title = item.voice_name || item.quality || String(index + 1);
+          }
+        }
         item.info = item.voice_name || item.quality || sources[activeSource].name;
         item.time = item.time || '';
         item.quality_label = item.quality_label || '';
@@ -464,9 +472,10 @@
       '.maniya-online-item__title{font-size:1.5em}.maniya-online-item__info{margin-top:.5em;opacity:.75}' +
       '.maniya-online-item.focus::after{content:"";position:absolute;top:-.45em;left:-.45em;right:-.45em;bottom:-.45em;border:.25em solid #fff;border-radius:.6em;pointer-events:none}' +
       '.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}' +
-      '.maniya-online-button{position:relative;overflow:hidden;border-radius:.55em;margin-left:.7em;padding:0 1.05em;background:linear-gradient(155deg,#ffd54a 0%,#ffb300 45%,#f4511e 100%);color:#1d1d1d;font-weight:700;letter-spacing:.02em;box-shadow:0 .12em .5em rgba(0,0,0,.35),0 0 .9em rgba(255,152,0,.45);transition:transform .15s,box-shadow .15s}' +
-      '.maniya-online-button::before{content:"";position:absolute;top:-20%;left:-40%;width:35%;height:150%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);transition:left .4s ease;pointer-events:none}' +
-      '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.05);box-shadow:0 .2em .8em rgba(0,0,0,.45),0 0 1.4em rgba(255,152,0,.8)}' +
+      '.maniya-online-button{position:relative;overflow:hidden;border-radius:.55em;margin-left:.1em;padding:0 1.05em;background:linear-gradient(155deg,#ffd54a 0%,#ffb300 45%,#f4511e 100%);color:#1d1d1d;font-weight:700;letter-spacing:.02em;box-shadow:0 .12em .5em rgba(0,0,0,.35),0 0 .9em rgba(255,152,0,.45);transition:transform .15s,box-shadow .15s;animation:maniya-glow 2.4s ease-in-out infinite}' +
+      '.maniya-online-button::before{content:"";position:absolute;top:-9%;left:-60%;width:35%;height:150%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);transform:skewX(-20deg);transition:left .4s ease;pointer-events:none}' +
+      '@keyframes maniya-glow{0%,100%{box-shadow:0 .12em .5em rgba(0,0,0,.35),0 0 .6em rgba(255,176,0,.55)}50%{box-shadow:0 .12em .6em rgba(0,0,0,.35),0 0 1.4em rgba(255,152,0,.95)}}' +
+      '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.06);animation-play-state:paused;box-shadow:0 .22em .9em rgba(0,0,0,.45),0 0 1.7em rgba(255,152,0,1)}' +
       '.maniya-online-button.focus::before,.maniya-online-button:hover::before{left:130%}' +
       '.maniya-online-button__m{width:1.35em;height:1.35em;margin-right:.5em;flex:0 0 auto}' +
     '</style>');
@@ -518,7 +527,17 @@
     );
     button = $(Lampa.Lang.translate(button.prop('outerHTML')));
     button.on('hover:enter', function () { openOnline(event.movie); });
-    event.render.after(button);
+
+    // М-кнопку вставляем ПЕРЕД кружком «Смотреть» (view--torrent), чтобы она
+    // лежала рядом с ним в ряду действий карточки фильма, а не в конце экрана.
+    var host = event.render;
+    if (host && host.length) {
+      host.before(button);
+    } else {
+      // Фолбэк: если кружка-«Смотреть» нет, вставим в поле кнопок, если найдём.
+      var actions = $('.fullstart__buttons, .fullview-director, .full-start__button').parent();
+      actions.first().append(button);
+    }
   }
 
   function startPlugin() {
