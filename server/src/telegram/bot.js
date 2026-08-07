@@ -9,6 +9,57 @@ export function makeToken(prefix = 'mo') {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Дата "ДД.ММ.ГГ" / "ДД.ММ.ГГГГ" (разделители . / -) → ISO-конца указанного дня
+ * (23:59:59.999 по местному времени). null при мусоре/несуществующей дате
+ * (32.13.2026, 31.02.2026). Двухзначный год: <70 → 20xx, иначе 19xx.
+ */
+export function parseDateArg(value) {
+  const s = String(value || '').trim();
+  const match = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  let year = Number(match[3]);
+  if (String(match[3]).length === 2) year = year < 70 ? 2000 + year : 1900 + year;
+  const end = new Date(year, month - 1, day, 23, 59, 59, 999);
+  if (end.getFullYear() !== year || end.getMonth() !== month - 1 || end.getDate() !== day) return null;
+  return end.toISOString();
+}
+
+/** План из короткого токена админа: "P"/"p"/"plugin" = полный (плагин), иначе — как написано. */
+export function normalizePlan(token) {
+  const t = String(token || '').trim();
+  if (!t) return 'full';
+  const lower = t.toLowerCase();
+  if (lower === 'p' || lower === 'plugin') return 'full';
+  return t;
+}
+
+/**
+ * Разобрать хвост /grant: "<дата|дни> [план]".
+ *   "/grant 5"            → +5 дней от now, план full
+ *   "/grant 08.08.26"     → конец 08.08.2026, план full
+ *   "/grant 08.08.26 P"   → конец 08.08.2026, план full (P = плагин)
+ * Без даты → бессрочно (null), как раньше.
+ */
+export function parseGrantArgs(args = [], now = Date.now()) {
+  const [dateArg, planArg] = args;
+  let expires_at = null;
+  if (dateArg) {
+    const byDate = parseDateArg(dateArg);
+    if (byDate) {
+      expires_at = byDate;
+    } else if (/^\d+$/.test(dateArg)) {
+      // Дни — только целое число; невалидная дата (31.02.2026) НЕ читается как «31 дней».
+      const days = Number.parseInt(dateArg, 10);
+      if (Number.isFinite(days) && days > 0) expires_at = new Date(now + days * DAY_MS).toISOString();
+    }
+  }
+  const plan = planArg ? normalizePlan(planArg) : 'full';
+  return { expires_at, plan };
+}
+
 const TRANSLIT = {
   'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z',
   'и': 'i', 'й': 'i', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r',
@@ -191,10 +242,11 @@ function helpReply(config) {
     '/help — справка'
   ];
   if (config?.telegram?.admins?.length) {
-    lines.push('/grant &lt;@ник|id|токен&gt; [days] — выдать/продлить (админ)');
+    lines.push('/grant &lt;@ник|id|токен&gt; ДД.ММ.ГГ [P] — выдать/продлить до даты (админ)');
+    lines.push('  P = плагин; вариант "/grant @ник 30" — на 30 дней');
     lines.push('/revoke &lt;ник|id|токен&gt; — отключить (админ)');
     lines.push('/list — список пользователей (админ)');
-    lines.push('Новый пользователь пишет /start → админ получит уведомление и выдаст /grant id [дней]');
+    lines.push('Новый пользователь пишет /start → админ получит уведомление и выдаст /grant @ник 08.08.26 P');
   }
   return { text: lines.join('\n') };
 }
@@ -254,10 +306,11 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
       if (fresh) {
         // Уведомим администраторов: появился запрос на подписку (триал выдан).
         const who = target.slug ? `@${target.slug}` : (slugFrom(nick) ? `@${slugFrom(nick)}` : `id ${chatId}`);
+        const grantVia = target.slug ? `@${target.slug}` : (slugFrom(nick) ? `@${slugFrom(nick)}` : String(chatId));
         reply.adminNote =
           `🆕 Новый пользователь: ${who} (chat id ${chatId})\n` +
           `Триал: ${target.plan} до ${escapeHtml(expiresLabel(target))}\n` +
-          `Выдать полный доступ: /grant ${chatId} [дней]`;
+          `Продлить: /grant ${grantVia} 08.08.26 P`;
       }
       return reply;
     }
@@ -284,11 +337,10 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
       if (!admin) return { text: 'Команда только для админ‑чата.' };
       const grantArgs = args.trim().split(/\s+/);
       const target = findBySubject(users, grantArgs[0]);
-      if (!target) return { text: 'Не найден пользователь. Укажи @ник, id или токен. Пример: /grant @vasya 30' };
-      const days = Number.parseInt(grantArgs[1] || '', 10);
-      if (Number.isFinite(days) && days > 0) target.expires_at = new Date(now + days * DAY_MS).toISOString();
-      else target.expires_at = null;
-      target.plan = 'full';
+      if (!target) return { text: 'Не найден пользователь. Укажи @ник, id или токен. Пример: /grant @vasya 08.08.26 P' };
+      const { expires_at, plan } = parseGrantArgs(grantArgs.slice(1), now);
+      target.expires_at = expires_at;
+      target.plan = plan;
       target.active = true;
       await setUsers(users);
       const granted = statusText(config, target, now);
@@ -345,7 +397,7 @@ export async function handleCallback({ data, chatId, config, getUsers = listUser
         };
       }
       const who = user.slug ? `@${user.slug}` : `id ${chatId}`;
-      const caption = `💳 Квитанция от ${who} (chat id ${chatId})\n\nПродлить подписку: /grant ${chatId} [дней]`;
+      const caption = `💳 Квитанция от ${who} (chat id ${chatId})\n\nПродлить подписку: /grant ${chatId} 08.08.26 P`;
       user.awaiting_receipt = false;
       user.receipt_file_id = '';
       user.receipt_caption = '';

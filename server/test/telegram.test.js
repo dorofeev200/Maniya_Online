@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, paymentReply, pluginUrl, shortId, slugFrom } from '../src/telegram/bot.js';
+import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, normalizePlan, parseDateArg, parseGrantArgs, paymentReply, pluginUrl, shortId, slugFrom } from '../src/telegram/bot.js';
 import { TelegramBotClient } from '../src/telegram/BotClient.js';
 import { createTelegramRunner } from '../src/telegram/runner.js';
 
@@ -259,10 +259,10 @@ test('handleCallback неизвестный data → null (только ack)', a
   assert.equal(reply, null);
 });
 
-test('/start нового пользователя: adminNote для выдачи подписки админом', async () => {
+test('/start нового пользователя: adminNote для продления админом (новый формат)', async () => {
   const store = memStore();
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'vitya' } });
-  assert.ok(reply.adminNote.includes('/grant 222'));
+  assert.ok(reply.adminNote.includes('/grant @vitya 08.08.26 P'));
   assert.ok(reply.adminNote.includes('@vitya'));
 });
 
@@ -283,6 +283,53 @@ test('/grant по @ник: выдаёт полную подписку и при�
   assert.match(r.text, /🟢 активна/);
   assert.ok(r.text.includes('vasya_'));
   assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 5 * 24 * 3600 * 1000);
+});
+
+test('parseDateArg: ДД.ММ.ГГ → ISO конца дня; мусор и невозможные даты → null', () => {
+  assert.equal(parseDateArg('08.08.26'), new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
+  assert.equal(parseDateArg('08/08/26'), new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
+  assert.equal(parseDateArg('1-3-2027'), new Date(2027, 2, 1, 23, 59, 59, 999).toISOString());
+  assert.equal(parseDateArg('08.08.2026'), new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
+  assert.equal(parseDateArg('31.02.2026'), null);
+  assert.equal(parseDateArg('32.13.26'), null);
+  assert.equal(parseDateArg('not-a-date'), null);
+  assert.equal(parseDateArg(''), null);
+});
+
+test('parseGrantArgs: дата + P; дни; без даты → бессрочно; невалидная дата → бессрочно', () => {
+  const endOfDay = new Date(2026, 7, 8, 23, 59, 59, 999).toISOString();
+  assert.deepEqual(parseGrantArgs(['08.08.26', 'P'], NOW), { expires_at: endOfDay, plan: 'full' });
+  assert.deepEqual(parseGrantArgs(['08.08.26'], NOW), { expires_at: endOfDay, plan: 'full' });
+  assert.deepEqual(parseGrantArgs(['30'], NOW), { expires_at: new Date(NOW + 30 * 24 * 3600 * 1000).toISOString(), plan: 'full' });
+  assert.deepEqual(parseGrantArgs([], NOW), { expires_at: null, plan: 'full' });
+  assert.deepEqual(parseGrantArgs(['31.02.2026'], NOW), { expires_at: null, plan: 'full' });
+});
+
+test('normalizePlan: P/plugin → full; прочее — как написано; пусто → full', () => {
+  assert.equal(normalizePlan('P'), 'full');
+  assert.equal(normalizePlan('p'), 'full');
+  assert.equal(normalizePlan('plugin'), 'full');
+  assert.equal(normalizePlan('pro'), 'pro');
+  assert.equal(normalizePlan(''), 'full');
+});
+
+test('/grant @ник ДД.ММ.ГГ P: продление до даты, план полный', async () => {
+  const store = memStore();
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
+  const r = await handleCommand({ text: '/grant @vasya 08.08.26 P', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(r.text, /🟢 активна/);
+  assert.ok(r.text.includes('vasya_'));
+  assert.equal(store.users[0].plan, 'full');
+  assert.equal(store.users[0].active, true);
+  assert.equal(store.users[0].expires_at, new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
+});
+
+test('/grant @ник 08.08.2026: 4-значный год и без P', async () => {
+  const store = memStore();
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW, sender: { username: 'Vasya' } });
+  await handleCommand({ text: '/grant @vasya 08.08.2026', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.equal(store.users[0].plan, 'full');
+  assert.equal(store.users[0].expires_at, new Date(2026, 7, 8, 23, 59, 59, 999).toISOString());
 });
 
 test('paymentReply: реквизиты + кнопки прикрепить/отправить', () => {
