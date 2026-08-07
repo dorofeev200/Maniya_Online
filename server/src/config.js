@@ -79,8 +79,11 @@ export const config = {
     trialPlan: (process.env.TELEGRAM_TRIAL_PLAN || 'trial').trim(),
     // Chat-id админов (разрешена ручная выдача / продление). Пусто → команд нет.
     admins: list('TELEGRAM_ADMINS', []),
-    // Ссылка плагина с подстановкой {token} (пользователь добавляет в Lampa).
+    // Ссылка плагина. Подстановки: {token} (полный), {short} (суффикс токена),
+    // {prefix} (linkPrefix). Короткая форма: /{prefix}_{short}.js (проще вводить).
     pluginUrlTemplate: (process.env.TELEGRAM_PLUGIN_URL || '').trim(),
+    // Префикс короткой ссылки /<prefix>_<short>.js (бренд/ник, напр. dorofeev200).
+    linkPrefix: (process.env.TELEGRAM_LINK_PREFIX || 'dorofeev200').trim(),
     // Баннер в шапке сообщений (бренд). По умолчанию — Maniya Online.
     bannerText: (process.env.TELEGRAM_BANNER || '').trim(),
     // URL/контакт админа для inline-кнопки «Связь с админом». Пусто → кнопки нет.

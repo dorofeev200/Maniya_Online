@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, pluginUrl } from '../src/telegram/bot.js';
+import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, pluginUrl, shortId } from '../src/telegram/bot.js';
 import { TelegramBotClient } from '../src/telegram/BotClient.js';
 import { createTelegramRunner } from '../src/telegram/runner.js';
 
@@ -11,7 +11,7 @@ const cfg = {
     admins: ['111'],
     trialDays: 3,
     trialPlan: 'trial',
-    pluginUrlTemplate: 'https://plugin.maniya-kvn.online/maniya-online.js?token={token}',
+    pluginUrlTemplate: 'https://plugin.maniya-kvn.online/dorofeev200_{short}.js',
     adminContact: 'https://t.me/admin'
   }
 };
@@ -35,9 +35,16 @@ test('makeToken: уникальные, с префиксом и без небе�
   assert.match(a, /^mo-[a-f0-9]+$/);
 });
 
-test('pluginUrl: подставляет {token} в шаблон', () => {
-  assert.equal(pluginUrl(cfg, 'abc'), 'https://plugin.maniya-kvn.online/maniya-online.js?token=abc');
-  assert.equal(pluginUrl({ publicBaseUrl: 'https://x.test' }, 'tok'), 'https://x.test/maniya-online.js?token=tok');
+test('shortId: берёт последние 12 hex из токена', () => {
+  assert.equal(shortId('mo-abcdef1234567890abcdef1234567890'), 'ef1234567890');
+  assert.equal(shortId('mo-111122223333'), '111122223333');
+});
+
+test('pluginUrl: короткая ссылка /{prefix}_{short}.js; старый {token}-шаблон и дефолт', () => {
+  assert.equal(pluginUrl(cfg, 'mo-abcdef1234567890abcdef1234567890'), 'https://plugin.maniya-kvn.online/dorofeev200_ef1234567890.js');
+  assert.equal(pluginUrl({ publicBaseUrl: 'https://x.test', telegram: {} }, 'mo-abcdef1234567890abcdef1234567890'), 'https://x.test/dorofeev200_ef1234567890.js');
+  const old = { telegram: { pluginUrlTemplate: 'https://x.test/?token={token}' } };
+  assert.equal(pluginUrl(old, 'mo-abc'), 'https://x.test/?token=mo-abc');
 });
 
 test('/start выдает триал новому чату и создаёт пользователя', async () => {
@@ -45,7 +52,8 @@ test('/start выдает триал новому чату и создаёт п�
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
   assert.match(reply.text, /Осталось/);
-  assert.match(reply.text, /token=\w+/);
+  assert.match(reply.text, /mo-[0-9a-f]+/);
+  assert.match(reply.text, /dorofeev200_[0-9a-f]{12}\.js/);
   assert.equal(store.users.length, 1);
   assert.equal(store.users[0].telegram_id, '222');
   assert.equal(store.users[0].active, true);
@@ -201,7 +209,8 @@ test('handleCallback get_link: возвращает ссылку существ�
   const token = store.users[0].token;
   const reply = await handleCallback({ data: 'get_link', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
-  assert.ok(reply.text.includes(`token=${token}`));
+  assert.ok(reply.text.includes(`dorofeev200_${shortId(token)}.js`));
+  assert.ok(reply.text.includes(token));
   assert.equal(store.users.length, 1);
 });
 

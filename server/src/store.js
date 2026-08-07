@@ -26,6 +26,24 @@ export async function listUsers() {
   return Array.isArray(users) ? users : [];
 }
 
+/**
+ * Поиск пользователя по суффиксу токена для короткой ссылки плагина
+ * `/<prefix>_<short>.js`, где `<short>` — последние N hex-символов полного токена.
+ * Возвращает пользователя (его полный токен заканчивается на short) либо null.
+ * Длина подаваемого суффикса < min шестн. отсекается (анти-гадалка).
+ */
+export async function findUserByShortToken(short, min = 8) {
+  const s = String(short || '').toLowerCase().trim();
+  if (!/^[0-9a-f]+$/.test(s) || s.length < min) return null;
+  const users = await listUsers();
+  return users.find((u) => {
+    const t = String(u.token || '').toLowerCase();
+    const sep = t.lastIndexOf('-');
+    const hex = sep >= 0 ? t.slice(sep + 1) : t;
+    return hex.length >= s.length && hex.endsWith(s);
+  }) || null;
+}
+
 function bearerToken(context) {
   const authorization = context.request?.headers?.authorization || '';
   const match = String(authorization).match(/^Bearer\s+(.+)$/i);

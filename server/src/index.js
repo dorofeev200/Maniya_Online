@@ -2,10 +2,10 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { config } from './config.js';
 import { HttpError, toHttpError } from './errors.js';
-import { sendJson, sendStatic } from './http.js';
+import { sendJson, sendPluginForToken, sendStatic } from './http.js';
 import { logger } from './logger.js';
 import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
-import { findUserByRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
+import { findUserByRequest, findUserByShortToken, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
 import { providerById, registeredProviders } from './providers/registry.js';
 import { buildProxyUrl, proxyMedia } from './proxy.js';
 import { createTelegramRunner } from './telegram/runner.js';
@@ -56,6 +56,16 @@ async function route(context, response) {
       service: 'maniya-online-lampa',
       uptime_ms: Date.now() - startedAt
     });
+  }
+
+  // Короткая ссылка плагина /<prefix>_<short>.js → ищем пользователя по суффиксу токена.
+  const shortLink = pathname.match(/^\/[^/]+_([0-9a-fA-F]{8,})\.js$/);
+  if (shortLink) {
+    const short = shortLink[1].toLowerCase();
+    const user = await findUserByShortToken(short);
+    if (!user) throw new HttpError(404, 'not_found', 'User not found');
+    if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
+    return sendPluginForToken(request, response, user.token);
   }
 
   if (!isApiPath(pathname)) {

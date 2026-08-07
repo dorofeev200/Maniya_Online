@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.js';
 import { corsHeaders } from './security.js';
@@ -49,4 +49,29 @@ export async function sendStatic(request, response, pathname) {
   } catch (error) {
     sendJson(request, response, 404, { error: 'not_found' });
   }
+}
+
+/**
+ * Отдать плагин для токена (короткая ссылка `/<prefix>_<short>.js`).
+ * Вшивает полный токен в window.MANIYA_ONLINE_TOKEN — пользователь вводит
+ * короткую ссылку проще длинной `?token=...`.
+ */
+export async function sendPluginForToken(request, response, token) {
+  const pluginPath = path.join(config.publicDir, 'maniya-online.js');
+  let source;
+  try {
+    source = await readFile(pluginPath, 'utf8');
+  } catch (error) {
+    return sendJson(request, response, 404, { error: 'plugin_not_found' });
+  }
+  const body = `/* Maniya Online — подпись токена сервером */\nwindow.MANIYA_ONLINE_TOKEN=${JSON.stringify(token)};\n` + source;
+  const { headers } = corsHeaders(request?.headers?.origin);
+  response.writeHead(200, {
+    ...headers,
+    'Content-Type': 'application/javascript; charset=utf-8',
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+    'Content-Length': Buffer.byteLength(body)
+  });
+  response.end(body);
 }

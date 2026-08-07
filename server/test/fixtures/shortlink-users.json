@@ -1,0 +1,16 @@
+[
+  {
+    "token": "mo-44444444444444444444444444444444",
+    "email": "",
+    "plan": "full",
+    "active": true,
+    "expires_at": null
+  },
+  {
+    "token": "mo-99999999999999999999999999999999",
+    "email": "",
+    "plan": "full",
+    "active": false,
+    "expires_at": null
+  }
+]

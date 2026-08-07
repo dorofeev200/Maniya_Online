@@ -23,11 +23,25 @@ export function daysLeft(user, now = Date.now()) {
   return diff <= 0 ? 0 : Math.ceil(diff / DAY_MS);
 }
 
+/** Короткий id из токена (последние 12 hex) для ссылки /{prefix}_{short}.js. */
+export function shortId(token) {
+  const t = String(token || '');
+  const sep = t.lastIndexOf('-');
+  const hex = sep >= 0 ? t.slice(sep + 1) : t;
+  return (hex || t).slice(-12).toLowerCase();
+}
+
 export function pluginUrl(config, token) {
+  const prefix = config?.telegram?.linkPrefix || 'dorofeev200';
   const tokenEnc = encodeURIComponent(token);
   const template = config?.telegram?.pluginUrlTemplate;
-  if (template) return String(template).replace('{token}', tokenEnc);
-  return `${config?.publicBaseUrl || ''}/maniya-online.js?token=${tokenEnc}`;
+  if (template) {
+    return String(template)
+      .replaceAll('{token}', tokenEnc)
+      .replaceAll('{short}', shortId(token))
+      .replaceAll('{prefix}', encodeURIComponent(prefix));
+  }
+  return `${config?.publicBaseUrl || ''}/${prefix}_${shortId(token)}.js`;
 }
 
 function escapeHtml(text) {
