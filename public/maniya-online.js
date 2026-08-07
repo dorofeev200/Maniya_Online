@@ -459,7 +459,17 @@
   }
 
   function addTemplates() {
-    Lampa.Template.add('maniya_css', '<style>.maniya-online-item{position:relative;border-radius:.3em;background:rgba(0,0,0,.3);padding:1.2em;margin-bottom:1em}.maniya-online-item__title{font-size:1.5em}.maniya-online-item__info{margin-top:.5em;opacity:.75}.maniya-online-item.focus::after{content:"";position:absolute;top:-.45em;left:-.45em;right:-.45em;bottom:-.45em;border:.25em solid #fff;border-radius:.6em;pointer-events:none}.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}</style>');
+    Lampa.Template.add('maniya_css', '<style>' +
+      '.maniya-online-item{position:relative;border-radius:.3em;background:rgba(0,0,0,.3);padding:1.2em;margin-bottom:1em}' +
+      '.maniya-online-item__title{font-size:1.5em}.maniya-online-item__info{margin-top:.5em;opacity:.75}' +
+      '.maniya-online-item.focus::after{content:"";position:absolute;top:-.45em;left:-.45em;right:-.45em;bottom:-.45em;border:.25em solid #fff;border-radius:.6em;pointer-events:none}' +
+      '.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}' +
+      '.maniya-online-button{position:relative;overflow:hidden;border-radius:.55em;margin-left:.7em;padding:0 1.05em;background:linear-gradient(155deg,#ffd54a 0%,#ffb300 45%,#f4511e 100%);color:#1d1d1d;font-weight:700;letter-spacing:.02em;box-shadow:0 .12em .5em rgba(0,0,0,.35),0 0 .9em rgba(255,152,0,.45);transition:transform .15s,box-shadow .15s}' +
+      '.maniya-online-button::before{content:"";position:absolute;top:-20%;left:-40%;width:35%;height:150%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);transition:left .4s ease;pointer-events:none}' +
+      '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.05);box-shadow:0 .2em .8em rgba(0,0,0,.45),0 0 1.4em rgba(255,152,0,.8)}' +
+      '.maniya-online-button.focus::before,.maniya-online-button:hover::before{left:130%}' +
+      '.maniya-online-button__m{width:1.35em;height:1.35em;margin-right:.5em;flex:0 0 auto}' +
+    '</style>');
     $('body').append(Lampa.Template.get('maniya_css', {}, true));
     Lampa.Template.add('maniya_content_loading', '<div class="online-empty"><div class="broadcast__scan"><div></div></div></div>');
     Lampa.Template.add('maniya_video_item', '<div class="maniya-online-item selector"><div class="maniya-online-item__title">{title}</div><div class="maniya-online-item__info">{info}</div></div>');
@@ -497,7 +507,15 @@
   function addButton(event) {
     if (event.render.find('.maniya-online-button').length) return;
 
-    var button = $('<div class="full-start__button selector view--online maniya-online-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="82" height="82" rx="20" stroke-width="6"></rect><path d="M38 30L70 50L38 70V30Z" fill="currentColor" stroke="none"></path></svg><span>#{title_maniya}</span></div>');
+    var button = $(
+      '<div class="full-start__button selector view--online maniya-online-button">' +
+        '<svg class="maniya-online-button__m" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">' +
+          '<circle cx="50" cy="50" r="46" stroke-width="1.5" opacity=".4"></circle>' +
+          '<path d="M22 78V22L50 52L78 22V78"></path>' +
+        '</svg>' +
+        '<span>Maniya</span>' +
+      '</div>'
+    );
     button = $(Lampa.Lang.translate(button.prop('outerHTML')));
     button.on('hover:enter', function () { openOnline(event.movie); });
     event.render.after(button);
