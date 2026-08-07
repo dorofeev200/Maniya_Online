@@ -61,6 +61,30 @@ Run remote checks with an explicit token:
 TOKEN=YOUR_REAL_TOKEN ./scripts/verify-remote.sh
 ```
 
+## Backup & restore (disaster recovery)
+
+Reproducible deploy / backup / restore (no `rsync` on the Windows side — uses tar-over-SSH):
+
+```bash
+export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=dummy:0
+printf '#!/bin/sh\necho "root_password"\n' > /tmp/askpass.sh   # recreate before each deploy
+
+# Deploy code + infra (systemd/nginx/tls). Does NOT overwrite remote server/.env or server/data.
+bash scripts/deploy.sh
+
+# Snapshot the irreplaceable VPS state (.env with tokens, data/*.json with real users)
+# into backup/snapshots/<timestamp>/ (gitignored — secrets never enter git).
+bash scripts/backup-remote.sh
+
+# Full from-scratch rebuild of a (lost) VPS: deploys code, then restores state from a snapshot.
+bash scripts/restore-vps.sh            # or: -s backup/snapshots/<timestamp>
+
+TOKEN=REAL_TOKEN bash scripts/verify-remote.sh
+```
+
+Source of truth for recovery: the local git repo (all code) + `backup/*` (live secrets/state) +
+`restore-vps.sh` (assembles both onto a fresh server). The repo also pushes to a GitHub `origin`.
+
 ## Production notes
 
 Before publishing:

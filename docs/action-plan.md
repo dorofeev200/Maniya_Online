@@ -9,34 +9,49 @@
 ссылку плагина в расширения Lampa, на iOS/Android работают балансировщики источников и играют фильмы.
 Все провайдеры из Lampac (~70) довести до 100% рабочего состояния, поочерёдно.
 
-## Как гонять тесты / деплой
+## Как гонять тесты / деплой / бэкап / восстановление
 ```bash
-cd C:/Users/Admin/Maniya_Online/server && NODE_ENV=test node --test   # юнит-тесты
-```
-Деплой: SSH root@95.85.241.121 (пароль 789zxc789; неинтерактивный вход —
-SSH_ASKPASS_REQUIRE=force с временным askpass-скриптом: `export SSH_ASKPASS=/tmp/askpass.sh
-SSH_ASKPASS_REQUIRE=force DISPLAY=dummy:0`, скрипт печатает пароль). VPS: systemd `maniya-online`
-(node 3000) + nginx 443; docker-контейнер `lampac` (9118) — эталон, не трогать. 
-`/opt/maniya-online/server/.env` — НЕ перезаписывать (там USERS_FILE и реальные пользователи);
-rsync исключает `.git`, `node_modules`, `.env`, `server/data`. Проверка: `scripts/verify-remote.sh`
-(нужен `TOKEN` реального пользователя). Локальный git — источник истины для восстановления с нуля.
+# юнит-тесты
+cd C:/Users/Admin/Maniya_Online/server && NODE_ENV=test node --test
 
-## ⏸ Точка остановки (2026-08-07, после второй сессии)
-- **WAVE RUTUBE ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (включая деплой на VPS):**
-  - Локально зелёный: 122 теста / 121 pass + 1 skip.
-  - Деплой на VPS через tar-over-SSH (rsync недоступен на Windows-стороне):
-    архив `tar czf --exclude .git --exclude server/.env --exclude server/data --exclude node_modules`,
-    распаковка в `/opt/maniya-online`, `systemctl restart maniya-online`. `.env` и `data/users.json`
-    сохранены (проверено). Волна аддитивная, `--delete` не нужен.
-  - `verify-remote.sh` — 5/5 зелёный (health, plugin 200, subscription active, nginx ok, systemd active).
-  - Live-проверка Rutube через публичный HTTPS: `sources` содержит `rutubemovie:true`, `videos`
-    (provider=rutubemovie, title=Интерстеллар, year=2014) вернул играбельный item (quality auto, через прокси).
-  - Правка `scripts/verify-remote.sh`: шаг "Plugin file" переведён с HEAD (сервер даёт 405 —
-    index.js разрешает только GET) на GET + `-w` статус.
-- Закоммичено: `2b9c5ee` (точка остановки) + текущий коммит этого волна.
-- **Следующая волна: CDNvideohub** (Tier 1, чистый HTTP: `{host}/api/v1/player/sv/...`, hlsUrl).
-  См. статусы ниже.
-- Деплой: `/tmp/askpass.sh` создавать заново при каждом деплое (URI-скрипт, пароль 789zxc789).
+# <-- Инфраструктура SSH (Windows-сторона, без rsync):
+export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=dummy:0
+printf '#!/bin/sh\necho "789zxc789"\n' > /tmp/askpass.sh   # пересоздать перед деплоем
+
+# Деплой кода + инфраструктуры (tar-over-SSH; .env/data НЕ трогает):
+bash scripts/deploy.sh
+# Проверка деплоя (нужен TOKEN реального пользователя):
+TOKEN=<...> bash scripts/verify-remote.sh
+
+# РЕЗЕРВ: снимок незаменимого состояния VPS (server/.env, data/*.json) → backup/snapshots/<stamp>/
+bash scripts/backup-remote.sh
+# ПОЛНОЕ ВОССТАНОВЛЕНИЕ VPS с нуля из свежего снимка:
+bash scripts/restore-vps.sh            # или -s backup/snapshots/<stamp>
+```
+Деплой через tar-over-ssh (`tar czf --exclude=.git --exclude=server/.env --exclude=server/data
+--exclude=node_modules --exclude=backup .`), т.к. rsync на Windows-стороне отсутствует. VPS:
+systemd `maniya-online` (node 3000) + nginx 443; docker-контейнер `lampac` (9118) — эталон, не трогать.
+`/opt/maniya-online/server/.env` — НЕ перезаписывать (там USERS_FILE/VIDEOS_FILE/KODIK_TOKEN);
+`server/data/*.json` — реальные пользователи, НЕ коммитить (gitignore) и не затирать деплоем.
+`backup/` — gitignored-бэкап секретов (не попадает в git). Восстановление с нуля: локальный git
+(код) + `backup/*` (состояние) + `restore-vps.sh` (сборка всего на новый VPS). Remote на GitHub:
+origin → код продублирован.
+
+## ⏸ Точка остановки (2026-08-07, сессия 3: durability + волна Rutube закрыта)
+- **WAVE RUTUBE ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (деплой VPS + верификация):** локально 122 теста / 121 pass + 1 skip;
+  деплой tar-over-SSH в `/opt/maniya-online` (`.env` и `data/users.json` сохранены); `verify-remote.sh` 5/5;
+  live Rutube через HTTPS: sources `rutubemovie:true`, videos (Интерстеллар 2014) → играбельный item quality auto.
+- **DURABILITY ✅:** `deploy.sh` починен (tar вместо rsync, `.env` не перезаписывает — heredoc только при отсутствии;
+  фикс `<<'NGINX'` для `$host`); добавлены `backup-remote.sh` (снимок `.env`+`data` → `backup/snapshots/`, gitignored)
+  и `restore-vps.sh` (полное восстановление с нуля: deploy + возврат состояния из снимка). Оба прогнаны на живом VPS:
+  restore прошёл [1/3..3/3], health active. `verify-remote.sh` шаг Plugin переведён на GET (сервер 405 на не-GET).
+  Первый снимок: `backup/snapshots/20260807-184437` (`.env` с KODIK_TOKEN ✓, `users.json` с токеном ✓).
+  Код запушен на GitHub origin (см. git).
+- **Kodik live (не регрессия):** токен валиден (API 200), поиск через сервер отдаёт до 100 записей. Живая
+  расшифровка потоков требует `secret_token` (HMAC video-links) — это уже Tier-2 «Kodik secret_token — HMAC»,
+  до неё Kodik в live отдаёт поисковые карточки (фолбэк в store.js). Код/токен не менялись.
+- **Следующая волна: CDNvideohub** (Tier 1, чистый HTTP: `{host}/api/v1/player/sv/...`, hlsUrl). См. статусы ниже.
+- `/tmp/askpass.sh` создавать заново при каждом деплое.
 
 ## Статус готовности
 
