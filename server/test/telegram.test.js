@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { handleCommand, isUserActive, makeToken, pluginUrl } from '../src/telegram/bot.js';
+import { daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, pluginUrl } from '../src/telegram/bot.js';
 import { TelegramBotClient } from '../src/telegram/BotClient.js';
 import { createTelegramRunner } from '../src/telegram/runner.js';
 
@@ -11,7 +11,8 @@ const cfg = {
     admins: ['111'],
     trialDays: 3,
     trialPlan: 'trial',
-    pluginUrlTemplate: 'https://plugin.maniya-kvn.online/maniya-online.js?token={token}'
+    pluginUrlTemplate: 'https://plugin.maniya-kvn.online/maniya-online.js?token={token}',
+    adminContact: 'https://t.me/admin'
   }
 };
 const NOW = 1_700_000_000_000;
@@ -42,7 +43,8 @@ test('pluginUrl: подставляет {token} в шаблон', () => {
 test('/start выдает триал новому чату и создаёт пользователя', async () => {
   const store = memStore();
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
-  assert.match(reply.text, /Триал‑подписка выдана/);
+  assert.match(reply.text, /MANIYA ONLINE/);
+  assert.match(reply.text, /Осталось/);
   assert.match(reply.text, /token=\w+/);
   assert.equal(store.users.length, 1);
   assert.equal(store.users[0].telegram_id, '222');
@@ -167,4 +169,43 @@ test('isUserActive: null expires → бессрочно; протухший fals
   assert.equal(isUserActive({ active: true, expires_at: null }, NOW), true);
   assert.equal(isUserActive({ active: true, expires_at: new Date(NOW - 1).toISOString() }, NOW), false);
   assert.equal(isUserActive(null, NOW), false);
+});
+
+test('daysLeft: полные дни до окончания; протухший 0; бессрочный Infinity', () => {
+  assert.equal(daysLeft({ active: true, expires_at: new Date(NOW + 3 * 24 * 3600 * 1000).toISOString() }, NOW), 3);
+  assert.equal(daysLeft({ active: true, expires_at: new Date(NOW + 1000 + 24 * 3600 * 1000).toISOString() }, NOW), 2);
+  assert.equal(daysLeft({ active: true, expires_at: new Date(NOW - 1).toISOString() }, NOW), 0);
+  assert.equal(daysLeft({ active: true, expires_at: null }, NOW), Infinity);
+  assert.equal(daysLeft(null, NOW), 0);
+});
+
+test('inlineKeyboard: кнопки Получить ссылку и Связь с админом; без контакта одна кнопка', () => {
+  const kb = inlineKeyboard(cfg);
+  assert.deepEqual(kb.inline_keyboard[0].map((b) => b.text), ['🎬 Получить ссылку', '📩 Связь с админом']);
+  assert.ok(kb.inline_keyboard[0].find((b) => b.url === 'https://t.me/admin'));
+  const noContact = inlineKeyboard({ telegram: {} });
+  assert.deepEqual(noContact.inline_keyboard[0].map((b) => b.text), ['🎬 Получить ссылку']);
+});
+
+test('/start: баннер-бренд MANIYA ONLINE, остаток дней и inline-кнопки', async () => {
+  const store = memStore();
+  const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(reply.text, /MANIYA ONLINE/);
+  assert.match(reply.text, /Осталось <b>3 дн\.<\/b>/);
+  assert.ok(reply.replyMarkup.inline_keyboard[0].some((b) => b.callback_data === 'get_link'));
+});
+
+test('handleCallback get_link: возвращает ссылку существующего пользователя', async () => {
+  const store = memStore();
+  await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  const token = store.users[0].token;
+  const reply = await handleCallback({ data: 'get_link', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(reply.text, /MANIYA ONLINE/);
+  assert.ok(reply.text.includes(`token=${token}`));
+  assert.equal(store.users.length, 1);
+});
+
+test('handleCallback неизвестный data → null (только ack)', async () => {
+  const reply = await handleCallback({ data: 'something_else', chatId: 222, config: cfg, getUsers: () => Promise.resolve([]), setUsers: () => Promise.resolve() });
+  assert.equal(reply, null);
 });

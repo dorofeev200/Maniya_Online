@@ -81,6 +81,10 @@ export const config = {
     admins: list('TELEGRAM_ADMINS', []),
     // Ссылка плагина с подстановкой {token} (пользователь добавляет в Lampa).
     pluginUrlTemplate: (process.env.TELEGRAM_PLUGIN_URL || '').trim(),
+    // Баннер в шапке сообщений (бренд). По умолчанию — Maniya Online.
+    bannerText: (process.env.TELEGRAM_BANNER || '').trim(),
+    // URL/контакт админа для inline-кнопки «Связь с админом». Пусто → кнопки нет.
+    adminContact: (process.env.TELEGRAM_ADMIN_CONTACT || '').trim(),
     maxTrialChats: integer('TELEGRAM_MAX_TRIAL_CHATS', 0)
   },
   filmix: {

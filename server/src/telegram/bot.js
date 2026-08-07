@@ -15,15 +15,19 @@ export function isUserActive(user, now = Date.now()) {
   return new Date(user.expires_at).getTime() > now;
 }
 
-function expiresLabel(user) {
-  if (!user.expires_at) return '∞ без срока';
-  return new Date(user.expires_at).toISOString();
+/** Сколько полных дней осталось до конца (0 = уже нет; Infinity = бессрочно). */
+export function daysLeft(user, now = Date.now()) {
+  if (!user || !user.active) return 0;
+  if (!user.expires_at) return Infinity;
+  const diff = new Date(user.expires_at).getTime() - now;
+  return diff <= 0 ? 0 : Math.ceil(diff / DAY_MS);
 }
 
 export function pluginUrl(config, token) {
+  const tokenEnc = encodeURIComponent(token);
   const template = config?.telegram?.pluginUrlTemplate;
-  if (template) return String(template).replace('{token}', encodeURIComponent(token));
-  return `${config?.publicBaseUrl || ''}/maniya-online.js?token=${encodeURIComponent(token)}`;
+  if (template) return String(template).replace('{token}', tokenEnc);
+  return `${config?.publicBaseUrl || ''}/maniya-online.js?token=${tokenEnc}`;
 }
 
 function escapeHtml(text) {
@@ -32,36 +36,74 @@ function escapeHtml(text) {
   })[ch]);
 }
 
-function linkReply(config, user, isNew, now = Date.now()) {
+/** Баннер-бренд (конфигурируется через TELEGRAM_BANNER). */
+export function bannerText(config) {
+  return (config?.telegram?.bannerText || '🎬 MANIYA ONLINE — ваш кино‑плагин для Lampa 🎬').trim();
+}
+
+/** Приветствие при входе с указанием остатка подписки. */
+export function welcomeLine(user, now, isNew) {
+  if (isNew) return '👋 Привет! Добро пожаловать в <b>Maniya Online</b>.';
+  return isUserActive(user, now) ? '✅ Ваша подписка активна.' : '🔴 Подписка отключена.';
+}
+
+function solutionLine() {
+  return '⚙️ Решение проблем: при проблемах — очистите кеш в Lampa\n' +
+    '(<code>Настройки → Кеш и данные → Только кеш</code>).';
+}
+
+/** Inline-клавиатура: [🎬 Получить ссылку] и [📩 Связь с админом] (если задан контакт). */
+export function inlineKeyboard(config, { getLink = true } = {}) {
+  const row = [];
+  if (getLink) row.push({ text: '🎬 Получить ссылку', callback_data: 'get_link' });
+  const contact = config?.telegram?.adminContact;
+  if (contact) row.push({ text: '📩 Связь с админом', url: contact });
+  return row.length ? { inline_keyboard: [row] } : null;
+}
+
+/** Главный ответ: приветствие + оставшиеся дни + ссылка для Lampa + кнопки. */
+function linkReply(config, user, isNew, now) {
   if (!user) return { text: '—' };
   const url = pluginUrl(config, user.token);
-  const header = isNew
-    ? '🎉 Триал‑подписка выдана!\n'
-    : `Ваша подписка ${isUserActive(user, now) ? 'активна' : 'отключена'}.\n`;
-  return {
-    text: `${header}` +
-      `Ссылка плагина для Lampa (добавьте как кастом‑плагин):\n\n` +
-      `<code>${escapeHtml(url)}</code>\n\n` +
-      `Токен: <code>${escapeHtml(user.token)}</code>\n` +
-      `Статус: /status · Помощь: /help`
-  };
+  const text =
+    `${bannerText(config)}\n\n` +
+    `${welcomeLine(user, now, isNew)}\n\n` +
+    `✅ Осталось <b>${daysText(user, now)}</b> до окончания подписки\n\n` +
+    `🔗 Ваша ссылка для Lampa:\n` +
+    `<code>${escapeHtml(url)}</code>\n\n` +
+    `🔑 Токен: <code>${escapeHtml(user.token)}</code>\n\n` +
+    `${solutionLine()}`;
+  return { text, replyMarkup: inlineKeyboard(config) };
+}
+
+function daysText(user, now) {
+  const d = isUserActive(user, now) ? daysLeft(user, now) : 0;
+  return d === Infinity ? '∞ (без срока)' : `${d} дн.`;
 }
 
 function statusText(config, user, now) {
-  if (!user) return { text: 'У вас ещё нет подписки. Отправьте /start для бесплатного триала.' };
+  if (!user) {
+    return { text: '🔑 У вас ещё нет подписки.\n\nОтправьте <b>/start</b> чтобы получить бесплатный триал.', replyMarkup: inlineKeyboard(config) };
+  }
   const active = isUserActive(user, now);
-  return {
-    text: `Токен: <code>${escapeHtml(user.token)}</code>\n` +
-      `Статус: ${active ? '🟢 активна' : '🔴 не активна'}\n` +
-      `План: ${escapeHtml(user.plan || '—')}\n` +
-      `Действует до: ${escapeHtml(expiresLabel(user))}`
-  };
+  const text = `${bannerText(config)}\n\n` +
+    `🆔 Токен: <code>${escapeHtml(user.token)}</code>\n` +
+    `Статус: ${active ? '🟢 активна' : '🔴 не активна'}\n` +
+    `План: ${escapeHtml(user.plan || '—')}\n` +
+    `✅ Осталось: ${active ? daysText(user, now) : '0'}\n` +
+    `Действует до: ${escapeHtml(expiresLabel(user))}`;
+  return { text, replyMarkup: inlineKeyboard(config) };
+}
+
+function expiresLabel(user) {
+  if (user.expires_at == null) return '∞ (без срока)';
+  return new Date(user.expires_at).toISOString();
 }
 
 function helpReply(config) {
   const lines = [
     'Доступные команды:',
-    '/start — получить триал‑подписку и ссылку плагина',
+    '/start — получить ссылку и статус подписки',
     '/status — статус вашей подписки',
     '/help — справка'
   ];
@@ -151,4 +193,15 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
     default:
       return { text: 'Неизвестная команда. Справка: /help' };
   }
+}
+
+/**
+ * Обработать inline-callback (кнопка). `value` — callback_data/url.
+ * @returns {Promise<{text?: string, replyMarkup?: object} | null>} null = только ack
+ */
+export async function handleCallback({ data, chatId, config, getUsers = listUsers, setUsers = writeUsers, now = Date.now() }) {
+  if (data === 'get_link') {
+    return handleCommand({ text: '/start', chatId, config, getUsers, setUsers, now });
+  }
+  return null;
 }
