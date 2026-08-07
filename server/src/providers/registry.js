@@ -6,6 +6,7 @@ import { KodikProvider } from './kodik/KodikProvider.js';
 import { RezkaProvider } from './rezka/RezkaProvider.js';
 import { RutubeProvider } from './rutube/RutubeProvider.js';
 import { CollapsProvider } from './collaps/CollapsProvider.js';
+import { HDVBProvider } from './hdvb/HDVBProvider.js';
 
 const providers = [
   new FilmixProvider({ token: config.filmix.token }),
@@ -45,6 +46,13 @@ const providers = [
     apihost: config.collaps.apihost,
     embedHost: config.collaps.embedHost,
     token: config.collaps.token
+  }),
+  new HDVBProvider({
+    enabled: config.hdvb.enabled,
+    apihost: config.hdvb.apihost,
+    frameHost: config.hdvb.frameHost,
+    referer: config.hdvb.referer,
+    token: config.hdvb.token
   })
 ];
 

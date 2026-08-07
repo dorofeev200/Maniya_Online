@@ -37,6 +37,23 @@ systemd `maniya-online` (node 3000) + nginx 443; docker-контейнер `lamp
 (код) + `backup/*` (состояние) + `restore-vps.sh` (сборка всего на новый VPS). Remote на GitHub:
 origin → код продублирован.
 
+## ⏸ Точка остановки (2026-08-07, сессия 6: волна HDVB ЗАКРЫТА; ПАУЗА по провайдерам)
+- **WAVE HDVB ✅ ЗАВЕРШЁН ПОЛНОСТЬЮ (код+тесты+деплой+live):** клиент (`videos.json` + iframe GET + POST playlist
+  с csrf), нормализатор (search/record/extractEmbed/cleanFile/parsePlaylistResponse/episodeFile), провайдер
+  (videos → фильм один item / сериал по сезонам×озвучкам×сериям, streams). Registry+config+`.env.example`+proxy
+  allowHosts (`sevstar933krop.com`,`entouaedon.com`).
+  Ключевое решение: еслиrame ходит на `frameHost = entouaedon.com` (не sevstar-нода из API) с referer movielab.one;
+  подписанная m3u8 привязана к IP POST-запроса → прокси обязателен, сегменты без заголовков.
+  Локально **166 тестов / 165 pass + 1 skip, 0 fail**. Live локально: фильм «Дюна» 1 item (voice), сериал «Шерлок»
+  4 сезона / 14 озвучек. Деплой VPS ✓ (tar+systemd+nginx), `HDVB_TOKEN` добавлен в server/.env, service active,
+  `/sources` включает `hdvb`, videos(movie Дюна) → real proxied m3u8, proxy отдаёт master и переписывает все
+  внутренние плейлисты/сегменты через `/api/lampa/proxy` (IP-привязка совпадает). Следующая волна: **Kinotochka**.
+- **▶ НАПРАВЛЕНИЕ ДАЛЬШЕ (по плану пользователя, сессия 6):** провайдеры на ПАУЗУ (новые не добавляем пока).
+  Фокус — **настройка проекта целиком и интеграционный тест уже добавленных источников**
+  (Filmix, Kodik, Rezka, Rutube, CDNvideohub, Collaps, HDVB, Alloha-код): подключить/довести до финального
+  рабочего результата, проверить что всё играет в Lampa с теми источниками, что уже есть, потом вернуться
+  к остальным провайдерам.
+
 ## ⏸ Точка остановки (2026-08-07, сессия 5: волна Collaps ЗАКРЫТА)
 - **WAVE COLLAPS ✅ ЗАВЕРШЁН (код+тесты+live, деплой см. ниже):** клиент (`/list` поиск + embed-страница),
   нормализатор (чистый DTO: search → записи, parseEmbed → movie-source / seasons-блок; слайсер parseJsObject —
@@ -89,7 +106,7 @@ origin → код продублирован.
 - [x] RutubeMovie — JSON API rutube, простой HLS/MP4; ✅ live (VPS, verify 5/5 + live-videos)
 - [x] CDNvideohub — JSON API (`{host}/api/v1/player/sv/...`), hlsUrl; ✅ реализован (клиент+нормализатор+провайдер, kp-only), 13 тестов, live: search(Интерстеллар 462682)→movie, videos→1 play-item (Неизвестный) через прокси
 - [x] Collaps — HTML+JSON, зашитый токен; ✅ реализован (клиент+нормализатор+провайдер), 15 тестов, live локально (токен Lampac); VPS live после `COLLAPS_TOKEN`
-- [ ] HDVB — JSON+POST playlist (csrf), зашитый токен
+- [x] HDVB — JSON+POST playlist (csrf), зашитый токен; ✅ live (VPS): sources включает hdvb, movie+serial играют через прокси
 - [ ] Kinotochka — JSON+HTML, plain
 - [ ] LeProduction — HTML iframe `[Qp]url`
 - [ ] VideoDB — HTML+base64 player config → HLS

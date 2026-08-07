@@ -127,8 +127,20 @@ export const config = {
     // выносим в config. Задать COLLAPS_TOKEN (иначе enabled()=false).
     token: (process.env.COLLAPS_TOKEN || '').trim()
   },
+  // HDVB — JSON API + POST playlist с csrf (как Lampac OnlineRUS/HDVB).
+  hdvb: {
+    enabled: bool('HDVB_ENABLED', true),
+    apihost: (process.env.HDVB_API_HOST || 'https://apivb.com').replace(/\/+$/, ''),
+    // Stream/frame-хост (init.host Lampac). Нода отвечает на /movie|/serial/{token}/iframe
+    // только с referer movielab.one (расшифровка `encrypt:kwwsv=22prylhode1rqh2`).
+    frameHost: (process.env.HDVB_FRAME_HOST || 'https://vid1733431681.entouaedon.com').replace(/\/+$/, ''),
+    referer: (process.env.HDVB_REFERER || 'https://movielab.one').replace(/\/+$/, '') + '/',
+    // Публичный токен зашит в Lampac = поведенческий реф, но по соглашению
+    // выносим в config. Задать HDVB_TOKEN (иначе enabled()=false).
+    token: (process.env.HDVB_TOKEN || '').trim()
+  },
   proxy: {
-    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com']),
+    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com', 'sevstar933krop.com', 'entouaedon.com']),
     timeoutMs: integer('PROXY_TIMEOUT_MS', 15_000),
     maxRedirects: integer('PROXY_MAX_REDIRECTS', 4)
   }
