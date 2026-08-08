@@ -23,6 +23,12 @@ class FakeEoClient {
 
   async getLite(params) {
     this.calls.push(['getLite', params]);
+    if (params && params.href) {
+      for (const [needle, html] of Object.entries(this.pages)) {
+        if (String(params.href).includes(needle)) return html;
+      }
+      return this.pages.fallback || null;
+    }
     return this.lite;
   }
 
@@ -151,6 +157,45 @@ test('serial: поиск URL по выбранному сезону из query',
   assert.ok(opened[1].includes('s=2'), `season URL: ${opened[1]}`);
   assert.ok(result.items.length >= 1);
   assert.equal(result.items[0].episode, 1);
+});
+
+test('movie: primary только похожие link-карточки → follow href → call-карточки фильма', async () => {
+  // Живой случай (rezka «Интерстеллар»): на primary-странице только
+  // {"method":"link","similar":true,"href":"films/fiction/2259-..."},
+  // повторный запрос с `href` отдаёт страницу с call-карточками.
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","similar":true,"href":"films/fiction/2259-interstellar-2014.html"}\'>Интерстеллар</div>',
+    '<div class="videos__item" data-json=\'{"method":"link","similar":true,"href":"films/fiction/777-other-2014.html"}\'>Другое</div>'
+  ].join('');
+  const filmHtml = [
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/movie.m3u8?play=true","url":"http://h/x","translate":"Дубляж"}\'>Дубляж</div>',
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/movie2.m3u8?play=true","url":"http://h/y","translate":"Оригінал"}\'>Оригінал</div>'
+  ].join('');
+
+  const client = new FakeEoClient({ lite: similarHtml, pages: { 'films/fiction/2259': filmHtml } });
+  const provider = makeProvider(client, 'rezka');
+
+  const result = await provider.videos(context({ title: 'Интерстеллар', original_title: 'Interstellar', year: '2014', serial: '0' }));
+
+  const followed = client.calls.find(([name, p]) => name === 'getLite' && p && p.href);
+  assert.ok(followed, 'должен быть повторный getLite с href');
+  assert.ok(String(followed[1].href).includes('interstellar'), `href выбран по релевантности: ${followed[1].href}`);
+  assert.ok(result.items.length >= 2, `items с call-карточек фильма: ${result.items.length}`);
+  assert.ok(result.items.every((item) => item.method === 'play'));
+});
+
+test('movie: сразу play-карточки — follow НЕ вызывается', async () => {
+  const playHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v.m3u8","quality":{"1080p":"http://h/1080.m3u8"},"title":"Х"}\'>Дубляж</div>'
+  ].join('');
+  const client = new FakeEoClient({ lite: playHtml });
+  const provider = makeProvider(client, 'filmix');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  const followed = client.calls.filter(([name, p]) => name === 'getLite' && p && p.href);
+  assert.equal(followed.length, 0, 'нет повторного запроса с href');
+  assert.ok(result.items.length >= 1);
 });
 
 test('поиск без id/imdb — пусто', async () => {

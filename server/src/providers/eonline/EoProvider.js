@@ -114,11 +114,31 @@ export class EoProvider extends Provider {
 
   /**
    * Фильм: page с карточками `play`/`call` → играбельные items.
+   * Если на primary-странице только похожие карточки `method:"link"` (без
+   * href): повторный запрос с `href` из этой карточки возвращает страницу
+   * фильма с call-карточками (напр. rezka на «Интерстеллар»).
    */
   async movieVideos(query, requestContext, streamProxy) {
-    const html = await this.client.getLite(this.buildPageParams(query));
+    const pageParams = this.buildPageParams(query);
+    const html = await this.client.getLite(pageParams);
     if (!html) return { items: [], seasons: [], voices: [] };
 
+    const items = await this.movieItemsFromHtml(html, requestContext, streamProxy);
+    if (items.length) return { items, seasons: [], voices: [] };
+
+    // Fallback: перейти по похожей карточке (rezka-страница тайтла).
+    const href = this.movieHref(this.normalizer.cards(html), query);
+    if (!href) return { items: [], seasons: [], voices: [] };
+
+    const pageHtml = await this.client.getLite({ ...pageParams, href });
+    if (!pageHtml) return { items: [], seasons: [], voices: [] };
+
+    const followed = await this.movieItemsFromHtml(pageHtml, requestContext, streamProxy);
+    return { items: followed, seasons: [], voices: [] };
+  }
+
+  /** Играбельные items из HTML фильма (play/call карточки без s/e). */
+  async movieItemsFromHtml(html, requestContext, streamProxy) {
     const cards = this.normalizer.cards(html);
     const items = [];
 
@@ -149,7 +169,38 @@ export class EoProvider extends Provider {
       }
     }
 
-    return { items, seasons: [], voices: [] };
+    return items;
+  }
+
+  /**
+   * Хоум-страница фильма: самая релевантная `method:"link"` карточка
+   * (href на детальную страницу тайтла). Скор по совпадению с запросом —
+   * title/оригинальное название/год. Релевантные ссылки-похожести идут
+   * первыми, одиночный одинаковый href не тяну дважды.
+   */
+  movieHref(cards, query = {}) {
+    const searched = new Set();
+    const needle = searchNeedle(query);
+    let best = null;
+    let bestScore = -1;
+
+    for (const card of cards || []) {
+      if (card.method !== 'link' && !card.method) continue;
+      const href = String(card.href || card.url || '').trim();
+      if (!href) continue;
+      if (searched.has(href)) continue;
+      searched.add(href);
+
+      let score = 0;
+      for (const token of needle) {
+        if (token && href.toLowerCase().includes(token)) score += 1;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = href;
+      }
+    }
+    return best;
   }
 
   /**
@@ -334,6 +385,33 @@ function setParam(url, key, value) {
   } catch {
     return url;
   }
+}
+
+/**
+ * Токены для скоринга link-карточки фильма: кино-ключи и слаг названия.
+ * Релевантство по совпадению в href (rezka: `2259-interstellar-2014`).
+ */
+function searchNeedle(query = {}) {
+  const tokens = [];
+  for (const key of ['kinopoisk_id', 'imdb_id', 'tmdb_id']) {
+    const value = String(query[key] || '').trim();
+    if (value) tokens.push(value.toLowerCase());
+  }
+  const original = String(query.original_title || query.title || '').trim();
+  if (original) {
+    tokens.push(slugify(original));
+    tokens.push(slugify(original).replace(/-?\d+$/, ''));
+  }
+  const year = String(query.year || '').trim();
+  if (year && original) tokens.push(year);
+  return tokens.filter(Boolean);
+}
+
+function slugify(text) {
+  return String(text).toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 export default EoProvider;
