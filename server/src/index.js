@@ -80,7 +80,8 @@ async function route(context, response) {
     await requireSubscription(context);
     return proxyMedia(context.query.url, request, response, {
       makeProxyUrl: (target) => buildProxyUrl(context, target),
-      referer: context.query.ref || null
+      referer: context.query.ref || null,
+      origin: context.query.origin || null
     });
   }
 
@@ -105,7 +106,7 @@ async function route(context, response) {
     const sources = [
       ...providers.map((provider) => ({
         id: provider.id,
-        name: provider.title || provider.id,
+        name: withBrand(provider.title || provider.id),
         url: videosUrl(context, provider.id),
         show: provider.show !== false
       }))
@@ -137,6 +138,15 @@ async function route(context, response) {
   }
 
   throw new HttpError(404, 'not_found', 'Not found');
+}
+
+/**
+ * Единый бренд источника: «Maniya · <name>». Уже имеющий префикс (напр. из
+ * EO_TITLES) не трогаем — не задваиваем «Maniya · Maniya · …».
+ */
+function withBrand(name) {
+  const clean = String(name || '').trim();
+  return /^Maniya\s*[·|–—:]?\s?/i.test(clean) ? clean : `Maniya · ${clean}`;
 }
 
 export const server = http.createServer((request, response) => {

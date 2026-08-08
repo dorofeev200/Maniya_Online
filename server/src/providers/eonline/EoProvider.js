@@ -276,7 +276,13 @@ export class EoProvider extends Provider {
     if (!this.enabled()) return { items: [], seasons: [], voices: [] };
 
     try {
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      // E-Online-стримы идут через наш прокси; CDN (skaz/voidboost) требует
+      // Origin/Referer на манифесте И на сегментах — отдаём их в URL прокси,
+      // откуда index.js пробрасывает их заголовками upstream.
+      const streamProxy = (url) => buildProxyUrl(requestContext, url, {
+        origin: this.client.origin,
+        ref: this.client.origin
+      });
       return this.serialQuery(query)
         ? await this.serialVideos(query, requestContext, streamProxy)
         : await this.movieVideos(query, requestContext, streamProxy);

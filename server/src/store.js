@@ -87,15 +87,19 @@ export async function getVideosForRequest(context) {
   // Один провайдер с расширенным контрактом videos() — отдаём payload
   // с играбельными items и фильтрами сезонов/озвучек.
   if (providers.length === 1 && videoProviders.length === 1) {
-    const primary = await payloadOrNull(videoProviders[0], context);
-    if (primary?.items?.length) {
-      return { items: primary.items, seasons: primary.seasons || [], voices: primary.voices || [] };
-    }
-    // Источник пуст (напр. native «Rezka» не нашёл тайтл) — прозрачно пробуем
-    // его скрытый E-Online близнец (тот же id). Пользователь видит один источник.
+    const primaryProvider = videoProviders[0];
     const twin = selected ? await twinForPayload(selected, context) : null;
-    if (twin?.items?.length) {
-      return { items: twin.items, seasons: twin.seasons || [], voices: twin.voices || [] };
+
+    // Сначала E-Online близнец: у него мультика-качество и озвучки
+    // (2160/1440/1080/720/480), как в самом E-Online. Native — фолбэк:
+    // если близнец не дал items (источник слабее/нет тайтла), отдаём native.
+    const chosen = (twin?.items?.length)
+      ? twin
+      : (await payloadOrNull(primaryProvider, context))
+        || twin
+        || null;
+    if (chosen?.items?.length) {
+      return { items: chosen.items, seasons: chosen.seasons || [], voices: chosen.voices || [] };
     }
   } else if (videoProviders.length > 0) {
     // Несколько провайдеров (или источник без videos()): склеиваем играбельные

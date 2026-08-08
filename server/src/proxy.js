@@ -153,7 +153,8 @@ export async function proxyMedia(targetUrl, request, response, options = {}) {
     maxRedirects = config.proxy.maxRedirects,
     allowHosts = config.proxy.allowHosts,
     httpAllowHosts = config.proxy.httpAllowHosts,
-    referer = request?.headers?.referer || null
+    referer = request?.headers?.referer || null,
+    origin = null
   } = options;
 
   let current = validateProxyTarget(targetUrl, allowHosts, httpAllowHosts);
@@ -164,6 +165,7 @@ export async function proxyMedia(targetUrl, request, response, options = {}) {
     const headers = { 'User-Agent': defaultUserAgent(), 'Accept': '*/*' };
     if (range) headers.Range = range;
     if (referer) headers.Referer = referer;
+    if (origin) headers.Origin = origin;
 
     const upstream = await requestOnce(current, headers, timeoutMs);
     const status = upstream.statusCode || 502;
@@ -228,12 +230,20 @@ function corsStreamHeaders(contentType) {
  * сегменты манифестов, которые запрашивает нативный плеер (без Authorization
  * заголовка), тоже проходили проверку подписки.
  */
-export function buildProxyUrl(context, targetUrl) {
+export function buildProxyUrl(context, targetUrl, extra = {}) {
   const { query, request } = context || {};
   const url = new URL('/api/lampa/proxy', config.publicBaseUrl);
   url.searchParams.set('url', String(targetUrl));
   const token = tokenFromRequest(query, request);
   if (token) url.searchParams.set('token', token);
+  // Пробрасываем сервисные параметры перезаписанным сегментам/плейлистам,
+  // чтобы CDN-запросы (сегменты HLS) шли с теми же заголовками, что и манифест:
+  // `origin` (E-Online требует Origin: http://lampa.mx) и `ref` (Referer).
+  // Приоритет: явные extra (например от провайдера) → значения из нашего query.
+  for (const key of ['origin', 'ref']) {
+    const value = String(extra[key] || query?.[key] || '').trim();
+    if (value && !url.searchParams.has(key)) url.searchParams.set(key, value);
+  }
   return url.toString();
 }
 
