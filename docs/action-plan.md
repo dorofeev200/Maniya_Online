@@ -54,18 +54,17 @@ origin → код продублирован.
   Полный сьют: **229 pass / 2 skip / 0 fail** (skip = live-гейты). Исправлен реальный баг провайдера:
   `seasonLinkHref` возвращал `fallback||url`, где fallback — ранняя карточка перевода → сезон терялся;
   теперь точное совпадение сезона отдаёт свой URL.
-- **Live-матрица (`test/eolive.test.js`, гейт `EO_LIVE=1`) — ФИНАЛЬНЫЙ ПРОГОН (после OpenResty):**
-  - ✅ **5 фильм-источников OK**: `filmix, videoseed, kinoflix, pidtor, solntse` — lite 200, items,
-    поток резолвится, 200, играемый — `isPlayable()` (HLS-тело или медиа-тип).
-  - ✅ rezka `serial=ep1` — сериалы s1e1 решаются до voidboost-HLS, 200 — **стрим-контур жив
-    после OpenResty-миграции**; формат `data-json` карточек генерит приложение, гейт его не трогает.
-  - ⚠️ hdvb/alloha/geosaitebi `lite=200 movie=NO-ITEMS` — по «Интерстеллар» контента нет
-    (каталожное покрытие, не поломка). veoveo — `fetch failed` (сетевой обрыв; на VPS повторить).
-  - ⚠️ kinoteatrkg/rutubemovie/vkmovie/aniliberty `lite=503` — «disable» под этот аккаунт.
-- **Дефолт пересобран под live-зелёные**: `EO_BALANCERS=filmix,rezka,videoseed,kinoflix,pidtor,solntse`
-  (config.js + корневой `.env.example`). Остальные остаются доступными через `EO_BALANCERS`.
-- **Следующее:** деплой в `backup` → на VPS перепроверить eonline-источники с реальными токенами
-  (сеть стабильнее — ждём не меньше 5 фильм-OK + rezka ep). Аккаунт — только в `server/.env` (не git).
+- **Live-матрица — МНОГОТАЙТЛОВАЯ (2026-08-08, 3 фильма/баланс: Интерстеллар/Матрица/Тёмный рыцарь):**
+  - ✅ **Alloha — 100% (3/3)** после фикса: call-карточки фильма резолвились через НЕСУЩЕСТВУЮЩИЙ
+    `resolveCardStream` → всё уходило в catch → NO-ITEMS. Метод добавлен (EoProvider.js): каждая
+    call-карточка (8 голосов) резолвится `stream` → финальный voidboost-HLS. Мок-тесты +2 (23 eonline).
+  - ✅ 3/3: `videoseed, veoveo, pidtor, solntse`; 2/3: `filmix` (Тёмный рыцарь НЕТ — «один фильм
+    играет, другой нет»), `kinoflix`, `rezka` (+сериалы ep1). filmixtv — 403-гейт в этом прогоне.
+  - ✅ **Дедупликация источников** (реестр): eonline-балансер НЕ генерится, если уже есть включённый
+    native-провайдер с тем же id (filmix/rezka/hdvb/rutubemovie) → «Rezka» и «Filmix» в Lampa один раз.
+  - ✅ Дефолт `EO_BALANCERS=alloha,videoseed,kinoflix,veoveo,pidtor,solntse` (без native-дублей,
+    без filmixtv-403). Исключены: link-только kinopub/lumex/kodik/animelib; 503/403 под аккаунт.
+- **Следующее:** проверка на VPS (источники в `/api/lampa/sources` под реальным токеном) → `backup`-commit.
 
 ## ⏸ Точка остановки (2026-08-08, сессия 8: ВОСПРОИЗВЕДЕНИЕ ПОЧИНЕНО, live-проверка E2E)
 - **✅ РУТ-ПРИЧИНА «ни один источник не играет» НАЙДЕНА И ЗАКРЫТА (коммит 1d0db18, деплой ✓):**

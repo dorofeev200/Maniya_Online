@@ -19,16 +19,36 @@ const accountEmail = config.eonline.accountEmail;
 const uid = config.eonline.uid;
 const balancers = config.eonline.balancers;
 
-// Параметры «поисковых» запросов (примеры из живых E2E).
-const MOVIE = {
-  id: '284647',
-  imdb_id: 'tt0816692',
-  kinopoisk_id: '437410',
-  title: 'Интерстеллар',
-  original_title: 'Interstellar',
-  year: '2014',
-  serial: '0'
-};
+// Параметры «поисковых» запросов. ❗ Тестируем НЕСКОЛЬКО фильмов: один тайтл —
+// только одна точка покрытия каталога (Filmix может играть один фильм и не
+// играть другой). Матрица большего числа тайтлов выявляет реальное покрытие.
+const MOVIES = [
+  {
+    id: '284647',
+    imdb_id: 'tt0816692',
+    kinopoisk_id: '437410',
+    title: 'Интерстеллар',
+    original_title: 'Interstellar',
+    year: '2014'
+  },
+  {
+    id: '329',
+    imdb_id: 'tt0133093',
+    kinopoisk_id: '301',
+    title: 'Матрица',
+    original_title: 'The Matrix',
+    year: '1999'
+  },
+  {
+    id: '175508',
+    imdb_id: 'tt0468569',
+    kinopoisk_id: '111543',
+    title: 'Тёмный рыцарь',
+    original_title: 'The Dark Knight',
+    year: '2008'
+  }
+].map((entry) => ({ ...entry, serial: '0' }));
+
 const SERIAL = {
   id: '1399',
   imdb_id: 'tt0944947',
@@ -97,37 +117,39 @@ async function verifyFinal(provider, lampUrl) {
   };
 }
 
-test('E-Online live: матрица балансеров', { skip: !live && 'только с EO_LIVE=1' }, async () => {
+test('E-Online live: матрица балансеров × несколько фильмов', { skip: !live && 'только с EO_LIVE=1' }, async () => {
   assert.ok(accountEmail && uid, 'EO_ACCOUNT_EMAIL и EO_UID обязательны для live');
   assert.ok(balancers.length >= 1, 'EO_BALANCERS не пуст');
 
   const report = [];
   for (const balancer of balancers) {
-    const row = { balancer, movie: '↑', serial: '↑', lite: '-', ms: 0, note: '' };
+    const row = { balancer, lite: '-', perMovie: {}, serial: '↑', okMovies: 0, ms: 0, note: '' };
     const start = Date.now();
     try {
       const provider = makeProvider(balancer);
 
-      // --- первичный статус lite-страницы: отличаем OpenResty-блок (403/429)
-      // от обычного «нет контента» (200 + rч/пусто). ---
-      const probe = await probeLite(provider.client, pageParams(MOVIE));
+      // --- первичный статус lite-страницы (по первому фильму) ---
+      const probe = await probeLite(provider.client, pageParams(MOVIES[0]));
       row.lite = String(probe.status) + gateMark(probe);
       if (probe.status < 200 || probe.status >= 300) {
         throw new Error(`lite HTTP ${probe.status}${gateMark(probe)}`);
       }
 
-      // --- фильм: страница → items → резолв потока → финальный манифест ---
-      const movieCtx = { query: { token: 'live-token', ...MOVIE } };
-      const movieRes = await provider.videos(movieCtx);
-      const movieItem = movieRes.items[0];
-      if (movieItem) {
-        const v = await verifyFinal(provider, movieItem.url);
-        row.movie = isPlayable(v) ? 'OK' : `HTTP${v.status}`;
-      } else {
-        row.movie = 'NO-ITEMS';
+      // --- каждый фильм: страница → items → резолв потока → играемый манифест ---
+      for (const entry of MOVIES) {
+        const ctx = { query: { token: 'live-token', ...entry } };
+        const res = await provider.videos(ctx);
+        const item = res.items[0];
+        if (!item) {
+          row.perMovie[entry.title] = 'НЕТ';
+          continue;
+        }
+        const v = await verifyFinal(provider, item.url);
+        row.perMovie[entry.title] = isPlayable(v) ? 'OK' : `HTTP${v.status}`;
+        if (isPlayable(v)) row.okMovies += 1;
       }
 
-      // --- сериал: голоса/сезоны → s1e1 через резолв ---
+      // --- сериал (только у балансеров с сериалами; требует s1..e1) ---
       const serialCtx = { query: { token: 'live-token', ...SERIAL } };
       const serialRes = await provider.videos(serialCtx);
       const ep = serialRes.items[0];
@@ -140,24 +162,28 @@ test('E-Online live: матрица балансеров', { skip: !live && 'т�
 
       row.ms = Date.now() - start;
     } catch (error) {
-      row.movie = 'ERR';
       row.note = String(error?.message || error).slice(0, 80);
       row.ms = Date.now() - start;
+      for (const entry of MOVIES) row.perMovie[entry.title] = 'ERR';
     }
     report.push(row);
-    const mark = row.movie === 'OK' ? '✔' : '✘';
+
+    const cells = Object.entries(row.perMovie)
+      .map(([title, status]) => `${title}:${status}`)
+      .join('  ');
+    const mark = row.okMovies >= Math.ceil(MOVIES.length / 2) ? '✔' : '✘';
     const note = row.note ? ` — ${row.note}` : '';
-    console.log(`  ${mark} ${balancer.padEnd(14)} lite=${row.lite} movie=${row.movie} serial=${row.serial} ${row.ms}ms${note}`);
+    console.log(`  ${mark} ${balancer.padEnd(12)} lite=${row.lite} [${cells}] serial=${row.serial} ${row.ms}ms${note}`);
   }
 
-  // Сводный итог: число живых балансов — «кто светится» в Lampa.
-  const ok = report.filter((row) => row.movie === 'OK');
-  console.log(`\nЖивые фильм-источники: ${ok.length} из ${report.length}`);
-  console.log(`EO_BALANCERS_LIVE=${ok.map((row) => row.balancer).join(',')}`);
-  assert.ok(ok.length >= 1, `хотя бы один баланс должен пройти live (был 0/${report.length})`);
+  // Сводный итог: баланс «жив по каталогу», если большинство фильмов играют.
+  const good = report.filter((row) => row.okMovies >= Math.ceil(MOVIES.length / 2));
+  console.log(`\nФильм-источники с покрытием ≥ ${Math.ceil(MOVIES.length / 2)}/${MOVIES.length}: ${good.length} из ${report.length}`);
+  console.log(`EO_BALANCERS_LIVE=${good.map((row) => row.balancer).join(',')}`);
+  assert.ok(good.length >= 1, `хотя бы один баланс должен пройти live (был 0/${report.length})`);
 });
 
-/** lite-параметры, как в videos (без токена — его добьёт buildLiteUrl). */
+/** lite-параметры, как в videos (без token — его добавит buildLiteUrl). */
 function pageParams(entry) {
   const params = { ...entry };
   delete params.token;

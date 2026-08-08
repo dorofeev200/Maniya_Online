@@ -81,6 +81,42 @@ test('movie: play-карточки, все URL идут через прокси'
   }
 });
 
+test('movie: call-карточки без s/e (Alloha) → резолв каждого stream → items play', async () => {
+  // Живой формат Alloha (raw/alloha.movie.html): method:"call", stream — m3u8,
+  // у карточки фильма НЕТ s/e → обязательный резолв через resolveCardStream.
+  const callHtml = [
+    '<div class="videos__item" data-json=\'{"method":"call","url":"http://94.249.239.63/lite/alloha/video?t=7&token_movie=abc&rjson=False&play=true","stream":"http://94.249.239.63/lite/alloha/video.m3u8?t=7&play=true","translate":"Дубляж"}\'>x</div>',
+    '<div class="videos__item" data-json=\'{"method":"call","url":"http://94.249.239.63/lite/alloha/video?t=8&token_movie=def&rjson=False&play=true","stream":"http://94.249.239.63/lite/alloha/video.m3u8?t=8&play=true","translate":"Оригінал"}\'>y</div>'
+  ].join('');
+  const client = new FakeEoClient({ lite: callHtml });
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  assert.equal(result.items.length, 2, `items по 2 call-карточкам: ${result.items.length}`);
+  const resolved = client.calls.filter(([name]) => name === 'resolveStream');
+  assert.equal(resolved.length, 2, 'каждая call-карточка резолвится');
+  assert.ok(
+    resolved.every(([, url]) => String(url).includes('video.m3u8')),
+    `резолвятся именно stream (не url-страница): ${resolved.map(([, u]) => u).join(' | ')}`
+  );
+  for (const item of result.items) {
+    assert.equal(item.method, 'play');
+    assert.ok(String(item.url).includes('/api/lampa/proxy'), `через прокси: ${item.url}`);
+    assert.ok(item.voice_name, 'голос перевода не пуст');
+  }
+});
+
+test('movie: call-карточка БЕЗ stream (пустой резолв) — пропускается без падения', async () => {
+  const callHtml = [
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"","url":"","translate":"Х"}\'>x</div>'
+  ].join('');
+  const client = new FakeEoClient({ lite: callHtml });
+  const provider = makeProvider(client, 'alloha');
+  const result = await provider.videos(context({ serial: '0' }));
+  assert.equal(result.items.length, 0);
+});
+
 test('serial: голоса/сезоны + серии через openLiteUrl', async () => {
   const serialHtml = await fixture('eo-got-rezka.html');
   const epHtml = await fixture('eo-got-ep.html');

@@ -27,6 +27,10 @@ tar czf - \
   --exclude='./server/.env' \
   --exclude='./server/data' \
   --exclude='./backup' \
+  --exclude='./scripts/cdp-ax-click.cjs' \
+  --exclude='./scripts/lampa-token-sniff.mjs' \
+  --exclude='./scripts/lampa-token-sniff.py' \
+  --exclude='./scripts/vps-dump.mjs' \
   -C "${ROOT_DIR}" . | ssh "${SERVER_USER}@${SERVER_HOST}" "tar xzf - -C '${SERVER_PATH}'"
 
 ssh "${SERVER_USER}@${SERVER_HOST}" bash -s <<REMOTE

@@ -175,12 +175,12 @@ export const config = {
     // skaz-кластер — карточки сериалов ссылаются на него.
     skazHosts: list('EO_SKAZ_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv']),
     // Балансеры (каждый = источник «Maniya · <имя>»). Дефолт — только live-зелёные
-    // (прогон test/eolive.test.js 2026-08-08 после OpenResty-миграции):
-    // filmix/videoseed/kinoflix/pidtor/solntse — фильмы OK; rezka — сериалы OK.
-    // Остальные исключены фактом: hdvb/alloha/geosaitebi — нет контента по тайтлу,
-    // kinoteatrkg/rutubemovie/vkmovie/aniliberty — «disable» (503) под этот аккаунт,
-    // veoveo — сетевой разрыв. Расширяется EO_BALANCERS.
-    balancers: list('EO_BALANCERS', ['filmix', 'rezka', 'videoseed', 'kinoflix', 'pidtor', 'solntse']),
+    // (многотайтловая матрица test/eolive.test.js 2026-08-08, 3 фильма/баланс):
+    // alloha 3/3 (100%, call→HLS), videoseed 3/3, veoveo 3/3, pidtor 3/3, solntse 3/3,
+    // kinoflix 2/3. Исключены из дефолта: filmix/rezka/hdvb — их отдают native-провайдеры
+    // (реестр не дублирует); filmixtv — 403-гейт в этом прогоне; link-только — kinopub/lumex/
+    // kodik/animelib; 503/403 под аккаунт — kinobase/animedia/anilibria/rutubemovie и др.
+    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinoflix', 'veoveo', 'pidtor', 'solntse']),
     // Аккаунт E-Online. Не коммитить — только server/.env.
     accountEmail: (process.env.EO_ACCOUNT_EMAIL || '').trim(),
     uid: (process.env.EO_UID || '').trim(),

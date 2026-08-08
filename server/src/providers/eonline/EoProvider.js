@@ -232,6 +232,19 @@ export class EoProvider extends Provider {
     }
   }
 
+  /**
+   * Резолв call-карточки фильма (`method:"call"` без s/e): открывает
+   * stream-URL с Origin → финальный voidboost/skaz m3u8 (или mp4).
+   * Вынесен отдельно от resolveStream, т.к. карточка фильма уже несёт
+   * `stream`, а не `url` (серийный эпизод — `url`).
+   */
+  async resolveCardStream(card, requestContext) {
+    const raw = String(card.stream || card.url || '').trim();
+    if (!raw) return null;
+    const final = await this.client.resolveStream(raw);
+    return final || null;
+  }
+
   /** Серверный резолв потока call-карточки (эпизод/фильм) для items. */
   async resolveStream(card, requestContext) {
     const url = String(card.stream || card.url || '').trim();
