@@ -1,5 +1,29 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ⏸ Точка остановки (2026-08-08, сессия 11: живой матрицер + фолбэк-твин + авто-подтверждение)
+- **Жалоба пользователя закрыта:** «задвоение Rezka/Maniya · Rezka» и «Maniya · Filmix» — это были дованние
+  между деплоями (до дедупа 12:34). На живом `/api/lampa/sources` СЕЙЧАС 13 источников без дублей:
+  filmix/kodik/rezka/rutubemovie/cdnvideohub/collaps/hdvb + Maniya·alloha/videoseed/kinoflix/veoveo/PidTor/solntse.
+  «Maniya · Filmix» в дефолтном EO_BALANCERS НЕТ вообще.
+- **НОВАЯ ЛОГИКА (реестр+store):** каждый EO-балансер теперь присутствует в двух режимах:
+  - у Native с тем же id (filmix/rezka/hdvb/rutubemovie) включен → eonline-близнец = СКРЫТЫЙ ФОЛБЭК
+    (`twinFor(nativeId)`), в UI НЕ светится;
+  - у native нет токена → eonline-источник ВИДИМ (как раньше).
+  **store.js:** если выбранный native вернул 0 items (или бросил) → `/api/lampa/videos` прозрачно пробует
+  скрытого близнеца → один источник в Lampa, но «рабочий». Проверено живьём: `provider=rezka` на «Форрест Гамп»
+  (native пуст) → 22 items через eonline-твина, манифест `application/vnd.apple.mpegurl` 200 (HLS). ✅
+- **БАГ, пойманный сервером после деплоя:** в store.js имя хелпера `twinPayloadOrNull` vs `twinForPayload`
+  (ReferenceError → 500 на /api/lampa/videos). Исправлено, 235 тестов pass (включая новые registry-twin).
+- **АВТОМАТИЧЕСКОЕ ПОДТВЕРЖДЕНИЕ (новый инструмент):** `scripts/auto-confirm.mjs` (+`auto-confirm-config.mjs`):
+  каждый источник × 8 фильмов/сериал → `/api/lampa/videos` → первый item → запрос его URL через прокси →
+  PASS если 200 + `#EXTM3U`/`mpd`/`mp4`/`webm`/`mkv`; ненулевой exit-код если хоть один источник мёртв.
+  Прогон: `TOKEN=<реальный> node scripts/auto-confirm.mjs` (опции `--source <id>` `--only a,b`).
+- **⚠️ E-Online СЕЙЧАС НЕДОСТУПЕН (провайдер лёг)**, при этом источники E- тянут НЕ собственные, а оригинальные
+  (skaz.tv / voidboost и API самих провайдеров). Задача следующего этапа — найти прямые исходные endpoint-ы
+  (идут в `C:\tmp\showy\E-ONLINE-REPORT.md` §6, §9 + код `eonline-deob*.js`) и/или держать балянс из native
+  провайдеров. Речь пользователя: обход защит (Cloudflare/Anubis) разрешён «любым способом».
+- Тесты: **235 pass / 2 skip / 0 fail** (+4 twin). Пуш: backup (ЗАПУШИТЬ после деплоя-верификации матрицы).
+
 > Единственный источник истины «где мы». Перед стартом каждой сессии: прочитать этот файл,
 > определить текущую незавершённую волну/провайдера, продолжить с неё. После каждого wave —
 > обновлять чекбоксы ниже и коммитить.

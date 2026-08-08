@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { HttpError } from './errors.js';
 import { validateToken } from './security.js';
-import { registeredProviders } from './providers/registry.js';
+import { registeredProviders, twinFor } from './providers/registry.js';
 
 async function readJson(filePath, fallback) {
   if (!filePath) return fallback;
@@ -87,24 +87,24 @@ export async function getVideosForRequest(context) {
   // Один провайдер с расширенным контрактом videos() — отдаём payload
   // с играбельными items и фильтрами сезонов/озвучек.
   if (providers.length === 1 && videoProviders.length === 1) {
-    try {
-      const payload = await providers[0].videos(context);
-      if (payload && Array.isArray(payload.items) && payload.items.length) {
-        return { items: payload.items, seasons: payload.seasons || [], voices: payload.voices || [] };
-      }
-    } catch {
-      // Ломается конкретный провайдер — не рвём весь запрос,
-      // а уходим на поисковые записи/файл-фолбэк ниже.
+    const primary = await payloadOrNull(videoProviders[0], context);
+    if (primary?.items?.length) {
+      return { items: primary.items, seasons: primary.seasons || [], voices: primary.voices || [] };
+    }
+    // Источник пуст (напр. native «Rezka» не нашёл тайтл) — прозрачно пробуем
+    // его скрытый E-Online близнец (тот же id). Пользователь видит один источник.
+    const twin = selected ? await twinForPayload(selected, context) : null;
+    if (twin?.items?.length) {
+      return { items: twin.items, seasons: twin.seasons || [], voices: twin.voices || [] };
     }
   } else if (videoProviders.length > 0) {
     // Несколько провайдеров (или источник без videos()): склеиваем играбельные
     // items со всех, кто умеет videos(). Фильтры не общие — отдаём пустыми.
+    // Пустой native дополняется своим E-Online близнецом (без дублей).
     const payloads = await Promise.all(videoProviders.map(async (provider) => {
-      try {
-        return await provider.videos(context);
-      } catch {
-        return null;
-      }
+      const payload = await payloadOrNull(provider, context);
+      if (payload?.items?.length) return payload;
+      return (await twinForPayload(provider.id, context)) || payload;
     }));
     const items = payloads.filter(Boolean).flatMap((payload) => (Array.isArray(payload.items) ? payload.items : []));
     if (items.length) return { items, seasons: [], voices: [] };
@@ -136,4 +136,24 @@ export async function getVideosForRequest(context) {
   const videos = await readJson(config.videosFile, { default: [] });
   const key = String(context.query.tmdb_id || context.query.id || '').trim();
   return { items: videos[key] || videos.default || [], seasons: [], voices: [] };
+}
+
+async function payloadOrNull(provider, context) {
+  try {
+    return await provider.videos(context);
+  } catch {
+    return null;
+  }
+}
+
+/** Скрытый E-Online близнец native-провайдера: его videos() или null. */
+async function twinForPayload(nativeId, context) {
+  const twin = twinFor(nativeId);
+  if (!twin || !twin.enabled()) return null;
+  try {
+    const payload = await twin.videos(context);
+    return payload?.items?.length ? payload : null;
+  } catch {
+    return null;
+  }
 }

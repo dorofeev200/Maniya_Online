@@ -180,7 +180,10 @@ export const config = {
     // kinoflix 2/3. Исключены из дефолта: filmix/rezka/hdvb — их отдают native-провайдеры
     // (реестр не дублирует); filmixtv — 403-гейт в этом прогоне; link-только — kinopub/lumex/
     // kodik/animelib; 503/403 под аккаунт — kinobase/animedia/anilibria/rutubemovie и др.
-    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinoflix', 'veoveo', 'pidtor', 'solntse']),
+    // Видимые источники «Maniya · …» + СКРЫТЫЕ фолбэки native-дублей
+    // (filmix/rezka/hdvb/rutubemovie регистрируются, но в UI их отдаёт native;
+    // eonline-близнец подхватывает тайтлы, где native вернул 0 items).
+    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie']),
     // Аккаунт E-Online. Не коммитить — только server/.env.
     accountEmail: (process.env.EO_ACCOUNT_EMAIL || '').trim(),
     uid: (process.env.EO_UID || '').trim(),

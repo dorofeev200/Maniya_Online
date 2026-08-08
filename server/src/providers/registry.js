@@ -77,15 +77,19 @@ const nativeProviders = [
 ];
 
 // E-Online: каждый REST-доступный балансер = отдельный источник «Maniya · …».
-  // Без EO_ACCOUNT_EMAIL/EO_UID провайдеры скрыты (enabled()=false) и не
-  // светятся в /api/lampa/sources.
-  // ❗ Балансер, у которого уже есть ВКЛЮЧЁННЫЙ native-провайдер с тем же id
-  // (filmix/rezka/hdvb/rutubemovie/kodik/collaps), не дублируется в реестре —
-  // его отдаёт native («такой источник должен быть один»). Включённый eonline-
-  // под тем же именем виден только если native выключен (нет токена/ключа).
-const eonlineProviders = config.eonline.balancers
-    .filter((balancer) => !nativeProviders.some((p) => p.id === balancer && p.enabled?.()))
-    .map((balancer) => new EoProvider({
+// Без EO_ACCOUNT_EMAIL/EO_UID провайдеры скрыты (enabled()=false) и не
+// светятся в /api/lampa/sources.
+// ❗ Балансер, у которого уже есть ВКЛЮЧЁННЫЙ native-провайдер с тем же id
+// (filmix/rezka/hdvb/rutubemovie/…), не становится видимым источником —
+// в UI его отдаёт native («такой источник должен быть один»), а eonline-
+// близнец регистрируется как СКРЫТЫЙ фолбэк (`twinFor`): если native вернёт
+// 0 items, store.js прозрачно отдаст его результат. Видимым eonline-балансер
+// становится только когда native выключен (нет токена/ключа).
+function buildEonlineProviders() {
+  return (config.eonline.balancers || []).map((balancer) => {
+    const nativeTwin = nativeProviders.find((p) => p.id === balancer);
+    const hidden = Boolean(nativeTwin?.enabled?.());
+    return new EoProvider({
       id: `eonline-${balancer}`,
       title: EO_TITLES[balancer] || `Maniya · ${capitalize(balancer)}`,
       balancer,
@@ -93,10 +97,22 @@ const eonlineProviders = config.eonline.balancers
       skazHosts: config.eonline.skazHosts,
       accountEmail: config.eonline.accountEmail,
       uid: config.eonline.uid,
-      origin: config.eonline.origin
-    }));
+      origin: config.eonline.origin,
+      show: !hidden,
+      hiddenTwinNative: hidden ? balancer : null
+    });
+  });
+}
 
+const allEonlineProviders = buildEonlineProviders();
+const eonlineProviders = allEonlineProviders.filter((provider) => provider.show);
 const providers = [...nativeProviders, ...eonlineProviders];
+
+/** Скрытый E-Online близнец native-провайдера (id совпадает) или null. */
+export function twinFor(nativeId) {
+  const id = String(nativeId || '').trim().toLowerCase();
+  return allEonlineProviders.find((provider) => provider.hiddenTwinNative === id) || null;
+}
 
 export function registeredProviders() {
   return providers;

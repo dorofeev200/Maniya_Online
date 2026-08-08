@@ -22,6 +22,8 @@ export class EoProvider extends Provider {
       id: options.id,
       title: options.title
     });
+    this.show = options.show !== false;
+    this.hiddenTwinNative = options.hiddenTwinNative || null;
     this.balancer = String(options.balancer || '').trim();
     this.client = options.client || new EoClient({
       balancer: this.balancer,

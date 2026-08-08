@@ -107,7 +107,7 @@ async function route(context, response) {
         id: provider.id,
         name: provider.title || provider.id,
         url: videosUrl(context, provider.id),
-        show: true
+        show: provider.show !== false
       }))
     ];
 
