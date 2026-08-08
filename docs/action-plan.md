@@ -1,5 +1,29 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ⏸ Точка остановки (2026-08-08, сессия 12: follow-фикс задеплоен; E-Online гейт 403, но skaz-кластер ЖИВ напрямую)
+- **✅ follow-href фикс задеплоен на VPS (сессия 11-хвост).** Точечный live-тест: `provider=rezka` на «Интерстеллар»
+  → **16 items → первый URL OK-HLS** (раньше «видео не найдено»). Источники без дублей: 13 (filmix/kodik/rezka/
+  rutubemovie/cdnvideohub/collaps/hdvb + Maniya·alloha/videoseed/kinoflix/veoveo/PidTor/solntse). Тесты локально
+  **237 pass / 2 skip / 0 fail**. Коммит `9270321` уже в remote backup.
+- **⚠️ «E-Online лёг» ≠ кластер лёг — ПРЯМОЙ ДОСТУП К SKAZ-КЛАСТЕРУ РАБОТАЕТ.**
+  Пользователь прав: E-Online тянет источники через skaz/voidboost. Доказано вручную: все 6 хостов
+  (online3/8.skaz.tv + 94.249.239.{63,37,11} + 77.90.33.109) → `cors/check` 200; прямой
+  `lite/filmix` → `werkecdn.me` **2160p**; **полный скан 21 балансера × 2 фильма сохранён**
+  (`backup` не нужен — это `C:\tmp\showy\skaz-scan-20260808161521.json` + `SKAZ-REPORT-12.md`,
+  НЕ КОММИТИМ сессии могут выкл свет — файл на диске).
+  - **Рабочие балансеры (прямые lite-ответы):** filmix 2/2(8), rezka 2/2(28), alloha 2/2(15), hdvb 2/2(7),
+    pidtor 2/2(12 play=torrent!), veoveo 2/2(6), solntse 2/2(2), **kinopub 2/2(26)**, **vkmovie 2/2(42)**,
+    geosaitebi 2/2(6), kinoflix 1/2(3), rutubemovie 1/2(8), kinoteatrkg 1/2(1).
+  - **Мёртвые:** videoseed(0/2), aniliberty, kinobase, xvideocdn, videohub, turboserial, mirkino, hdrezka
+    (503/400/таймаут).
+- **❓ Разрыв в авто-матрице:** eonline-* через НАШ proxy → `eonline-alloha` FAIL·HTTP403 на ВСЕХ тайтлах,
+  при этом прямой alloha → 15 карток 200. Т.е. наш EoClient/прокси теряет пробив потока (Origin/302/voidboost-call)
+  на этапе манифест/сегмент, НЕ поиск. **Задача след волны: сравнить прямые lite-запросы vs наш e-провider
+  на уровне потока и починить 403 (см. `SKAZ-REPORT-12.md` TODO).**
+- **pidtor нюанс:** play-карточка = torrent URL (`tr=http%3a…`), не HLS. Классификатор/авто-confirm не должен
+  бить по нему как по манифесту.
+- Авто-матрица (13×8) отработала частично (упрлась в таймауты e-источников), данные у eс в `/tmp/auto-confirm.log`.
+
 ## ⏸ Точка остановки (2026-08-08, сессия 11: живой матрицер + фолбэк-твин + авто-подтверждение)
 - **Жалоба пользователя закрыта:** «задвоение Rezka/Maniya · Rezka» и «Maniya · Filmix» — это были дованние
   между деплоями (до дедупа 12:34). На живом `/api/lampa/sources` СЕЙЧАС 13 источников без дублей:
