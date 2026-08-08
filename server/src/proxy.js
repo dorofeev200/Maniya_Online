@@ -10,8 +10,10 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 /**
  * SSRF-гард: переданный URL должен быть https и указывать на хост из allowlist
- * (корень или его поддомен). http разрешён только для loopback — это нужно,
- * чтобы интеграционные тесты могли поднять локальный источник.
+ * (корень или его поддомен). http разрешён только для loopback или для явных
+ * хостов из httpAllowHosts (узкий список, по умолчанию пустой) — это нужно
+ * для E-Online: его хосты (`94.249.239.*`, `77.90.33.109`, `skaz.tv`) и CDN-
+ * манифест voidboost отдаются только по http.
  */
 export function isHostAllowed(host, allowHosts = config.proxy.allowHosts) {
   const clean = String(host || '').toLowerCase().replace(/^\.+|\.+$/g, '');
@@ -23,7 +25,7 @@ export function isHostAllowed(host, allowHosts = config.proxy.allowHosts) {
   });
 }
 
-export function validateProxyTarget(value, allowHosts = config.proxy.allowHosts) {
+export function validateProxyTarget(value, allowHosts = config.proxy.allowHosts, httpAllowHosts = config.proxy.httpAllowHosts) {
   let parsed;
   try {
     parsed = new URL(String(value || ''));
@@ -40,6 +42,9 @@ export function validateProxyTarget(value, allowHosts = config.proxy.allowHosts)
 
   if (parsed.protocol === 'http:') {
     if (parsed.hostname && LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) {
+      return parsed;
+    }
+    if (isHostAllowed(parsed.hostname, httpAllowHosts)) {
       return parsed;
     }
   }
@@ -147,10 +152,11 @@ export async function proxyMedia(targetUrl, request, response, options = {}) {
     timeoutMs = config.proxy.timeoutMs,
     maxRedirects = config.proxy.maxRedirects,
     allowHosts = config.proxy.allowHosts,
+    httpAllowHosts = config.proxy.httpAllowHosts,
     referer = request?.headers?.referer || null
   } = options;
 
-  let current = validateProxyTarget(targetUrl, allowHosts);
+  let current = validateProxyTarget(targetUrl, allowHosts, httpAllowHosts);
   const range = request?.headers?.range || null;
   let redirects = 0;
 
@@ -166,7 +172,7 @@ export async function proxyMedia(targetUrl, request, response, options = {}) {
     if (status >= 300 && status < 400 && location && redirects < maxRedirects) {
       redirects += 1;
       upstream.resume();
-      current = validateProxyTarget(new URL(location, current).toString(), allowHosts);
+      current = validateProxyTarget(new URL(location, current).toString(), allowHosts, httpAllowHosts);
       continue;
     }
 

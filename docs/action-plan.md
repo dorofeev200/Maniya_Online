@@ -37,6 +37,36 @@ systemd `maniya-online` (node 3000) + nginx 443; docker-контейнер `lamp
 (код) + `backup/*` (состояние) + `restore-vps.sh` (сборка всего на новый VPS). Remote на GitHub:
 origin → код продублирован.
 
+## ⏸ Точка остановки (2026-08-08, сессия 9: E-Online → источники «Maniya»)
+- **Код волны E-Online ГОТОВ (клиент+нормализатор+провайдер+реестр+config+proxy http-allowlist):**
+  - `server/src/providers/eonline/{EoClient,EoNormalizer,EoProvider}.js` — каждый REST-доступный
+    балансер (`EO_BALANCERS`) становится отдельным источником `eonline-<balancer>` под брендом «Maniya · …».
+  - Аккаунт только через env `EO_ACCOUNT_EMAIL`/`EO_UID` (в `server/.env`, не коммитить). Авторизация —
+    `account_email`+`uid` в URL, `Origin: http://lampa.mx` на потоки skaz/voidboost.
+  - Серверный резолв потоков: `method:"call"` карточки резолвятся на сервере (GET m3u8 с Origin →
+    финальный voidboost/skaz-манифест) и наружу идут ТОЛЬКО прокси-URL `/api/lampa/proxy?url=…`.
+  - `proxy.js`: добавлен `httpAllowHosts` (`PROXY_HTTP_ALLOW_HOSTS`) — http-хосты (E-Online IP,
+    `skaz.tv`, `voidboost.one|com`) отдельным узким списком; https-локлист не ослаблен.
+  - ⚠️ **OpenResty-миграция E-Online** (сообщил пользователь): формат `data-json` карточек генерится
+    приложением, гейт OpenResty его не трогает; но гейт решает «кого пускать» (403/429/re-директы).
+    Проверяется live-матрицей: статус первичного `lite`-запроса + `:gate`-маркер в отчёте.
+- **Mock-тесты: 29 новых (client 8 + normalizer 6 + provider 7 + proxy http-allow 3) — зелёные.**
+  Полный сьют: **229 pass / 2 skip / 0 fail** (skip = live-гейты). Исправлен реальный баг провайдера:
+  `seasonLinkHref` возвращал `fallback||url`, где fallback — ранняя карточка перевода → сезон терялся;
+  теперь точное совпадение сезона отдаёт свой URL.
+- **Live-матрица (`test/eolive.test.js`, гейт `EO_LIVE=1`) — ФИНАЛЬНЫЙ ПРОГОН (после OpenResty):**
+  - ✅ **5 фильм-источников OK**: `filmix, videoseed, kinoflix, pidtor, solntse` — lite 200, items,
+    поток резолвится, 200, играемый — `isPlayable()` (HLS-тело или медиа-тип).
+  - ✅ rezka `serial=ep1` — сериалы s1e1 решаются до voidboost-HLS, 200 — **стрим-контур жив
+    после OpenResty-миграции**; формат `data-json` карточек генерит приложение, гейт его не трогает.
+  - ⚠️ hdvb/alloha/geosaitebi `lite=200 movie=NO-ITEMS` — по «Интерстеллар» контента нет
+    (каталожное покрытие, не поломка). veoveo — `fetch failed` (сетевой обрыв; на VPS повторить).
+  - ⚠️ kinoteatrkg/rutubemovie/vkmovie/aniliberty `lite=503` — «disable» под этот аккаунт.
+- **Дефолт пересобран под live-зелёные**: `EO_BALANCERS=filmix,rezka,videoseed,kinoflix,pidtor,solntse`
+  (config.js + корневой `.env.example`). Остальные остаются доступными через `EO_BALANCERS`.
+- **Следующее:** деплой в `backup` → на VPS перепроверить eonline-источники с реальными токенами
+  (сеть стабильнее — ждём не меньше 5 фильм-OK + rezka ep). Аккаунт — только в `server/.env` (не git).
+
 ## ⏸ Точка остановки (2026-08-08, сессия 8: ВОСПРОИЗВЕДЕНИЕ ПОЧИНЕНО, live-проверка E2E)
 - **✅ РУТ-ПРИЧИНА «ни один источник не играет» НАЙДЕНА И ЗАКРЫТА (коммит 1d0db18, деплой ✓):**
   `isManifestResponse` в `server/src/proxy.js` считал `video/mp2t` (TS-сегмент, sync-byte 0x47)
@@ -201,3 +231,4 @@ origin → код продублирован.
 - ⚠️ Filmix: «то видео нет» — часть тайтлов 0/403 (Cloudflare), нестабилен по каталогу
 - «В остальных по одному фильму» — поисковая выдача провайдеров слабая → гл. боль = покрытие каталога/поиска (не декод — он работает)
 ОТЛОЖЕНО НА ЗАВТРА. Старт: проверить каждый через живой API с реальным токеном (не напрямую провайдер), см. память.
+

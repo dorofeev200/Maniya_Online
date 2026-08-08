@@ -23,6 +23,27 @@ test('validateProxyTarget: SSRF-гард', () => {
   assert.ok(validateProxyTarget('http://127.0.0.1:9999/x.mp4', allow));
 });
 
+test('validateProxyTarget: http только из явного httpAllowHosts', () => {
+  const allow = ['filmix.tv'];
+  const httpAllow = ['voidboost.one', '94.249.239.63'];
+
+  // Наш CDN-манифест voidboost (http) — разрешён
+  assert.ok(validateProxyTarget('http://magic.stream.voidboost.one/s/x/manifest.m3u8', allow, httpAllow));
+  // Прямой хост E-Online (http) — разрешён
+  assert.ok(validateProxyTarget('http://94.249.239.63/lite/rezka', allow, httpAllow));
+
+  // Чужой http-хост даже с https-allowlist — запрещён
+  assert.throws(() => validateProxyTarget('http://evil.com/x.m3u8', allow, httpAllow),
+    (e) => e instanceof HttpError && e.statusCode === 400);
+
+  // https-хосты не затронуты — по-прежнему через allowHosts
+  assert.ok(validateProxyTarget('https://vip.filmix.tv/x.mp4', allow, httpAllow));
+
+  // без httpAllowHosts http не проходит (кроме loopback)
+  assert.throws(() => validateProxyTarget('http://94.249.239.63/x', allow, []),
+    (e) => e instanceof HttpError && e.statusCode === 400);
+});
+
 function startTestServer() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {

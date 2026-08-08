@@ -165,8 +165,33 @@ export const config = {
     // выносим в config. Задать HDVB_TOKEN (иначе enabled()=false).
     token: (process.env.HDVB_TOKEN || '').trim()
   },
+  // E-Online (источники-бренда «Maniya»): каждый балансер — отдельный источник.
+  // Авторизация — account_email + uid в URL каждого запроса (E-ONLINE-REPORT §9);
+  // на потоки skaz/voidboost обязателен Origin. Секреты только из env, не в гит.
+  eonline: {
+    enabled: bool('EO_ENABLED', true),
+    // Прямые хосты балансеров (ротация при недоступности).
+    hosts: list('EO_HOSTS', ['http://94.249.239.63', 'http://94.249.239.37', 'http://94.249.239.11', 'http://77.90.33.109']),
+    // skaz-кластер — карточки сериалов ссылаются на него.
+    skazHosts: list('EO_SKAZ_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv']),
+    // Балансеры (каждый = источник «Maniya · <имя>»). Дефолт — только live-зелёные
+    // (прогон test/eolive.test.js 2026-08-08 после OpenResty-миграции):
+    // filmix/videoseed/kinoflix/pidtor/solntse — фильмы OK; rezka — сериалы OK.
+    // Остальные исключены фактом: hdvb/alloha/geosaitebi — нет контента по тайтлу,
+    // kinoteatrkg/rutubemovie/vkmovie/aniliberty — «disable» (503) под этот аккаунт,
+    // veoveo — сетевой разрыв. Расширяется EO_BALANCERS.
+    balancers: list('EO_BALANCERS', ['filmix', 'rezka', 'videoseed', 'kinoflix', 'pidtor', 'solntse']),
+    // Аккаунт E-Online. Не коммитить — только server/.env.
+    accountEmail: (process.env.EO_ACCOUNT_EMAIL || '').trim(),
+    uid: (process.env.EO_UID || '').trim(),
+    // Обязательный Origin для потоков skaz/voidboost.
+    origin: (process.env.EO_ORIGIN || 'http://lampa.mx').trim()
+  },
   proxy: {
     allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com', 'sevstar933krop.com', 'entouaedon.com']),
+    // E-Online-хосты и CDN-манифест voidboost — http:// (validateProxyTarget по
+    // умолчанию разрешает http только для loopback). Явный узкий список.
+    httpAllowHosts: list('PROXY_HTTP_ALLOW_HOSTS', ['94.249.239.63', '94.249.239.37', '94.249.239.11', '77.90.33.109', 'skaz.tv', 'voidboost.one', 'voidboost.com']),
     timeoutMs: integer('PROXY_TIMEOUT_MS', 15_000),
     maxRedirects: integer('PROXY_MAX_REDIRECTS', 4)
   }

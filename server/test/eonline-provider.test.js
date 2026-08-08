@@ -1,0 +1,131 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { readFile } from 'node:fs/promises';
+import { EoProvider } from '../src/providers/eonline/EoProvider.js';
+
+async function fixture(name) {
+  return readFile(`C:/tmp/showy/${name}`, 'utf8');
+}
+
+/** FakeClient: getLite → lite, openLiteUrl → по подстроке URL, resolve → финальный m3u8. */
+class FakeEoClient {
+  constructor(options = {}) {
+    this.lite = String(options.lite ?? '');
+    this.pages = options.pages || {};
+    this.resolveResult = options.resolveStream || 'http://magic.stream.voidboost.one/s/key/manifest.m3u8';
+    this.calls = [];
+  }
+
+  enabled() {
+    return true;
+  }
+
+  async getLite(params) {
+    this.calls.push(['getLite', params]);
+    return this.lite;
+  }
+
+  async openLiteUrl(url) {
+    this.calls.push(['openLiteUrl', url]);
+    for (const [needle, html] of Object.entries(this.pages)) {
+      if (String(url).includes(needle)) return html;
+    }
+    return this.lite;
+  }
+
+  async resolveStream(url) {
+    this.calls.push(['resolveStream', url]);
+    return this.resolveResult;
+  }
+}
+
+function makeProvider(client, balancer = 'rezka') {
+  return new EoProvider({
+    id: `eonline-${balancer}`,
+    title: `Maniya ${balancer}`,
+    balancer,
+    client
+  });
+}
+
+function context(query) {
+  return { query: { token: '', ...query }, request: {} };
+}
+
+test('enabled() = false без client-enable', () => {
+  const provider = new EoProvider({
+    id: 'x',
+    title: 'X',
+    balancer: 'x',
+    client: { enabled: () => false }
+  });
+  assert.equal(provider.enabled(), false);
+});
+
+test('enabled() = true при рабочем балансере', () => {
+  const provider = makeProvider(new FakeEoClient());
+  assert.equal(provider.enabled(), true);
+});
+
+test('movie: play-карточки, все URL идут через прокси', async () => {
+  const client = new FakeEoClient({ lite: await fixture('eo-fx.json') });
+  const provider = makeProvider(client, 'filmix');
+
+  const result = await provider.videos(context({ title: 'film', serial: '0' }));
+
+  assert.ok(result.items.length >= 1, `items: ${result.items.length}`);
+  for (const item of result.items) {
+    assert.ok(String(item.url).startsWith('http'), `item.url: ${item.url}`);
+    assert.equal(item.method, 'play');
+  }
+});
+
+test('serial: голоса/сезоны + серии через openLiteUrl', async () => {
+  const serialHtml = await fixture('eo-got-rezka.html');
+  const epHtml = await fixture('eo-got-ep.html');
+  const client = new FakeEoClient({ lite: serialHtml, pages: { 's=1': epHtml } });
+  const provider = makeProvider(client, 'rezka');
+
+  const result = await provider.videos(context({ serial: '1' }));
+
+  assert.ok(result.voices.length >= 6, `голоса: ${result.voices.length}`);
+  assert.ok(result.seasons.length >= 1, `сезоны: ${result.seasons.length}`);
+  assert.ok(result.items.length >= 1, `серии: ${result.items.length}`);
+  const item = result.items[0];
+  assert.equal(item.method, 'play');
+  assert.equal(item.season, 1);
+  assert.ok(item.episode >= 1);
+});
+
+test('serial: поиск URL по выбранному сезону из query', async () => {
+  const serialHtml = await fixture('eo-got-rezka.html');
+  // Эпизоды именно 2-го сезона (в eo-got-ep.html все серии — S1).
+  const ep2Html = [
+    '<div class="videos__item"',
+    " data-json='{\"method\":\"call\",\"stream\":\"http://h/x.m3u8\",\"url\":\"http://h/lite?t=111&s=2&e=1\",\"s\":2,\"e\":1,\"name\":\"2x01\"}'>",
+    '<span class="videos__item-title">2x01</span></div>'
+  ].join('');
+  const client = new FakeEoClient({ lite: serialHtml, pages: { 's=2': ep2Html } });
+  const provider = makeProvider(client, 'rezka');
+
+  const result = await provider.videos(context({ serial: '1', season: '2' }));
+  const opened = client.calls.find(([name]) => name === 'openLiteUrl');
+  assert.ok(opened, 'должен быть открыт season-page');
+  assert.ok(opened[1].includes('s=2'), `season URL: ${opened[1]}`);
+  assert.ok(result.items.length >= 1);
+  assert.equal(result.items[0].episode, 1);
+});
+
+test('поиск без id/imdb — пусто', async () => {
+  const provider = makeProvider(new FakeEoClient({ lite: '<html/>' }));
+  assert.deepEqual(await provider.search({ title: '' }), []);
+});
+
+test('поиск с id/imdb_id — запись контракта', async () => {
+  const provider = makeProvider(new FakeEoClient());
+  const records = await provider.search({ id: '45', imdb_id: 'tt0944947', title: 'Игра престолов', serial: '1' });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].type, 'serial');
+  assert.equal(records[0].metadata.imdb_id, 'tt0944947');
+});
