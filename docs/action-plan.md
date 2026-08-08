@@ -179,6 +179,7 @@ origin → код продублирован.
 - [x] CDNvideohub — JSON API (`{host}/api/v1/player/sv/...`), hlsUrl; ✅ реализован (клиент+нормализатор+провайдер, kp-only), 13 тестов, live: search(Интерстеллар 462682)→movie, videos→1 play-item (Неизвестный) через прокси
 - [x] Collaps — HTML+JSON, зашитый токен; ✅ реализован (клиент+нормализатор+провайдер), 15 тестов, live локально (токен Lampac); VPS live после `COLLAPS_TOKEN`
 - [x] HDVB — JSON+POST playlist (csrf), зашитый токен; ✅ live (VPS): sources включает hdvb, movie+serial играют через прокси
+- [x] **E-Online (проксированные источники «Maniya · …»)** — ✅ live (сессия 9): чистый REST без memkey, авторизация account_email+uid через env; фильмы OK у `filmix,videoseed,kinoflix,pidtor,solntse`, сериалы — `rezka` (voidboost-HLS) после OpenResty-миграции; дефолт `EO_BALANCERS` = эти 6, каждый балансер — отдельный источник
 - [ ] Kinotochka — JSON+HTML, plain
 - [ ] LeProduction — HTML iframe `[Qp]url`
 - [ ] VideoDB — HTML+base64 player config → HLS
