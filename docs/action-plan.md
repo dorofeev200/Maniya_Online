@@ -1,10 +1,17 @@
 # Action Plan — Maniya Online (план возобновления)
 
-## ⏸ Точка остановки (2026-08-08, сессия 12: follow-фикс задеплоен; E-Online гейт 403, но skaz-кластер ЖИВ напрямую)
-- **✅ follow-href фикс задеплоен на VPS (сессия 11-хвост).** Точечный live-тест: `provider=rezka` на «Интерстеллар»
-  → **16 items → первый URL OK-HLS** (раньше «видео не найдено»). Источники без дублей: 13 (filmix/kodik/rezka/
-  rutubemovie/cdnvideohub/collaps/hdvb + Maniya·alloha/videoseed/kinoflix/veoveo/PidTor/solntse). Тесты локально
-  **237 pass / 2 skip / 0 fail**. Коммит `9270321` уже в remote backup.
+## ⏸ Точка остановки (2026-08-08, сессия 12: follow-фикс + skaz-прямые + vkvideo allowlist; alloha играет)
+- **✅ ВЕСЬ e-онлайн-СТЕК ПОЧИНЕН И ИГРАЕТ (live на VPS):** `provider=eonline-alloha` «Интерстеллар» →
+  10 items, прокси → **200 `application/vnd.apple.mpegurl` + `#EXTM3U`**. Три фикса:
+  1. `config.js` — хосты первыми `online3/8.skaz.tv` (**`94.249.*` стали 503/302 → 403-поток**);
+  2. `config.js` allowlist: +`vkvideo.cloud` (alloha-резолв уводит на VK-хостинг → `proxy_host_forbidden`);
+  3. (ранее) follow-href (rezka → 16 items) + скрытый twin-фолбэк.
+  Тесты локально **237 pass / 2 skip / 0 fail**. Коммиты `935a50c`, `85a3c4e`, пуш backup.
+- **⚠️ ЗАДВОЕНИЕ «Rezka / Maniya · Rezka» — НА СЕРВЕРЕ УЖЕ НЕТ.** Живой `/api/lampa/sources` = 13 источников,
+  **без дублей**: filmix/kodik/rezka/rutubemovie/cdnvideohub/collaps/hdvb + Maniya·alloha/videoseed/kinoflix/
+  veoveo/PidTor/solntse. `eonline-rezka` существует только как скрытый фолбэк (`show:false`) и в sources НЕ
+  светится. Клиентский плагин не создаёт источников (тянет `/sources`). Если в Lampa всё же два кода — это
+  старый кэш/список расширений на устройстве; обновить (**`/sources` должен показать один**).
 - **⚠️ «E-Online лёг» ≠ кластер лёг — ПРЯМОЙ ДОСТУП К SKAZ-КЛАСТЕРУ РАБОТАЕТ.**
   Пользователь прав: E-Online тянет источники через skaz/voidboost. Доказано вручную: все 6 хостов
   (online3/8.skaz.tv + 94.249.239.{63,37,11} + 77.90.33.109) → `cors/check` 200; прямой
