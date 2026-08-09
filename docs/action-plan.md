@@ -1,5 +1,31 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ✅ 2026-08-09 (сессия 15, вечер): ФИКС №1 «балансер как в Е-Online» + ДИАГНОСТИКА «Script error»
+- **Фикс №1 (закоммичен `a48440c`, НЕ задеплоен): перебор хостов пула при 5xx/сетевой ошибке.**
+  SkazClient/EoClient раньше: один запрос на один хост ротации, БЕЗ ретрая → 503 ноды кластера
+  (online3.skaz.tv для kinoflix/rutubemovie при живых карточках на online8/94.249.*) роняли источник
+  целиком. Теперь: `fetchHosts()` — первый кандидат URL как есть, при 5xx/network каждый следующий
+  хост пула с тем же путём (lite/* обслуживается любым бэкендом); `fetchResolvedHosts()` — для
+  openLiteUrl (link-карточки), с гейтом STATUS_REST; resolveStream НЕ ротирует (CDN-токеновые).
+  **200-ответы (rch/accsdb/disable/JSON) перебор НЕ запускают** — это «нет источника», не сбой хоста.
+  Тесты +9 (5xx→следующий хост, весь пул мёртв→null, rch не перебирает, resolveStream один запрос).
+  Всего: **306 тестов (304 pass / 2 skip / 0 fail)**.
+- **Диагностика «Script error» (живой VPS, фильм «Зловещие мертвецы: Пекло» 2026, tmdb 1212763):**
+  эндпоинт `/api/lampa/videos?provider=filmix` отвечает быстро (200, 382ms, items 8–10) — сервер жив.
+  Замер стримов: mp4-карточки skaz-filmix отдают **500MB–1.1GB за ~12с** (первый байт ~300мс) — стрим
+  НЕ висит. Реальные векторы «Script error»:
+  1. **pidtor = торрент-магниты**: `/api/lampa/proxy?url=…/lite/pidtor/…magnet&tr=…` → upstream закрыл
+     коннект → nginx **502 HTML** → `decodeJson` бросает → «Скрипт ерор». Подтверждено в
+     `/var/log/nginx/error.log` (13:45–13:47 UTC, реальные запросы пользователя). pidtor → **BROKEN**
+     (торренты не стримятся), не путать с фильмами.
+  2. **skaz-filmix CDN 429**: `nl105.cdnsqu.com/s/…` отдаёт HTTP 429 text/html на любых заголовках
+     и через прокси — IP-рейт-лимит CDN из VPS; часть качеств (4K-карточки) не играется.
+  3. Флак самого filmix: один и тот же фильм → то 10 mp4-карточек (skaz), то 8 m3u8 480p (native).
+- **`SkazProvider.videos()` НЕ может «Script error» по коду**: `catch → {items:[]}`; `store.js`
+  `payloadOrNull` тоже ловит всё. «Script error» = не-JSON/не-200 ответ, приходящий через nginx.
+- **Следующие фиксы по очереди (после деплоя):** (#2) сериалы skaz — все 13 на GoT дают 0 items;
+  (#3) потеря качеств в follow/postid-путях; (#4) veoveo 403 / pidtor-магниты — выключать/фильтровать.
+
 ## ✅ 2026-08-09 (сессия 14): РЕГИСТР ПЕРЕКЛЮЧЁН НА SKAZ-КЛАСТЕР (порядок пользователя: BACKEND→TEST→LIVE E2E→UI)
 - **Статус:** SkazClient/SkazNormalizer/SkazProvider готовы (задачи #20–#22), **registry строит
   источники из `config.skaz`** (`skaz-<balancer>` вместо `eonline-<balancer>`). EoClient/EoProvider
