@@ -636,3 +636,35 @@ origin → код продублирован.
 - Деплой c54ca67 → backup (`feature/alloha-provider`) + VPS; md5 `cabe2951…` совпал, health 200.
 - Дополнение: админ-команда `/grant @ник|id|токен <дней>` (0543f0a) — выдача/продление
   от текущего срока, ответ `✅ @ник → DD.MM.YY <буква>` + ссылка. Тесты 316 pass / 2 skip.
+
+## Сессия 16.1 (2026-08-09) — Запрос A: ИТОГОВАЯ таблица источников (live-матрикс 15 sources)
+
+Проба `/tmp/probe-final-matrix.mjs` (VPS, 127.0.0.1:3000, 2026-08-09).
+Фильм = «Зловещие мертвецы: Пекло» (id 1212763), сериал = GoT S1.
+Контур: `/api/lampa/videos` → items/voices/seasons → manifest-проба ep1 (первый chunk, не text()).
+
+| source | movie | serial | вердикт |
+|---|---|---|---|
+| filmix (native) | ⚠ **Timeout 30s** (ранее 9/10 играбельных) | ✅ 10 items / 8s / 4v, ep1 HLS 200 | ⚠ NEEDS INVESTIGATION — фильм нестабилен (Cloudflare/429/таймаут) |
+| kodik (native) | ❌ 0 items | ❌ 0 items | ⚠ NEEDS INVESTIGATION — 0 на тестах (был рабочий в сессии 13) |
+| rezka (native) | ❌ 0 (нет тайтла) | ✅ 10 / 8s / 7v, ep1 HLS 200 | ✅ WORKING (сериалы) |
+| rutubemovie | ❌ 0 | ❌ 0 | ✅ WORKING на своём каталоге (играл ранее) |
+| cdnvideohub | ✅ 2 items, ep1 HLS 200 | — | ✅ WORKING |
+| collaps | ✅ 1 item, ep1 HLS 200 | — | ✅ WORKING (раньше «видео не найдено» — исправлено) |
+| hdvb | ✅ 2 items, ep1 HLS 200 | — | ✅ WORKING |
+| skaz-alloha | ✅ 8, ep1 HLS 200 | ✅ 10 / 8s / 8v, ep1 HLS 200 | ✅ WORKING |
+| skaz-videoseed | ✅ 8, ep1 HLS 200 | ⚠ 10 / 8s / 0v, ep1 = JSON-обёртка `{"title":"auto","method":"play",…}` | ⚠ проверить JSON-обёртку в Lampa (резолвер) |
+| skaz-kinopub | ✅ 5, ep1 HLS 200 | ✅ 10 / 8s / 12v, ep1 HLS 200 | ✅ WORKING |
+| skaz-kinoflix | ❌ 0 | ❌ 0 | ❌ BROKEN (нет контента в кластере) |
+| skaz-veoveo | ❌ 0 | ⚠ 10 найдено, ep1 **403 proxy_host_forbidden** | ❌ BROKEN — CDN не в allowlist → FIX #4 (запрет) |
+| skaz-pidtor | ⚠ 8 items, ep1 = **matroska 7.9 GB** (video/x-matroska) | ❌ 0 | ⚠ NEEDS INVESTIGATION — торрент-магниты/огромный файл → Task #26 (запрет) |
+| skaz-solntse | ❌ 0 | ✅ 10 / 2s / 0v, ep1 MP4 3.2 GB 200 | ✅ WORKING (сериалы MP4; фильмов нет) |
+| skaz-zagonka | ❌ 0 | ❌ 0 | ❌ BROKEN (нет контента) |
+
+Скрытые близнецы (не в sources, только через twin native): skaz-filmix → `{"items":[]}`,
+skaz-kodik → `{"items":[]}`, skaz-rezka = native rezka (работает).
+
+**Вывод**: 8 источников играют live (rezka, cdnvideohub, collaps, hdvb, skaz-alloha,
+skaz-videoseed, skaz-kinopub, skaz-solntse). Главный больной — **filmix фильм-путь**
+(30s таймаут = вероятный источник «Скрипт ерор»), затем **kodik (0 items)**.
+FIX #3/#4 и pidtor (#26) остаются под запретом.
