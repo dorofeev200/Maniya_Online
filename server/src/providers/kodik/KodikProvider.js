@@ -7,6 +7,11 @@ import { KodikNormalizer } from './KodikNormalizer.js';
 // Референр по умолчанию — как Lampac ModInit (headers.referer = anilib.me).
 const KODIK_REFERER = 'https://anilib.me/';
 
+// Гейт каталога как Lampac ModInit.Invoke (аниме/восточные языки). Западный
+// контент у kodik-токена почти отсутствует (диагноз §16.2, все 8 западных id
+// → total=0), поэтому при явном невосточном original_language — честный пусто.
+const EASTERN_LANGUAGES = new Set(['ja', 'ko', 'zh', 'cn', 'th', 'vi', 'tl']);
+
 export class KodikProvider extends Provider {
   static id = 'kodik';
   static title = 'Kodik';
@@ -43,11 +48,23 @@ export class KodikProvider extends Provider {
     const kinopoiskId = Number(query.kinopoisk_id || query.kp || 0) || 0;
     const imdbId = String(query.imdb_id || query.imdb || '');
     const season = Number(query.season || query.s || 0) || 0;
+    const year = Number(query.year || 0) || 0;
+
+    // Каталог kodik-токена — аниме/восточные языки (как Lampac ModInit.Invoke).
+    if (!this.withinCatalog(query)) return [];
 
     try {
-      const raw = kinopoiskId || imdbId
+      let raw = kinopoiskId || imdbId
         ? await this.client.searchByIds({ kinopoiskId, imdbId, season })
-        : await this.titleSearch(title, originalTitle);
+        : [];
+      // Id-поиск пуст (тайтл у kodik хранится под другим id или только по
+      // названию) — фолбэк на title-поиск с релевант-фильтром, как Lampac
+      // Controller.Index redirect-on-empty. Без фильтра title-выдача — мусор.
+      if (!raw.length) {
+        raw = this.relevantOnly(await this.titleSearch(title, originalTitle), {
+          title, originalTitle, kinopoiskId, imdbId, year
+        });
+      }
       return this.records(raw);
     } catch {
       return [];
@@ -249,6 +266,43 @@ export class KodikProvider extends Provider {
 
     if (title && title !== originalTitle) return this.client.searchByTitle({ title });
     return [];
+  }
+
+  /** Гейт каталога: только аниме/восточные языки (Lampac ModInit.Invoke). */
+  withinCatalog(query = {}) {
+    const lang = String(query.original_language || '').split('|')[0].trim().toLowerCase();
+    if (!lang) return true; // язык не указан — не гадаем, оставляем как было
+    return EASTERN_LANGUAGES.has(lang);
+  }
+
+  /**
+   * Сужение title-выдачи до релевантных записей. Kodik-поиск по названию —
+   * фаззи-подстрока с топом по релевантности («Побег из Шоушенка» → «Побег
+   * из аула», диагноз §16.2); фолбэк без фильтра отдавал бы мусор.
+   * Релевантность: точный kp/imdb-хит в записи ИЛИ совпадение названия
+   * (title/original_title/other_title) + год (если известен).
+   */
+  relevantOnly(raw, { title, originalTitle, kinopoiskId, imdbId, year } = {}) {
+    const norm = (value) => String(value || '').toLowerCase().replace(/ё/g, 'е').trim();
+    const queryTitle = norm(title);
+    const queryOriginal = norm(originalTitle);
+    const queryKp = kinopoiskId ? String(kinopoiskId) : '';
+    const queryImdb = imdbId ? String(imdbId).toLowerCase() : '';
+
+    return (Array.isArray(raw) ? raw : []).filter((item) => {
+      if (queryKp && String(item.kinopoisk_id || '') === queryKp) return true;
+      if (queryImdb && String(item.imdb_id || '').toLowerCase() === queryImdb) return true;
+
+      const names = [item.title, item.title_orig, item.other_title].map(norm);
+      const nameHit = (queryTitle && names.includes(queryTitle)) || (queryOriginal && names.includes(queryOriginal));
+      if (!nameHit) return false;
+
+      if (year) {
+        const itemYear = Number(item.year) || 0;
+        if (itemYear && Number(year) !== itemYear) return false;
+      }
+      return true;
+    });
   }
 
   records(raw) {

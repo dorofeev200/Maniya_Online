@@ -202,12 +202,12 @@ test('KodikProvider: тип по списку фильмов Lampac (anime/sovie
   const unknownRaw = { id: 'u1', title: 'X', type: 'whatever', link: 'l', translation: { title: 'Оригинал' } };
 
   const client = new FakeKodikClient({
-    byQuery: { anime: [animeRaw], cartoon: [cartoonRaw], x: [unknownRaw] }
+    byQuery: { 'Твоё имя': [animeRaw], 'Ну, погоди!': [cartoonRaw], x: [unknownRaw] }
   });
   const provider = new KodikProvider({ client });
 
-  assert.equal((await provider.search({ title: 'anime' }))[0].type, 'movie');
-  assert.equal((await provider.search({ title: 'cartoon' }))[0].type, 'movie');
+  assert.equal((await provider.search({ title: 'Твоё имя' }))[0].type, 'movie');
+  assert.equal((await provider.search({ title: 'Ну, погоди!' }))[0].type, 'movie');
   assert.equal((await provider.search({ title: 'x' }))[0].type, 'serial');
 });
 
@@ -318,4 +318,95 @@ test('KodikProvider.search: отключённый клиент → []', async (
   const provider = new KodikProvider({ client });
 
   assert.deepEqual(await provider.search({ title: 'Начало' }), []);
+});
+
+// --- KC: гейт каталога (только аниме/восточные языки, как Lampac ModInit) ---
+
+test('KodikProvider.search: KC-гейт — западный язык → [] без обращений к API', async () => {
+  const client = new FakeKodikClient({ byQuery: { Inception: [MOVIE_RAW] }, ids: [MOVIE_RAW] });
+  const provider = new KodikProvider({ client });
+
+  assert.deepEqual(await provider.search({ title: 'Начало', original_language: 'en|ru' }), []);
+  assert.equal(client.calls.length, 0, 'гейт обрубает запрос до клиента');
+});
+
+test('KodikProvider.search: KC-гейт — аниме/восточный язык работает как раньше', async () => {
+  const animeRaw = {
+    id: 'a1',
+    title: 'Твоё имя',
+    title_orig: 'Kimi no Na wa.',
+    type: 'anime',
+    year: 2016,
+    link: 'https://example.com/player/a1',
+    kinopoisk_id: '86866',
+    imdb_id: 'tt5311514',
+    translation: { title: 'Дубляж' }
+  };
+  const client = new FakeKodikClient({ byQuery: { 'Твоё имя': [animeRaw] } });
+  const provider = new KodikProvider({ client });
+
+  const records = await provider.search({ title: 'Твоё имя', original_language: 'ja' });
+
+  assert.equal(records.length, 1);
+  assert.equal(records[0].id, 'a1');
+  assert.equal(records[0].type, 'movie');
+  assert.deepEqual(client.calls, [['searchByTitle', 'Твоё имя']]);
+});
+
+test('KodikProvider.search: KC-гейт — без языка не гадаем, поиск как раньше', async () => {
+  const client = new FakeKodikClient({ ids: [MOVIE_RAW] });
+  const provider = new KodikProvider({ client });
+
+  const records = await provider.search({ kinopoisk_id: '111' });
+  assert.equal(records.length, 1);
+  assert.deepEqual(client.calls, [['searchByIds']]);
+});
+
+// --- KA: фолбэк id-поиск → title-поиск с релевант-фильтром ---
+
+test('KodikProvider.search: KA-фолбэк — пустой id-поиск уходит на название, мусор-title отсекается', async () => {
+  const junk = {
+    id: 'j1', title: 'Побег из аула', title_orig: 'Escape from aul',
+    type: 'foreign-movie', year: 2015, link: 'https://example.com/player/j1',
+    translation: { title: 'Дубляж' }
+  };
+  const real = {
+    id: 'sh1', title: 'Побег из Шоушенка', title_orig: 'The Shawshank Redemption',
+    type: 'foreign-movie', year: 1994, link: 'https://example.com/player/sh1',
+    kinopoisk_id: '326', imdb_id: 'tt0111161', translation: { title: 'Дубляж' }
+  };
+  const client = new FakeKodikClient({
+    ids: [],
+    byQuery: { 'Побег из Шоушенка': [junk, real] }
+  });
+  const provider = new KodikProvider({ client });
+
+  const records = await provider.search({
+    title: 'Побег из Шоушенка',
+    original_title: 'The Shawshank Redemption',
+    kinopoisk_id: '326', imdb_id: 'tt0111161', year: '1994'
+  });
+
+  assert.equal(records.length, 1);
+  assert.equal(records[0].id, 'sh1');
+  assert.equal(records[0].kinopoisk_id, '326');
+  assert.deepEqual(client.calls, [
+    ['searchByIds'],
+    ['searchByTitle', 'The Shawshank Redemption'],
+    ['searchByTitle', 'Побег из Шоушенка']
+  ]);
+});
+
+test('KodikProvider.search: KA-фильтр — совпадение названия, но другой год → отсекает', async () => {
+  const old = {
+    id: 'b1', title: 'Бэтмен', title_orig: 'Batman',
+    type: 'foreign-movie', year: 1989, link: 'https://example.com/player/b1',
+    translation: { title: 'Дубляж' }
+  };
+  const client = new FakeKodikClient({ byQuery: { 'Бэтмен': [old] } });
+  const provider = new KodikProvider({ client });
+
+  const records = await provider.search({ title: 'Бэтмен', year: '2022' });
+
+  assert.equal(records.length, 0);
 });

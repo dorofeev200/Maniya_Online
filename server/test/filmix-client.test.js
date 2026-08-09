@@ -83,3 +83,42 @@ test('FilmixClient.searchApi без ретраев быстро уходит н�
   const result = await client.searchApi('Властелин колец', {});
   assert.deepEqual(result, []);
 });
+
+test('FilmixClient: primary-клиент держит короткий таймаут для быстрого фолбэка (F1)', () => {
+  const client = new FilmixClient({});
+  assert.equal(client.primaryClient.timeoutMs, 3000);
+});
+
+test('FilmixClient.searchByExternalIds бьёт по kp и imdb параллельно (F1)', async () => {
+  const events = [];
+  const primaryClient = {
+    get: async () => {
+      events.push('start');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      events.push('end');
+      return { json: async () => [] };
+    }
+  };
+  const client = new FilmixClient({ primaryClient });
+
+  await client.searchByExternalIds({ kp: '79322', imdb: 'tt0944947' }, {});
+
+  const starts = events.filter((event) => event === 'start');
+  const firstEnd = events.indexOf('end');
+  assert.equal(starts.length, 2, 'оба id-запроса стартовали');
+  assert.ok(firstEnd > 1, `параллельность: оба start раньше первого end — ${JSON.stringify(events)}`);
+});
+
+test('FilmixClient.searchByExternalIds фильтрует результаты по году', async () => {
+  const fixture = [
+    { original_title: 'Evil Dead Burn', year: 2026 },
+    { original_title: 'Evil Dead (1999)', year: 1999 }
+  ];
+  const primaryClient = { get: async () => ({ json: async () => fixture }) };
+  const client = new FilmixClient({ primaryClient });
+
+  const results = await client.searchByExternalIds({ kp: '1', imdb: 't1', year: '2026' }, {});
+
+  assert.equal(results.length, 2); // по одному на каждый id после фильтра года
+  assert.ok(results.every((item) => item.year === 2026));
+});

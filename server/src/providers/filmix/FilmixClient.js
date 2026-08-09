@@ -27,10 +27,13 @@ export class FilmixClient {
     // Primary API на filmix.my при geo-блоке висит до таймаута на каждом
     // ретрае. Для карточки/поиска заводим отдельный клиент без ретраев с
     // коротким таймаутом — фолбэк на api-fx должен включаться быстро.
+    // Диагноз 2026-08-09 (§16.2): primary с VPS мёртв, интермиттентные
+    // long-hang'и до 8с × 4 вызова давали worst-case 32с+ (30с-таймаут фильма
+    // в матриксе). 3с хватает живому JSON-эндпоинту с запасом.
     this.primaryClient = primaryClient || new HttpClient({
       provider: 'filmix',
       headers,
-      timeoutMs: 8000,
+      timeoutMs: 3000,
       retryPolicy: new RetryPolicy({ retries: 0 }),
       rateLimiter
     });
@@ -116,13 +119,12 @@ export class FilmixClient {
   }
 
   async searchByExternalIds({ kp, imdb, year } = {}, context = null) {
+    // Параллельно, а не последовательно: два primary-вызова по 8с (теперь 3с)
+    // складывались в worst-case по каждому id. Promise.all не ускоряет живой
+    // ответ, но срезает сумму таймаутов при long-hang до максимума одного.
     const queries = [kp, imdb].filter(Boolean).map(String);
-    const results = [];
-    for (const query of queries) {
-      const found = await this.searchApi(query, context);
-      results.push(...found.filter((item) => !year || Number(item.year) === Number(year)));
-    }
-    return results;
+    const found = await Promise.all(queries.map((query) => this.searchApi(query, context).catch(() => [])));
+    return found.flat().filter((item) => !year || Number(item.year) === Number(year));
   }
 
   async searchApi(story, context = null) {
