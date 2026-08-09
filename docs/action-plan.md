@@ -53,13 +53,21 @@
      server/.env сейчас: `PORT, EO_ENABLED, EO_ACCOUNT_EMAIL(18), EO_UID(8)` — hosts/balancers/
      origin НЕ заданы (дефолты). → Перевод .env = замена 3 ключей на SKAZ_*, остальное дефолты
      (идентичны). Миграция тривиальна.
-  4. ⏳ **Migration test — ОТДЕЛЬНО ПОСЛЕ UI** (как заказал пользователь). План: на VPS
-     `sed 's/^EO_/SKAZ_/' server/.env > /tmp/migrated.env`, `PORT=3001 node --env-file=/tmp/migrated.env`
-     второй инстанс; сравнить `/api/lampa/sources` (тот же набор) и `videos` 2 тайтлов × kinoflix/
-     zagonka/kinopub (items + play-OK) с основным на 3000; затем включить SKAZ_* в server/.env.
-  5. ⏳ Решение об удалении EO_* — ТОЛЬКО после зелёного migration test. При удалении: обновить
-     `config.eonline`-читателей в легаси-стаке (eolive.test.js/e2e-*.mjs → SKAZ_* или retire-стек
-     сравнения), убрать fallback из config.skaz и блок eonline, EO_TITLES оставить (это данные).
+  4. ✅ **Migration test — ВЫПОЛНЕН 09.08 (после UI-завершения кода), PASS.** Протокол: первый
+     шаг — второй инстанс `PORT=3001 node --env-file=/tmp/migrated.env` (env = `sed 's/^EO_/SKAZ_/'`),
+     где SKAZ_ENABLED/SKAZ_ACCOUNT_EMAIL/SKAZ_UID, hosts/balancers/origin — дефолты: **health OK,
+     sources IDENTICAL (15=15), videos 8 пар = эквивалентны** (zagonka 16=16, kinopub 22=22 QM,
+     play=OK:hls). Расхождения (alloha/kinopub 0) — **флак интермиттентности skaz, НЕ регресс**:
+     retry-probe 3 раунда показал одинаковые качели 0↔7↔8/0↔9↔16 на ОБЕИХ инстансах (P1 и P2
+     флуктуируют синхронно; известная хост-ротация skaz, документировано ранее). Второй шаг —
+     **production переведён**: `server/.env` → `SKAZ_ENABLED/SKAZ_ACCOUNT_EMAIL/SKAZ_UID`
+     (EO_* удалены из .env, бэкап `server/.env.bak-eo` на VPS, НЕ коммитится), systemd restart,
+     **PROD-VERIFY: PASS** — sources 15/15, zagonka 16 items play=OK:hls qmap=[1080p/360p/480p],
+     alloha 7 items play=OK:hls (kinopub 0 — тот же флак, давал 9 на обоих конфигах).
+  5. ⏺ **EO_* alises в КОДЕ НЕ удалены** (как заказано). Решение пользователя, когда удалять.
+     При удалении: обновить `config.eonline`-читателей в легаси-стаке (eolive.test.js/e2e-*.mjs →
+     SKAZ_* или retire-стек сравнения), убрать fallback из config.skaz и блок eonline,
+     EO_TITLES оставить (это данные). Готово к удалению в любой момент — runtime их не читает.
 - **UI (#10) верификация кода (выполнено live, базы контракта):**
   - ✅ **#3 quality→player**: `chooseQuality`→`runPlayer(item,{url:entry.url,quality:item.quality})` →
     `Player.play({url: entry.url})` — ВЫБРАННЫЙ quality-URL идёт в плеер (не дефолтный item.url).
