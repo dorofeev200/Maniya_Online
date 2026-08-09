@@ -34,6 +34,43 @@
 - **Что дальше:** закрыть veoveo-403 после миграции (задача deep-dive, #327-подобна) →
   вернуться к UI (#10).
 
+## 📋 2026-08-09: АУДИТ КОНФИГА ПОСЛЕ МИГРАЦИИ (EO_* → SKAZ_*) — HOLD, migration test отдельно после UI
+- **Задача пользователя:** подтвердить, что (1) SkazClient/SkazProvider не зависят от E-Online,
+  (2) EO_* — только временный alias, (3) новые конфиги документированы как SKAZ_*,
+  (4) production .env переводится на SKAZ_ACCOUNT_EMAIL/SKAZ_UID/SKAZ_HOSTS, (5) после перевода
+  тесты + live E2E работают, (6) ПОСЛЕ этого решить, когда удалить EO_*. Aliases НЕ удалять.
+- **Результат аудита (код):**
+  1. ✅ **SkazClient/SkazProvider/SkazNormalizer НЕ зависят от E-Online кода**: импорты только
+     `errors.js`/`proxy.js`/`base.js` + свои (grep по `server/src/providers/skaz/`). Слова
+     «E-Online» в их комментариях — только описание «1:1-порт», runtime-зависимости нет.
+  2. ✅ **config.eonline — МЁРТВ на runtime**: в `server/src` НИ ОДНОГО чтения `config.eonline`
+     (grep `config\.eonline|config\.skaz` → только registry читает `config.skaz`). EO_* остались
+     только в: config fallback-алиасах блока `skaz`, .env.example, легаси-стаке сравнения
+     (EoClient/EoProvider/EoNormalizer — читают их только `scripts/e2e-*.mjs` и `test/eolive.test.js`,
+     гейт `EO_LIVE=1`, в обычном прогоне skip).
+  3. ✅ **SKAZ_* документированы primary** (config.js + .env.example §«Skaz-кластер»: SKAZ_ENABLED/
+     SKAZ_HOSTS/SKAZ_BALANCERS/SKAZ_ACCOUNT_EMAIL/SKAZ_UID/SKAZ_ORIGIN, EO_* — фолбэк). VPS
+     server/.env сейчас: `PORT, EO_ENABLED, EO_ACCOUNT_EMAIL(18), EO_UID(8)` — hosts/balancers/
+     origin НЕ заданы (дефолты). → Перевод .env = замена 3 ключей на SKAZ_*, остальное дефолты
+     (идентичны). Миграция тривиальна.
+  4. ⏳ **Migration test — ОТДЕЛЬНО ПОСЛЕ UI** (как заказал пользователь). План: на VPS
+     `sed 's/^EO_/SKAZ_/' server/.env > /tmp/migrated.env`, `PORT=3001 node --env-file=/tmp/migrated.env`
+     второй инстанс; сравнить `/api/lampa/sources` (тот же набор) и `videos` 2 тайтлов × kinoflix/
+     zagonka/kinopub (items + play-OK) с основным на 3000; затем включить SKAZ_* в server/.env.
+  5. ⏳ Решение об удалении EO_* — ТОЛЬКО после зелёного migration test. При удалении: обновить
+     `config.eonline`-читателей в легаси-стаке (eolive.test.js/e2e-*.mjs → SKAZ_* или retire-стек
+     сравнения), убрать fallback из config.skaz и блок eonline, EO_TITLES оставить (это данные).
+- **UI (#10) верификация кода (выполнено live, базы контракта):**
+  - ✅ **#3 quality→player**: `chooseQuality`→`runPlayer(item,{url:entry.url,quality:item.quality})` →
+    `Player.play({url: entry.url})` — ВЫБРАННЫЙ quality-URL идёт в плеер (не дефолтный item.url).
+  - ✅ **quality-мапы приходят прокси-URL** (SkazProvider `cleanedQualityMap(card.quality, streamProxy)`);
+    call-карточки резолвятся сервером в ОДИН манифест без мапы (live: skaz-alloha 8 items).
+  - ✅ **#4 TV D-pad**: ход по item (`selector`), Enter=`hover:enter`→≥2 quality→`Lampa.Select`
+    (нативная модалка, пульт); <2 — играет сразу.
+  - ✅ **#5 responsive**: media ≤640px/≤420px на `.maniya-online-item/*` (есть в maniya_css).
+  - ⏳ **#2 hands-on в Lampa** (мобильный + ТВ) — только пользователь; **#16 Alloha per-voice** —
+    отдельно (заморожено).
+
 ## 🚨 2026-08-09: CRITICAL AUDIT+REPAIR E2E (запрос пользователя, полный текст в резюме сессии)
 - **Задача:** полный end-to-end аудит и ремонт существующего проекта (НЕ создавать провайдеров
   с нуля, НЕ дублировать). Reference — исходный JS: `http://138.16.184.153:8080/dorofeev200_6c95576dbcb5.js`.
