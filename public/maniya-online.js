@@ -535,11 +535,12 @@
       '.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}' +
       '@media (max-width:640px){.maniya-online-item{padding:1em;margin-bottom:.8em}.maniya-online-item__title{font-size:1.25em}}' +
       '@media (max-width:420px){.maniya-online-item{padding:.85em;margin-bottom:.6em}.maniya-online-item__quality{font-size:.8em}}' +
-      '.maniya-online-button{position:relative;width:2.2em;height:2.2em;margin-right:.7em;border-radius:50%;background:radial-gradient(circle at 32% 26%,#ffd98f 0%,#ffb23e 42%,#f58a1b 100%);color:#3a1d02;display:flex;align-items:center;justify-content:center;box-shadow:0 .1em .5em rgba(0,0,0,.38),inset 0 .07em .22em rgba(255,255,255,.5);transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease;flex:0 0 auto}' +
-      '.maniya-online-button::after{content:"";position:absolute;top:-6%;left:-6%;width:112%;height:112%;border-radius:50%;border:.09em solid rgba(255,255,255,.4);box-shadow:inset 0 .06em .35em rgba(255,255,255,.28),inset 0 -.06em .28em rgba(0,0,0,.15);pointer-events:none}' +
-      '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.12);box-shadow:0 0 0 .22em rgba(255,255,255,.6),0 .18em .7em rgba(0,0,0,.45);outline:none}' +
-      '.maniya-online-button__m{width:1.5em;height:1.5em;position:relative;z-index:1;filter:drop-shadow(0 .05em .12em rgba(0,0,0,.28));display:flex;align-items:center;justify-content:center}' +
-      '.maniya-online-button__svg{width:1.5em;height:1.5em;display:block}' +
+      '.maniya-online-button{position:relative;min-width:2.6em;height:2.3em;padding:0 1.05em;margin-right:.55em;border-radius:999em;background:radial-gradient(circle at 32% 26%,#ffd98f 0%,#ffb23e 42%,#f58a1b 100%);color:#3a1d02;display:inline-flex;align-items:center;justify-content:center;gap:.4em;box-shadow:0 .1em .5em rgba(0,0,0,.38),inset 0 .07em .22em rgba(255,255,255,.5);transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease;flex:0 0 auto}' +
+      '.maniya-online-button::after{content:"";position:absolute;top:-6%;left:-4%;width:108%;height:112%;border-radius:999em;border:.09em solid rgba(255,255,255,.4);box-shadow:inset 0 .06em .35em rgba(255,255,255,.28),inset 0 -.06em .28em rgba(0,0,0,.15);pointer-events:none}' +
+      '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.06);box-shadow:0 0 0 .22em rgba(255,255,255,.6),0 .18em .7em rgba(0,0,0,.45);outline:none}' +
+      '.maniya-online-button__m{width:1.35em;height:1.35em;position:relative;z-index:1;filter:drop-shadow(0 .05em .12em rgba(0,0,0,.28));display:flex;align-items:center;justify-content:center}' +
+      '.maniya-online-button__svg{width:1.35em;height:1.35em;display:block}' +
+      '.maniya-online-button__label{font-size:.82em;font-weight:800;letter-spacing:.045em;text-transform:uppercase;line-height:1;white-space:nowrap}' +
       '.maniya-online-button__ring{fill:none;stroke:rgba(255,255,255,.55);stroke-width:5;opacity:1}' +
       '.maniya-online-button__glyph{fill:none;stroke:#3a1d02;stroke-width:12.5;stroke-linecap:round;stroke-linejoin:round}' +
       // Badge статуса подписки «M-Online». Нативный компонент, flex + wrap:
@@ -587,7 +588,8 @@
     });
   }
 
-  // Внутренности «M»-кнопки (логотип Maniya Online): кольцо + SVG-глиф «M».
+  // Внутренности «M»-кнопки (логотип Maniya Online): PILL/OVAL — глиф «M» + лейбл.
+  // Форма pill (шире высоты, radius 999em) задаётся CSS `.maniya-online-button`.
   function maniyaButtonPart() {
     return (
       '<span class="maniya-online-button__m" aria-hidden="true">' +
@@ -595,7 +597,8 @@
           '<circle class="maniya-online-button__ring" cx="50" cy="50" r="47"></circle>' +
           '<path class="maniya-online-button__glyph" d="M21 80V22l29 33 29-33v58"></path>' +
         '</svg>' +
-      '</span>'
+      '</span>' +
+      '<span class="maniya-online-button__label">M-Online</span>'
     );
   }
 
