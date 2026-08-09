@@ -600,3 +600,26 @@ origin → код продублирован.
 - «В остальных по одному фильму» — поисковая выдача провайдеров слабая → гл. боль = покрытие каталога/поиска (не декод — он работает)
 ОТЛОЖЕНО НА ЗАВТРА. Старт: проверить каждый через живой API с реальным токеном (не напрямую провайдер), см. память.
 
+
+## Сессия 15.5 (2026-08-09 вечер) — FIX №2: сериалы skaz (двухуровневая структура) ✅
+- **Диагноз**: skaz-сериалы на большинстве балансеров (alloha/videoseed/kinopub/veoveo/
+  solntse) ДВУХУРОВНЕВЫЕ: базовая serial-страница несёт только сезон-карточки `link s=N`
+  (без t=), голосов на ней нет; переводы и серии появляются только на странице сезона.
+  Раньше `serialVideos` выходил при `voices=0` → 0 items на всем кроме rezka.
+- **Фикс (e6bfd9b)**: ранний выход только когда нет ни сезонов, ни голосов; голоса
+  подтягиваются со страницы сезона (`SkazNormalizer.voices(cards, {withSeason:true})`);
+  `episodeItems` принимает и `method:"play"` (veoveo/solntse/kinopub — готовый CDN-URL,
+  резолв не нужен), `call`-серии резолвятся как раньше.
+- **Live (VPS, GoT через /api/lampa/videos)**:
+  - ✅ alloha: 10 items / 8 сезонов / 8 голосов, ep1 HLS-OK
+  - ✅ kinopub: 10 items / 8 сезонов / 12 голосов, ep1 HLS-OK
+  - ✅ videoseed: 10 items / 8 сезонов, ep1 OK-200
+  - ✅ solntse: 10 items / 2 сезона, ep1 OK-200
+  - ⚠ veoveo: 10 items найдены, но первый ep — 403 `proxy_host_forbidden`
+    (CDN `api.rstprgapipt.com` не в allowlist) — это и есть известный «veoveo 403» (FIX №4)
+  - ❌ kinoflix/pidtor/zagonka: 0 items (lite=null / нет контента на кластере)
+  - rezka — работал и раньше (7 голосов на базовой) — не сломан
+- **Filmix фильм «Зловещие мертвецы: Пекло»** (pub endpoint): native `filmix` → 10 items,
+  9/10 играются (200 MP4 до 24 ГБ), 1 item «MVO Dragon Money» — 429 CDN (известный вектор
+  «Скрипт ерор», memory maniya-script-error-findings). `skaz-filmix` → `{"items":[]}`.
+- Тесты: 311 (309 pass + 2 skip, 0 fail). Деплой e6bfd9b → backup + VPS, md5 совпал.
