@@ -148,6 +148,103 @@ test('HTTP 5xx — источник недоступен (null)', async () => {
   assert.equal(await client.getLite({}), null);
 });
 
+test('ретрай по хостам: 5xx на одном хосте → карточки со следующего хоста', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2', 'http://h3'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.includes('h1')) return Promise.resolve(response(503, 'disable'));
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.getLite({ title: 'Game' });
+  assert.ok(html, 'после 503 на h1 должен прийти HTML со следующего хоста');
+  // первый кандидат — выбранный buildLiteUrl хост (h1), затем h2, h3 — по порядку.
+  assert.ok(seen[0].startsWith('http://h1/lite/x?'));
+  assert.ok(seen[1].startsWith('http://h2/lite/x?'));
+  assert.equal(seen.length, 2, 'достаточно двух хостов: h1 503, h2 OK');
+});
+
+test('ретрай по хостам: весь пул мёртв → null', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      return Promise.resolve(response(503, 'disable'));
+    }
+  });
+
+  assert.equal(await client.getLite({}), null);
+  assert.equal(seen.length, 2, 'перебрали оба хоста пула');
+});
+
+test('ретрай по хостам: rch/JSON (200) НЕ перебирает хосты — это «нет источника»', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      return Promise.resolve(response(200, '{"rch":true}'));
+    }
+  });
+
+  assert.equal(await client.getLite({}), null);
+  assert.equal(seen.length, 1, '200-ответ не запускает перебор хостов');
+});
+
+test('openLiteUrl: 5xx на хосте карточки → страница с другого хоста пула', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://online3.skaz.tv', 'http://online8.skaz.tv'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.startsWith('http://online3.skaz.tv')) return Promise.resolve(response(503, 'disable'));
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.openLiteUrl('http://online3.skaz.tv/lite/x/serial?s=1');
+  assert.ok(html);
+  assert.ok(seen[0].startsWith('http://online3.skaz.tv/lite/x/serial?s=1'));
+  assert.ok(seen[0].includes('account_email=user%40example.com'));
+  assert.ok(seen[1].startsWith('http://online8.skaz.tv/lite/x/serial?s=1'));
+});
+
+test('resolveStream: НЕ ротирует хосты (потоки CDN-токеновые)', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: async (url) => {
+      seen.push(url);
+      return {
+        status: 200,
+        ok: true,
+        url: 'http://magic.stream/key/manifest.m3u8',
+        headers: {},
+        body: { cancel: () => {} },
+        text: async () => 'm3u8'
+      };
+    }
+  });
+
+  const final = await client.resolveStream('http://h1/lite/x/movie.m3u8?play=true');
+  assert.equal(seen.length, 1, 'резолв потока — один запрос, без перебора хостов');
+  assert.ok(final.includes('magic.stream'));
+});
+
 test('isUsablePage / isRchPayload / isAccsdbPayload', () => {
   const html = '<div class="videos__item">x</div> <!DOCTYPE html>';
   assert.equal(isUsablePage(html), true);

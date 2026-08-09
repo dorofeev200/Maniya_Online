@@ -115,6 +115,42 @@ test('HTTP 5xx — источник недоступен (null)', async () => {
   assert.equal(await client.getLite({}), null);
 });
 
+test('ретрай по хостам: 5xx на одном хосте → карточки со следующего', async () => {
+  const seen = [];
+  const client = new EoClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2', 'http://h3'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.includes('h1')) return Promise.resolve(response(503, 'disable'));
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.getLite({ title: 'Game' });
+  assert.ok(html);
+  assert.ok(seen[0].startsWith('http://h1/lite/x?'));
+  assert.ok(seen[1].startsWith('http://h2/lite/x?'));
+  assert.equal(seen.length, 2);
+});
+
+test('ретрай по хостам: rch/JSON (200) НЕ перебирает хосты', async () => {
+  const seen = [];
+  const client = new EoClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      return Promise.resolve(response(200, '{"rch":true}'));
+    }
+  });
+
+  assert.equal(await client.getLite({}), null);
+  assert.equal(seen.length, 1);
+});
+
 test('isUsablePage: html ок, json/null/disable — нет', () => {
   const html = '<div class="videos__item">x</div> <!DOCTYPE html>';
   assert.equal(isUsablePage(html), true);

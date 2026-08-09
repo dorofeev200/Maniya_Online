@@ -59,11 +59,16 @@ export class SkazClient {
   /**
    * GET `lite/<balancer>?…`. Возвращает HTML-строку (финальная страница),
    * или null если источник для тайтла недоступен (rch/accsdb/503/disable).
+   *
+   * При 5xx/сетевой ошибке на одном хосте пула перебираем остальные хосты
+   * (fetchHosts) — это и есть честный «балансер как в Е-Online»: кластерные
+   * ноды флакают по одной (напр. online3.skaz.tv даёт 503 для kinoflix при
+   * живых карточках на online8/94.249.*).
    */
   async getLite(params = {}) {
     const url = this.buildLiteUrl(params);
     if (!url) return null;
-    const response = await this.fetch(url);
+    const response = await this.fetchHosts(url);
     if (!response) return null;
     const text = await response.text().catch(() => null);
     if (text == null) return null;
@@ -72,12 +77,13 @@ export class SkazClient {
 
   /**
    * Открыть URL из карточки `method:"link"`. Абсолютный lite URL (часто на
-   * skaz-хосте). Дописываем auth-параметры, если их там нет.
+   * skaz-хосте). Дописываем auth-параметры, если их там нет. 5xx на одном
+   * хосте → следующий хост пула (fetchResolvedHosts).
    */
   async openLiteUrl(url) {
     if (!url) return null;
     const target = withAuth(url, this.accountEmail, this.uid);
-    const { response, finalUrl } = await this.fetchResolved(target);
+    const { response, finalUrl } = await this.fetchResolvedHosts(target);
     if (!response) return null;
     const finalURL = finalUrl || target;
     const text = await response.text().catch(() => null);
@@ -107,7 +113,7 @@ export class SkazClient {
     if (!this.accountEmail || !this.uid) return null;
     const url = this.buildLiteUrl({}, { discovery: true });
     if (!url) return null;
-    const response = await this.fetch(url);
+    const response = await this.fetchHosts(url);
     if (!response) return null;
     const text = await response.text().catch(() => null);
     if (!text) return null;
@@ -173,6 +179,53 @@ export class SkazClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * GET `lite/…` с перебором хостов пула: первый кандидат — URL как есть
+   * (уже на хосте ротации buildLiteUrl), при 5xx/network/reset пробуем
+   * каждый следующий хост пула с тем же путём. Возвращает первый рабочий
+   * Response (status 2xx) либо null, когда весь пул мёртв. FAIL-NOT-RETRY:
+   * 200-ответы (в т.ч. rch/accsdb/JSON) НЕ перебираются — это «нет источника
+   * для тайтла», а не сбой хоста.
+   */
+  async fetchHosts(url, options = {}) {
+    for (const target of this._hostTargets(url)) {
+      const response = await this.fetch(target, options);
+      if (response) return response;
+    }
+    return null;
+  }
+
+  /**
+   * fetchResolved с перебором хостов пула (для link-страниц карточек):
+   * 5xx/redirect-glob на хосте → следующий хост. Используется только
+   * openLiteUrl; resolveStream не ротирует хосты (потоки CDN-токеновые).
+   */
+  async fetchResolvedHosts(url, headers = {}) {
+    for (const target of this._hostTargets(url)) {
+      const { response, finalUrl } = await this.fetchResolved(target, headers);
+      if (response && STATUS_REST.has(response.status)) return { response, finalUrl };
+    }
+    return { response: null, finalUrl: null };
+  }
+
+  /**
+   * Порядок кандидатов-хостов для URL: (0) URL как есть — уже на выбранном
+   * buildLiteUrl хосте ротации; (1..N) остальные хосты пула с тем же путём.
+   * Start-индекс = где URL в пуле; если URL не из пула (резервный/CDN), идём
+   * от текущей точки ротации `_hostIndex`. Каждый хост пула — ровно один раз.
+   */
+  _hostTargets(url) {
+    const pool = this.hosts.length ? this.hosts : SKAZ_DEFAULT_HOSTS;
+    const targets = [url];
+    if (!pool.length) return targets;
+    const origin = safeOrigin(url);
+    const startIndex = pool.indexOf(origin) !== -1 ? pool.indexOf(origin) : this._hostIndex % pool.length;
+    for (let step = 1; step < pool.length; step += 1) {
+      targets.push(swapHost(url, pool[(startIndex + step) % pool.length]));
+    }
+    return targets;
   }
 
   _pickHost() {
@@ -246,6 +299,29 @@ function parseBalancersFromSearch(text) {
 function normalizeHosts(list) {
   if (!Array.isArray(list)) return [];
   return list.map((host) => String(host).trim().replace(/\/+$/, '')).filter(Boolean);
+}
+
+/** Origin URL-а (для поиска в пуле хостов), или '' при невалидном URL. */
+function safeOrigin(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Переписать URL на другой хост пула (тот же путь/query — lite-страницы
+ * кластера обслуживаются любым бэкендом). Протокол берём из исходного URL.
+ */
+function swapHost(url, nextHost) {
+  try {
+    const parsed = new URL(url);
+    parsed.host = String(nextHost).replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return parsed.toString();
+  } catch {
+    return url;
+  }
 }
 
 /** Дописать `account_email`/`uid` в URL, если их нет. */
