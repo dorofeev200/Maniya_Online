@@ -58,6 +58,33 @@ test('episodeItems: серии из страницы сезона', async () => 
   assert.ok(first.stream, 'у эпизода есть stream-URL');
 });
 
+test('episodeItems: play-серии (veoveo/solntse) тоже отдаются', () => {
+  const html = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://cdn.example.com/ep/3.m3u8","s":1,"e":3,"name":"3 серия"}\'>x</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://cdn.example.com/ep/1.m3u8","s":1,"e":1,"name":"1 серия"}\'>x</div>'
+  ].join('');
+  const episodes = normalizer.episodeItems(normalizer.cards(html), 1);
+  assert.equal(episodes.length, 2, `play-эпизоды: ${episodes.length}`);
+  assert.equal(episodes[0].method, 'play');
+  assert.equal(episodes[0].episode, 1, 'сортируются по номеру');
+  assert.equal(episodes[1].episode, 3);
+  assert.equal(episodes[0].url, 'http://cdn.example.com/ep/1.m3u8');
+});
+
+test('voices: withSeason — переводы со страницы сезона (карточки s+N t=+)', () => {
+  const seasonPageHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha?title=GOT&t=138&s=1","similar":false}\'><span class="videos__item-title">Рен-ТВ</span></div>',
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha?title=GOT&t=3&s=1","similar":false}\'><span class="videos__item-title">AlexFilm</span></div>'
+  ].join('');
+  const cards = normalizer.cards(seasonPageHtml);
+
+  // По умолчанию (без withSeason) эти карточки — сезоны, не голоса.
+  assert.equal(normalizer.voices(cards).length, 0, 'без withSeason — 0 голосов');
+  const withSeason = normalizer.voices(cards, { withSeason: true });
+  assert.equal(withSeason.length, 2, `withSeason отработал: ${withSeason.length}`);
+  assert.ok(withSeason.every((v) => v.t != null));
+});
+
 test('filmItems: play-карточки фильма → items с качеством', async () => {
   const html = await fixture('eo-fx.json');
   const cards = normalizer.cards(html);

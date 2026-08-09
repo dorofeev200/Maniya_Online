@@ -29,8 +29,19 @@ export class SkazNormalizer {
     return items;
   }
 
-  /** Переводы (method:"link", url содержит t= и НЕ содержит s=/similar). */
-  voices(cards) {
+  /**
+   * Переводы (method:"link", url содержит t= и similar=false).
+   *
+   * По умолчанию сбрасываем карточки, несущие `s=` — это сезон-карточки,
+   * у которых `t` — просто активный перевод внутри сезона (rezka), а не
+   * отдельный голос. Но сериалы skaz-кластера часто двухуровневые: базовая
+   * страница даёт только сезоны, а переводы появляются только на странице
+   * конкретного сезона (alloha/videoseed/kinopub/…) в виде `link s=<сезон>`
+   * с уникальным `t=`. Для таких страниц нужен режим `{ withSeason: true }` —
+   * считать переводом любую link-карточку с `t=` (сезоны без перевода `s=`
+   * без `t=` и так отсеются).
+   */
+  voices(cards, options = {}) {
     const seen = new Set();
     const voices = [];
     for (const card of cards || []) {
@@ -39,8 +50,8 @@ export class SkazNormalizer {
       const t = paramNumber(card.url, 't');
       if (t == null) continue;
       // Сезон-карточки rezka тоже несут `&t=<активный перевод>&s=<номер>` —
-      // у перевода s быть не должно.
-      if (paramNumber(card.url, 's') != null) continue;
+      // у перевода s быть не должно (кроме явного withSeason-режима).
+      if (!options.withSeason && paramNumber(card.url, 's') != null) continue;
       const name = voiceName(card, t);
       const title = String(card._text || card.title || name).trim();
       if (seen.has(title)) continue;
@@ -107,15 +118,23 @@ export class SkazNormalizer {
     return items;
   }
 
-  /** Серии: items по карточкам `call` с полями s/e. */
+  /**
+   * Серии: items по карточкам `call`/`play` с полями s/e.
+   *
+   * Skaz-сериалы дают эпизоды на странице сезона в двух видах:
+   * - `call` с s/e (alloha/videoseed) — URL требует серверного резолва;
+   * - `play` с s/e (veoveo/solntse/kinopub) — готовый CDN-URL серии, резолв
+   *   не нужен (провайдер просто проксирует `url`).
+   */
   episodeItems(cards, seasonNumber) {
     const items = [];
     for (const card of cards || []) {
-      if (card.method !== 'call' || card.s == null || card.e == null) continue;
+      if (card.method !== 'call' && card.method !== 'play') continue;
+      if (card.s == null || card.e == null) continue;
       if (seasonNumber != null && Number(card.s) !== Number(seasonNumber)) continue;
       const episode = Number(card.e) || 0;
       items.push({
-        method: 'call',
+        method: card.method,
         title: card.name || `Серия ${episode}`,
         episode,
         season: Number(card.s) || 0,

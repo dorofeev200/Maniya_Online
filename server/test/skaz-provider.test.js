@@ -144,6 +144,65 @@ test('serial: голоса/сезоны + серии через openLiteUrl', as
   assert.ok(item.episode >= 1);
 });
 
+test('serial: alloha-вид — база только с сезонами (нет голосов) → openLiteUrl сезона → серии', async () => {
+  // Всеoha/видеоид/солнце: базовая serial-страница несёт только сезонные карточки
+  // `link s=N` без `t=` — голосов на базовой нет. Голоса и серии появляются
+  // только на странице сезона.
+  const baseAlloha = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha?title=GOT&s=1","similar":false}\'><span class="videos__item-title">1 сезон</span></div>',
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha?title=GOT&s=2","similar":false}\'><span class="videos__item-title">2 сезон</span></div>'
+  ].join('');
+  // Страница сезона: переводы (link с t=) + серии (call c s/e).
+  const season1Html = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha/s?t=138&s=1","similar":false}\'><span class="videos__item-title">Рен-ТВ</span></div>',
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha/s?t=3&s=1","similar":false}\'><span class="videos__item-title">AlexFilm</span></div>',
+    '<div class="videos__item" data-json=\'{"method":"call","url":"http://h/x","stream":"http://h/video.m3u8?t=138&s=1&e=1&play=true","s":1,"e":1,"name":"1 серия"}\'>s</div>',
+    '<div class="videos__item" data-json=\'{"method":"call","url":"http://h/y","stream":"http://h/video.m3u8?t=138&s=1&e=2&play=true","s":1,"e":2,"name":"2 серия"}\'>s</div>'
+  ].join('');
+
+  const client = new FakeSkazClient({ lite: baseAlloha, pages: { 's=1': season1Html } });
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '1', title: 'GOT' }));
+
+  assert.equal(result.seasons.length, 2, `сезоны с базовой: ${result.seasons.length}`);
+  assert.ok(result.items.length >= 2, `серии со страницы сезона: ${result.items.length}`);
+  assert.equal(result.items[0].episode, 1);
+  assert.equal(result.items[0].method, 'play');
+  const opened = client.calls.find(([name]) => name === 'openLiteUrl');
+  assert.ok(opened, 'сезон открывается через openLiteUrl');
+});
+
+test('serial: veoveo-вид — эпизоды на странице сезона как method:play (готовый CDN)', async () => {
+  const baseVeoveo = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/veoveo?title=GOT&s=1","similar":false}\'><span class="videos__item-title">1 сезон</span></div>'
+  ].join('');
+  const seasonHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://cdn.example.com/ep/1.m3u8","s":1,"e":1,"name":"1 серия"}\'>x</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://cdn.example.com/ep/2.m3u8","s":1,"e":2,"name":"2 серия"}\'>x</div>'
+  ].join('');
+
+  const client = new FakeSkazClient({ lite: baseVeoveo, pages: { 's=1': seasonHtml } });
+  const provider = makeProvider(client, 'veoveo');
+
+  const result = await provider.videos(context({ serial: '1', title: 'GOT' }));
+
+  assert.ok(result.items.length >= 2, `play-серии: ${result.items.length}`);
+  // play-серии не резолвятся через resolveStream — url готовый через прокси.
+  const resolved = client.calls.filter(([name]) => name === 'resolveStream');
+  assert.equal(resolved.length, 0, 'play-серии не идут в resolveStream');
+  assert.ok(String(result.items[0].url).includes('/api/lampa/proxy'), `url через прокси: ${result.items[0].url}`);
+});
+
+test('serial: база без сезонов и голосов — пусто (не киноплэй-путь)', async () => {
+  const weirdHtml = '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v.m3u8","s":null,"e":null}\'>x</div>';
+  const client = new FakeSkazClient({ lite: weirdHtml });
+  const provider = makeProvider(client, 'filmix');
+  const result = await provider.videos(context({ serial: '1', title: 'X' }));
+  assert.equal(result.items.length, 0);
+  assert.equal(result.seasons.length, 0);
+});
+
 test('serial: поиск URL по выбранному сезону из query', async () => {
   const serialHtml = await fixture('eo-got-rezka.html');
   const ep2Html = [

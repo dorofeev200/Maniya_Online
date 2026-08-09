@@ -217,12 +217,17 @@ export class SkazProvider extends Provider {
     const voices = this.normalizer.voices(cards);
     const seasons = this.normalizer.seasons(cards);
 
-    if (!voices.length && !inlineEpisodes) {
+    // skaz-сериалы двухуровневые: базовая страница часто несёт только
+    // сезон-карточки `link s=N` (без `t=`), а переводы и серии появляются
+    // только после открытия страницы сезона (alloha/videoseed/kinopub/
+    // veoveo/solntse). Если есть сезоны — продолжаем, даже когда голосов
+    // на базовой странице нет.
+    if (!seasons.length && !voices.length && !inlineEpisodes) {
       return { items: [], seasons: [], voices: [] };
     }
 
     const voiceIndex = Number(query.voice) || 0;
-    const voice = voices[voiceIndex % voices.length] || voices[0] || null;
+    const voice = voices.length ? voices[voiceIndex % voices.length] || voices[0] : null;
     let seasonNumber = Number(query.season) || 0;
     if (seasons.length && !seasons.some((entry) => entry.number === seasonNumber)) {
       seasonNumber = seasons[0].number;
@@ -233,11 +238,20 @@ export class SkazProvider extends Provider {
     if (!pageHtml) return { items: [], seasons: [], voices: [] };
 
     const pageCards = targetHref ? this.normalizer.cards(pageHtml) : cards;
+
+    // Голоса могут жить только на странице сезона (alloha/kinopub): базовая
+    // страница их не показывает. Собираем переводы оттуда, если базовых нет.
+    const effectiveVoices = voices.length ? voices : this.normalizer.voices(pageCards, { withSeason: true });
+
     const episodes = this.normalizer.episodeItems(pageCards, seasonNumber || undefined);
 
     const items = [];
     for (const episode of episodes) {
-      const streamUrl = await this.resolveStream(episode, requestContext);
+      // `play`-серии (veoveo/solntse/kinopub) — готовый CDN-URL, резолв не нужен;
+      // `call`-серии (alloha/videoseed) — резолвим сервером.
+      const streamUrl = episode.method === 'play'
+        ? (episode.url || episode.stream)
+        : await this.resolveStream(episode, requestContext);
       if (!streamUrl) continue;
       items.push({
         method: 'play',
@@ -253,7 +267,7 @@ export class SkazProvider extends Provider {
     }
 
     const seasonsList = seasons.map((entry) => ({ number: entry.number, title: entry.title }));
-    const voicesList = voices.map((entry, index) => ({ name: entry.name, index }));
+    const voicesList = effectiveVoices.map((entry, index) => ({ name: entry.name, index }));
     return { items, seasons: seasonsList, voices: voicesList };
   }
 
