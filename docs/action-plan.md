@@ -44,6 +44,27 @@
 - **Деплой:** сразу после этой волны, потом commit+pash на `backup`. План обновлён.
 - **Обновление плана (unit-фикс):** деплой выполнен ✓ (`DEPLOY 09.08 08:49` — tar-over-SSH, certbot renew OK,
   `/health` = `{"ok":true}`), коммит `82987b0` на `feature/alloha-provider`, пушим на `backup`.
+
+## ⏸ ТОЧКА ВОЗОБНОВЛЕНИЯ (09.08, ПОСЛЕ ОБРЫВА ТОКЕНОВ) — №10 UI SELECTOR
+> Прошлая сессия закрыта полностью: провайдеры #9 done (все REST-живые источники готовы, деплой ✓,
+> коммиты `82987b0`/`2569f24`/`747f949` в `backup/feature/alloha-provider`). ВСЕ изменения сохранены:
+> локально ✓ + VPS ✓ + GitHub backup ✓. Тесты: 262 (260 pass +2 skip live).
+> **СЛЕДУЮЩИЙ ШАГ (продолжить ОТСЮДА): задача #10 — UI Source/Quality/Translation selector.**
+- **Цель #10:** в компоненте-листе плагина (`public/maniya-online.js`) — видимый выбор
+  **источника / качества / перевода** + адаптив 1920×1080→320×568 + навигация кнопками ТВ (D-pad).
+- **Что уже ЕСТЬ (не переделывать!):** селектор источника — нативный `filter` (`sort`),
+  перевод — `filter('voice')`, сезон — `filter('season')` (D-pad из коробки). `play()` уже
+  отдаёт `item.quality`-мапу `{label: url}`.
+- **ЧЕГО НЕТ → реализовать (только `public/maniya-online.js`):**
+  1) **Качество:** item с мапой `quality` (≥1 ключ) получает строку-бейдж качеств; клик/Enter
+     (если ≥2) открывает `Lampa.Select` (нативная модалка, D-pad): список `{title: label, url}`
+     → «Смотреть <label>» играет КОНКРЕТНЫЙ URL. 1-качество / нет мапы — играем сразу.
+  2) **Responsive CSS:** media ≤640px/≤420px на `.maniya-online-item/*`, строка качеств
+     с `flex-wrap`, не ломать фокус.
+  3) **TV D-pad:** `hover:enter` на строке → меню качества (если ≥2) / сразу играть;
+     `Lampa.Select` фокусируем пультом.
+- **Тест/деплой:** `node --check public/maniya-online.js` → коммит → push backup →
+  `bash scripts/deploy.sh` → verify `/health`. Коммит ПОСЛЕ КАЖДОГО шага.
 - **AUDIT исходного `eonline-deob3.js` (деобфускат 198KB плагина) — ОБНОВЛЕНО:**
   - ✅ **Карта балансеров `_0x39b522`** (все 11 источников пользователя + остальные найдены):
     `kinobase:"🔥 Kino"`, `veoveo:"📽️ Ozvuchky"`, `alloha:"📺 Allo-XA"`, `filmix:"🔥 FILMix"`,
