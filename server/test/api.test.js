@@ -62,6 +62,19 @@ describe('Maniya Online API', () => {
     const body = await response.json();
     assert.equal(body.active, true);
     assert.equal(body.plan, 'test-fixture');
+    // M-Online badge: данные из реальной подписки, не хардкод.
+    assert.equal(body.authorized, true);
+    assert.equal(typeof body.days_left, 'number');
+    assert.match(body.subscription_text, /^Осталось \d+ дней$/);
+  });
+
+  it('subscription/check: неавторизованный → authorized=false без текста для badge', async () => {
+    const response = await fetch(`${base}/api/lampa/subscription/check`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.authorized, false);
+    assert.equal(body.active, false);
+    assert.equal(body.subscription_text, null);
   });
 
 

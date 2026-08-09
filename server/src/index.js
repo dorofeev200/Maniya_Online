@@ -6,6 +6,7 @@ import { sendJson, sendPluginForToken, sendStatic } from './http.js';
 import { logger } from './logger.js';
 import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
 import { findUserByRequest, findUserByShortToken, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
+import { subscriptionStatus } from './status.js';
 import { providerById, registeredProviders } from './providers/registry.js';
 import { buildProxyUrl, proxyMedia } from './proxy.js';
 import { createTelegramRunner } from './telegram/runner.js';
@@ -90,11 +91,17 @@ async function route(context, response) {
   if (pathname === '/api/lampa/subscription/check') {
     const user = await findUserByRequest(context);
     const active = isSubscriptionActive(user);
+    const status = user
+      ? subscriptionStatus({ active, expiresAt: user?.expires_at })
+      : { label: null, days: null };
 
     return sendJson(request, response, 200, {
+      authorized: Boolean(user),
       active,
       plan: user?.plan || null,
       expires_at: user?.expires_at || null,
+      days_left: status.days,
+      subscription_text: status.label,
       message: active ? 'Подписка Maniya Online активна' : 'Подписка Maniya Online не активна'
     });
   }

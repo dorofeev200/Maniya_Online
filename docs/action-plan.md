@@ -1,5 +1,48 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ✅ 2026-08-09: Бейдж «MOnlineStatus» на странице фильма — задеплоен, работает live
+- **Задача:** статус-бейдж M-Online рядом с кнопками действий, дни из РЕАЛЬНОЙ подписки (`expires_at`),
+  НЕ хардкод; склонения; состояния active/1 день/0 дней/expired/no-подписки/неавторизован; responsive
+  1920×1080 → 320×568; не ломать layout/фокус; unit-тесты; деплой сразу.
+- **AUDIT:** подписка = `users.json {token,email,plan,active,expires_at}`; `isSubscriptionActive`
+  (store.js), `expires_at` ISO или null=навсегда. Клиент Lampa: строка кнопок `.full-start-new__buttons`.
+- **Реализация:**
+  - `server/src/status.js` (новый, чистый модуль): UTC-календарный день не 24ч-интервал,
+    `remainingDays` (null=бессрочно/бито), `pluralDays` (1→день, 2-4→дня, 5-20/0→дней, 11-14→дней),
+    `subscriptionStatus` (истекла/активна/Остался 1 день/Осталось N дней).
+  - `/api/lampa/subscription/check` → `authorized`/`active`/`plan`/`expires_at`/`days_left`/`subscription_text`
+    (без `requireSubscription` — бейдж виден и без активной подписки).
+  - `public/maniya-online.js`: `addStatusBadge(event)` тянет `/subscription/check`, рендерит бейдж с
+    текстом статуса (не рендерит при `authorized === false` или пустом тексте), вставляется
+    `.before('.full-start-new__buttons, .fullstart__buttons')`, fallback — `prepend` контейнера.
+    CSS `.maniya-status` в `maniya_css`: фикс. ширина, `@media (max-width:640px)/(420px)`.
+- **Тесты:** `server/test/status.test.js` (remainingDays/pluralDays/subscriptionStatus — 26 ассертов)
+  + `server/test/api.test.js` (subscription/check токен → `Осталось N дней`, неавторизованный →
+  `authorized=false`, `subscription_text=null`). **Итог: 261 тест, 259 pass, 2 skip, 0 fail.**
+- **Деплой:** `scripts/deploy.sh` → HTTPS 200, health OK, systemd active; live `subscription/check`:
+  trial (expires 2026-08-10) → «Остался 1 день», full (2026-09-09) → «Осталось 31 день».
+- **Potential issues:** бейдж — косметика; не влияет на прокси/rate-limit; `days_left` может быть
+  отрицательным (expired) — текст «Подписка истекла»; клиент кэширует плагин — обновление после
+  переподключения расширения.
+
+## 📌 2026-08-09: IP входа E-Online сменился (138.16.184.153:8080) — балансеры НЕ менялись
+- Пользователь: «изменился IP в Е-Online, учти где мы брали токены и skaz; Е-Online всё берёт
+  с другого сервера, он только промежуточный».
+- **Проверено:** старый вход `195.133.39.208:8080/dorofeev200_*.js` → мёртв (000/соединение сброшено).
+  Новый — `http://138.16.184.153:8080/dorofeev200_6c95576dbd45.js` (отдаёт «Добавьте в плагины Lampa»,
+  41B). Цепочка Е-Online: Lampa → `<вход>:8080/dorofeev_*.js` → `<вход>:8085/check?key=9d42475c810a`
+  → **балансеры skaz** (`lite/<balancer>`). Чек-скрипт на новом IP **идентичный байт-в-байт** старому
+  (198094B, diff пуст) → **хосты балансеров не менялись** (94.249.239.{63,37,11}, 77.90.33.109,
+  online3/8.skaz.tv, cf 188.114.*). `cors/check` 200, `lite/events?life=true` 200.
+- **Вывод:** наш EoClient/EoProvider ходит **напрямую на skaz-кластер** (`lite/<balancer>`) — это и есть
+  «другой сервер», из которого всё берётся; плагин-вход только посредник, смена его IP не требует
+  изменений в коде. Токены `account_email=nazarov6@gmail.com`/`uid=dg4xu2tj` живут в `server/.env`
+  (EO_ACCOUNT_EMAIL/EO_UID), из вход-скрипта наружу они НЕ читаются. Обновлено: `docs/action-plan.md`
+  (этот блок) + `E-ONLINE-REPORT.md` (источник — новый вход). Диагностические скрипты `diag-eo-*.mjs`
+  остались в `C:\tmp\showy`, в git не коммитятся.
+- **TODO-future:** если балансеры снова слетят — проверять `:8085/check` на входном IP напрямую
+  (минуя вход-плагин) и обновлять `EO_HOSTS`/`PROXY_HTTP_ALLOW_HOSTS`.
+
 ## ⏸ Точка остановки (2026-08-08, сессия 12: follow-фикс + skaz-прямые + vkvideo allowlist; alloha играет)
 - **✅ ВЕСЬ e-онлайн-СТЕК ПОЧИНЕН И ИГРАЕТ (live на VPS):** `provider=eonline-alloha` «Интерстеллар» →
   10 items, прокси → **200 `application/vnd.apple.mpegurl` + `#EXTM3U`**. Три фикса:

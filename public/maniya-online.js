@@ -478,6 +478,14 @@
       '.maniya-online-button__m{width:1.5em;height:1.5em;position:relative;z-index:1;filter:drop-shadow(0 .05em .12em rgba(0,0,0,.28))}' +
       '.maniya-online-button__ring{fill:none;stroke:rgba(255,255,255,.55);stroke-width:5;opacity:1}' +
       '.maniya-online-button__glyph{fill:none;stroke:#3a1d02;stroke-width:12.5;stroke-linecap:round;stroke-linejoin:round}' +
+      // Badge статуса подписки «M-Online». Нативный компонент, flex + wrap:
+      // на широком TV — одной строкой, на мобильном переносится на две.
+      '.maniya-status{display:flex;flex-wrap:wrap;align-items:center;gap:.5em .7em;margin:.35em 0 1em;padding:.55em .8em;border-radius:.55em;background:rgba(0,0,0,.28);line-height:1.25}' +
+      '.maniya-status__badge{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;padding:.2em .65em;border-radius:2em;background:linear-gradient(135deg,#ffd98f 0%,#f58a1b 100%);color:#3a1d02;font-weight:700;letter-spacing:.03em;text-transform:uppercase}' +
+      '.maniya-status__text{color:#fff;opacity:.92;white-space:normal}' +
+      '.maniya-status--expired{background:rgba(138,32,44,.4)}.maniya-status--expired .maniya-status__badge{background:#d94b58;color:#fff}' +
+      '@media (max-width:640px){.maniya-status{font-size:.92em;gap:.4em .55em}}' +
+      '@media (max-width:420px){.maniya-status{padding:.5em .65em;margin:.25em 0 .8em}}' +
     '</style>');
     $('body').append(Lampa.Template.get('maniya_css', {}, true));
     Lampa.Template.add('maniya_content_loading', '<div class="online-empty"><div class="broadcast__scan"><div></div></div></div>');
@@ -540,6 +548,38 @@
     else if (root && root.length) root.find('.full-start__button, .full-start-new__button').first().before(button);
   }
 
+  // Badge статуса подписки «M-Online» на странице фильма/сериала.
+  // Данные — из существующего /subscription/check (authorized/active/subscription_text),
+  // ничего не хардкодим. Неавторизованный пользователь — badge не показываем.
+  function addStatusBadge(event) {
+    if (!event || !event.render) return;
+    var root = event.render;
+    if (root.find && root.find('.maniya-status').length) return;
+
+    var network = new Lampa.Reguest();
+    requestJson(network, trimSlash(MANIYA_API_BASE) + '/subscription/check', function (json) {
+      // Неавторизован / подписка не известна — не рисуем ничего (без undefined/NaN).
+      if (!json || json.authorized === false || !json.subscription_text) return;
+
+      var badge = $(
+        '<div class="maniya-status" role="status">' +
+          '<span class="maniya-status__badge">M-Online</span>' +
+          '<span class="maniya-status__text"></span>' +
+        '</div>'
+      );
+      badge.find('.maniya-status__text').text(json.subscription_text);
+      if (json.active === false) badge.addClass('maniya-status--expired');
+
+      // Над рядом action-кнопок страницы фильма: [M-Online] … <кнопки>.
+      // Встраиваем ПЕРЕД рядом кнопок (не внутрь), чтобы не ломать focus/раскладку.
+      var row = (root && root.find) ? root.find('.full-start-new__buttons, .fullstart__buttons').first() : $();
+      if (row && row.length) row.before(badge);
+      else if (root && root.append) root.prepend(badge);
+    }, function () {
+      // Ошибка сети — просто не показываем badge, страница не ломается.
+    });
+  }
+
   function startPlugin() {
     ensureUid();
     ensureToken();
@@ -568,19 +608,23 @@
 
     Lampa.Listener.follow('full', function (event) {
       if (event.type === 'complite') {
+        var render = event.object.activity.render();
         addButton({
-          render: event.object.activity.render(),
+          render: render,
           movie: event.data.movie
         });
+        addStatusBadge({ render: render });
       }
     });
 
     try {
       if (Lampa.Activity.active().component === 'full') {
+        var currentRender = Lampa.Activity.active().activity.render();
         addButton({
-          render: Lampa.Activity.active().activity.render(),
+          render: currentRender,
           movie: Lampa.Activity.active().card
         });
+        addStatusBadge({ render: currentRender });
       }
     } catch (e) {}
   }
