@@ -80,7 +80,7 @@
   | `alloha` 📺 Allo-OA | EoProvider balancer `alloha` | ✅ есть, live |
   | `rutube` 🇷🇺 RUS-2 | — | ⛔ REST 400 (rch/аккаунт) — зарезервировать |
   | `vk` 🇷🇺 RUS-1 | — | ⛔ REST 400 (rch/аккаунт) — зарезервировать |
-  | `kinopub` 🌏 Lime | EoProvider `kinopub` | ✅ **ДОБАВИТЬ**: REST 200 link-карточки → follow (movieHref уже есть) |
+  | `kinopub` L E Lime | EoProvider `kinopub` | ✅ **ДОБАВЛЕН** (09.08): postid-follow, unit 262/260, DEPLOY ✓ |
   | `fanserials` 😈 FANS | — | ⛔ REST 429 (rch/аккаунт) — зарезервировать |
   | `zagonka` 🌏 GET`s TV | — | ⛔ REST 429/400 (rch) — зарезервировать |
   | `veoveo` 📽️ Ozvuchky | EoProvider `veoveo` | ✅ есть (live 200 PLAY) |
