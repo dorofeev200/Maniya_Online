@@ -623,3 +623,14 @@ origin → код продублирован.
   9/10 играются (200 MP4 до 24 ГБ), 1 item «MVO Dragon Money» — 429 CDN (известный вектор
   «Скрипт ерор», memory maniya-script-error-findings). `skaz-filmix` → `{"items":[]}`.
 - Тесты: 311 (309 pass + 2 skip, 0 fail). Деплой e6bfd9b → backup + VPS, md5 совпал.
+
+## Сессия 16 (2026-08-09) — админ-бот: компактный `/list` (@ник DD.MM.YY <буква>)
+
+- Запрос: в админ-боте подписки выводить в виде `@ник DD.MM.YY <буква плана>`.
+- Код (c54ca67): `server/src/telegram/bot.js`
+  - `formatExpiry()` — дата истечения DD.MM.YY (UTC-календарь), `∞` — бессрочно, `—` — невалид.
+  - `planLetter()` — `P` активна (полная/бессрочно), `T` триал, `X` истекла/отключена.
+  - `nickLabel()` — `@slug` или `id N`.
+  - Строка `/list`: `1) @dorofeev200 10.10.26 P`, токен — отдельной строкой (для /revoke и ссылок).
+- Тесты: +7 в `telegram.test.js`, всего 315 (313 pass / 2 skip / 0 fail).
+- Деплой c54ca67 → backup (`feature/alloha-provider`) + VPS; md5 `cabe2951…` совпал, health 200.
