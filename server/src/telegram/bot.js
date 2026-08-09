@@ -72,6 +72,34 @@ export function daysLeft(user, now = Date.now()) {
   return diff <= 0 ? 0 : Math.ceil(diff / DAY_MS);
 }
 
+/** Человекочитаемый ник пользователя для админ-списка: @slug или id N. */
+export function nickLabel(user) {
+  if (!user) return '—';
+  if (user.slug) return `@${user.slug}`;
+  return `id ${user.telegram_id || '—'}`;
+}
+
+/** Короткая дата истечения DD.MM.YY (UTC-календарь) для админ-списка; ∞ — бессрочно, — — невалид. */
+export function formatExpiry(iso) {
+  if (iso == null || iso === '') return '∞';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yy = String(d.getUTCFullYear()).slice(-2);
+  return `${dd}.${mm}.${yy}`;
+}
+
+/**
+ * Буква состояния подписки для админ-списка: P — активна (полная/бессрочно),
+ * T — триал, X — неактивна (истекла или отключена).
+ */
+export function planLetter(user, now = Date.now()) {
+  if (!user || !user.active) return 'X';
+  if (user.expires_at != null && new Date(user.expires_at).getTime() <= now) return 'X';
+  return String(user.plan || 'full').toLowerCase() === 'trial' ? 'T' : 'P';
+}
+
 /** Короткий id из токена (последние 12 hex) для ссылки /{prefix}_{short}.js. */
 export function shortId(token) {
   const t = String(token || '');
@@ -307,9 +335,7 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
       if (!admin) return { text: 'Команда только для админ‑чата.' };
       if (!users.length) return { text: 'Пока нет пользователей.' };
       const rows = users.map((u, i) =>
-        `${i + 1}) ${u.slug ? '@' + u.slug : '—'} | id ${u.telegram_id} | ` +
-        `${u.active ? (isUserActive(u, now) ? '🟢 активна' : '🔴 истекла') : '⛔ отключена'} | ` +
-        `${daysText(u, now)} | ${escapeHtml(u.plan || '—')}\n   ${escapeHtml(u.token)}`
+        `${i + 1}) ${nickLabel(u)} ${formatExpiry(u.expires_at)} ${planLetter(u, now)}\n   ${escapeHtml(u.token)}`
       );
       return { text: `Пользователей: ${users.length}\n` + rows.join('\n') };
     }

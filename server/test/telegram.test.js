@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { adminGrantMarkup, daysLeft, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, paymentReply, pluginUrl, shortId, slugFrom } from '../src/telegram/bot.js';
+import { adminGrantMarkup, daysLeft, formatExpiry, handleCallback, handleCommand, inlineKeyboard, isUserActive, makeToken, nickLabel, paymentReply, planLetter, pluginUrl, shortId, slugFrom } from '../src/telegram/bot.js';
 import { TelegramBotClient } from '../src/telegram/BotClient.js';
 import { createTelegramRunner } from '../src/telegram/runner.js';
 
@@ -290,6 +290,44 @@ test('/list (админ): перечисляет пользователей с �
   assert.ok(list.text.includes(store.users[0].token));
   const denied = await handleCommand({ text: '/list', chatId: 777, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(denied.text, /только для админ/);
+});
+
+test('/list: компактный вид @ник DD.MM.YY <буква> (P/T/X)', async () => {
+  const store = memStore([
+    { telegram_id: '222', token: 'mo-a1', slug: 'dorofeev200', active: true, plan: 'full', expires_at: '2026-10-10T12:00:00.000Z' },
+    { telegram_id: '333', token: 'mo-b2', slug: 'anya', active: true, plan: 'trial', expires_at: NOW + 3 * 24 * 3600 * 1000 },
+    { telegram_id: '444', token: 'mo-c3', active: true, plan: 'full', expires_at: '2040-01-01T00:00:00.000Z' },
+    { telegram_id: '555', token: 'mo-d4', slug: 'pet', active: false, plan: 'full', expires_at: '2026-10-10T12:00:00.000Z' }
+  ]);
+  const list = await handleCommand({ text: '/list', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.match(list.text, /1\) @dorofeev200 10\.10\.26 P/);
+  assert.match(list.text, /@anya \d\d\.\d\d\.\d\d T/);
+  assert.match(list.text, /id 444 01\.01\.40 P/, 'без ника — «id N», бессрочно/далеко — P');
+  assert.match(list.text, /@pet 10\.10\.26 X/, 'отключённая — X');
+});
+
+test('formatExpiry: DD.MM.YY, ∞ для бессрочно, — для невалидного', () => {
+  assert.equal(formatExpiry('2026-10-10T12:00:00.000Z'), '10.10.26');
+  assert.equal(formatExpiry(null), '∞');
+  assert.equal(formatExpiry(''), '∞');
+  assert.equal(formatExpiry('nope'), '—');
+});
+
+test('planLetter: P полная/бессрочно, T триал, X истекла/выключена', () => {
+  const future = '2040-01-01T00:00:00.000Z';
+  const past = '2000-01-01T00:00:00.000Z';
+  assert.equal(planLetter({ active: true, plan: 'full', expires_at: future }), 'P');
+  assert.equal(planLetter({ active: true, plan: 'full', expires_at: null }), 'P');
+  assert.equal(planLetter({ active: true, expires_at: future }), 'P', 'без plan → P');
+  assert.equal(planLetter({ active: true, plan: 'trial', expires_at: future }), 'T');
+  assert.equal(planLetter({ active: true, plan: 'trial', expires_at: past }), 'X');
+  assert.equal(planLetter({ active: false, plan: 'full', expires_at: future }), 'X');
+});
+
+test('nickLabel: @slug или id N', () => {
+  assert.equal(nickLabel({ slug: 'vasya', telegram_id: '7' }), '@vasya');
+  assert.equal(nickLabel({ telegram_id: '7' }), 'id 7');
+  assert.equal(nickLabel(null), '—');
 });
 
 test('/revoke по нику: поиск устойчив — кириллица, регистр, пробелы/дефисы', async () => {
