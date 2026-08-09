@@ -244,6 +244,7 @@ function helpReply(config) {
   ];
   if (config?.telegram?.admins?.length) {
     lines.push('Выдача подписки — кнопкой «🟢 Выдать подписку» в уведомлении о новом пользователе (админ)');
+    lines.push('/grant &lt;ник|id|токен&gt; &lt;дней&gt; — выдать/продлить на N дней (админ)');
     lines.push('/revoke &lt;ник|id|токен&gt; — отключить (админ)');
     lines.push('/list — список пользователей (админ)');
   }
@@ -348,6 +349,23 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
       target.active = false;
       await setUsers(users);
       return { text: '⛔ Подписка отключена.' };
+    }
+    case '/grant':
+    case '/extend': {
+      if (!admin) return { text: 'Команда только для админ‑чата.' };
+      const tokens = args.trim().split(/\s+/);
+      const days = Number(tokens[tokens.length - 1]);
+      if (tokens.length < 2 || !/^\d+$/.test(tokens[tokens.length - 1]) || days <= 0) {
+        return { text: 'Формат: /grant @ник &lt;дней&gt;, например: /grant @dorofeev200 30' };
+      }
+      const target = findBySubject(users, tokens.slice(0, -1).join(' '));
+      if (!target) return { text: 'Не найден пользователь. Указание: @ник / id / токен' };
+      applyGrant(target, days, now);
+      await setUsers(users);
+      const granted = statusText(config, target, now);
+      granted.text = `✅ ${nickLabel(target)} → ${formatExpiry(target.expires_at)} ${planLetter(target, now)}\n\n` + granted.text;
+      granted.text += `\n🔗 Ссылка плагина:\n<code>${escapeHtml(pluginUrl(config, target.token, target))}</code>`;
+      return granted;
     }
     default:
       return { text: 'Неизвестная команда. Справка: /help' };

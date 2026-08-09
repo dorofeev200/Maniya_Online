@@ -330,6 +330,37 @@ test('nickLabel: @slug или id N', () => {
   assert.equal(nickLabel(null), '—');
 });
 
+test('/grant: admin выдаёт 30 дней по нику; ответ «✅ @ник → DD.MM.YY P»', async () => {
+  const store = memStore([
+    { telegram_id: '222', token: 'mo-a1', slug: 'dorofeev200', active: false, plan: 'trial', expires_at: new Date(NOW - 1 * 24 * 3600 * 1000).toISOString() }
+  ]);
+  const r = await handleCommand({ text: '/grant @dorofeev200 30', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.equal(store.users[0].active, true);
+  assert.equal(store.users[0].plan, 'full');
+  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 30 * 24 * 3600 * 1000, 'у истёкшего — от now');
+  assert.match(r.text, /✅ @dorofeev200 → \d\d\.\d\d\.\d\d P/);
+  assert.match(r.text, /Ссылка плагина/);
+});
+
+test('/grant: продлевает от текущего срока (не с нуля), www по id без @', async () => {
+  const store = memStore([
+    { telegram_id: '222', token: 'mo-a1', slug: 'dorofeev200', active: true, plan: 'full', expires_at: new Date(NOW + 100 * 24 * 3600 * 1000).toISOString() }
+  ]);
+  await handleCommand({ text: '/grant 222 30', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
+  assert.equal(new Date(store.users[0].expires_at).getTime(), NOW + 130 * 24 * 3600 * 1000);
+});
+
+test('/grant: не-админ отклонён; неверный формат — подсказка; нет юзера — ошибка', async () => {
+  const store = memStore([{ telegram_id: '222', token: 'mo-a1', slug: 'vasya', active: true, expires_at: null }]);
+  const opts = { text: '/grant @vasya 10', chatId: 777, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW };
+  const denied = await handleCommand(opts);
+  assert.match(denied.text, /только для админ/);
+  const bad = await handleCommand({ ...opts, chatId: 111, text: '/grant @vasya' });
+  assert.match(bad.text, /Формат: \/grant/);
+  const notFound = await handleCommand({ ...opts, chatId: 111, text: '/grant @nobody 5' });
+  assert.match(notFound.text, /Не найден пользователь/);
+});
+
 test('/revoke по нику: поиск устойчив — кириллица, регистр, пробелы/дефисы', async () => {
   const store = memStore([{ telegram_id: '222', token: 'mo-222', slug: 'ivan-ivanov', active: true, expires_at: null, plan: 'full' }]);
   const r = await handleCommand({ text: '/revoke @ИВАН ИВАНОВ', chatId: 111, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
