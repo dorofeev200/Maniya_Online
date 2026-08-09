@@ -86,7 +86,7 @@ async function mainKodik() {
 
 async function mainVeoveo() {
   console.log('== VEOVEO: первый item + трасса сырого URL ==');
-  const q = new URLSearchParams({ token, provider: 'eonline-veoveo', ...MOVIE });
+  const q = new URLSearchParams({ token, provider: 'skaz-veoveo', ...MOVIE });
   const r = await fetch(`${base}/api/lampa/videos?${q}`, { signal: AbortSignal.timeout(30000) }).catch(() => null);
   if (!r) { console.log('  ERR fetch videos'); return; }
   const json = await r.json().catch(() => ({}));

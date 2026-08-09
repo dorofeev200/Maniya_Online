@@ -90,9 +90,10 @@ export async function getVideosForRequest(context) {
     const primaryProvider = videoProviders[0];
     const twin = selected ? await twinForPayload(selected, context) : null;
 
-    // Сначала E-Online близнец: у него мультика-качество и озвучки
-    // (2160/1440/1080/720/480), как в самом E-Online. Native — фолбэк:
-    // если близнец не дал items (источник слабее/нет тайтла), отдаём native.
+    // Сначала skaz-близнец (мультиязычный контур skaz-кластера, качества
+    // 2160/1440/1080/720/480). Native — фоллбэк: если близнец не дал ни одного
+    // ВАЛИДНОГО item'а (0 после normalization / все стримы битые), отдаём native.
+    // Никогда не объединяем — либо twin, либо native (без дублей).
     const chosen = (twin?.items?.length)
       ? twin
       : (await payloadOrNull(primaryProvider, context))
@@ -104,7 +105,7 @@ export async function getVideosForRequest(context) {
   } else if (videoProviders.length > 0) {
     // Несколько провайдеров (или источник без videos()): склеиваем играбельные
     // items со всех, кто умеет videos(). Фильтры не общие — отдаём пустыми.
-    // Пустой native дополняется своим E-Online близнецом (без дублей).
+    // Пустой native дополняется своим skaz-близнецом (без дублей).
     const payloads = await Promise.all(videoProviders.map(async (provider) => {
       const payload = await payloadOrNull(provider, context);
       if (payload?.items?.length) return payload;
@@ -150,7 +151,7 @@ async function payloadOrNull(provider, context) {
   }
 }
 
-/** Скрытый E-Online близнец native-провайдера: его videos() или null. */
+/** Скрытый skaz-близнец native-провайдера: его videos() или null. */
 async function twinForPayload(nativeId, context) {
   const twin = twinFor(nativeId);
   if (!twin || !twin.enabled()) return null;

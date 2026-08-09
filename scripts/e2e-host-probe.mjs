@@ -21,7 +21,7 @@ const MOVIES = [
   { id: '284647', imdb_id: 'tt0816692', kinopoisk_id: '437410', title: 'Интерстеллар', original_title: 'Interstellar', year: '2014', serial: '0' },
   { id: '329', imdb_id: 'tt0133093', kinopoisk_id: '301', title: 'Матрица', original_title: 'The Matrix', year: '1999', serial: '0' }
 ];
-const TARGETS = ['eonline-kinopub', 'eonline-veoveo', 'eonline-solntse'];
+const TARGETS = ['skaz-kinopub', 'skaz-veoveo', 'skaz-solntse'];
 
 function hostOfProxy(proxyUrl) {
   try {

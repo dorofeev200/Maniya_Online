@@ -1,5 +1,30 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ✅ 2026-08-09 (сессия 14): РЕГИСТР ПЕРЕКЛЮЧЁН НА SKAZ-КЛАСТЕР (порядок пользователя: BACKEND→TEST→LIVE E2E→UI)
+- **Статус:** SkazClient/SkazNormalizer/SkazProvider готовы (задачи #20–#22), **registry строит
+  источники из `config.skaz`** (`skaz-<balancer>` вместо `eonline-<balancer>`). EoClient/EoProvider
+  остались в дереве ТОЛЬКО для live-сравнения (`scripts/e2e-skaz-vs-eo.mjs`) и сравнение
+  **завершено успешно**: все тайтлы (Интерстеллар/Матрица/GoT) по filmix/alloha/rezka/videoseed/
+  kinoflix/veoveo/pidtor/solntse — Eo ≡ Sk (status/cards/methods идентичны); call-резолвы оба
+  **`OK:vnd.apple.mpegurl`** (HLS); `SkazClient.discover()` → **29 живых балансеров** с
+  `lite/withsearch`. Порт доказан байт-в-байт.
+- **Изменения (registry+store+config):**
+  - `registry.js` — `buildSkazProviders()` из `config.skaz` (hosts/accountEmail/uid/origin,
+    EO_* — фолбэк через config-алиасы, VPS `.env` НЕ менялся); id `skaz-*`; `twinFor()` —
+    скрытый skaz-близнец native-провайдера; `hiddenTwinNative` (filmix/rezka/hdvb/rutubemovie/
+    kodik/… скрыты, когда native включён — «такой источник должен быть один»).
+  - `store.js` — twin-логика: выбранный native → skaz-близнец ПЕРВЫМ, если ≥1 валидный item
+    (мультика-качество 2160/1440/1080/720/480); native — фоллбэк при 0 items/битых стримах.
+    **Никакого объединения** (либо twin, либо native — без дублей).
+  - `test/registry-twin.test.js` — переписан под `skaz-*`; **важно:** ESM static imports
+    хостируются — registry загружается ДИНАМИЧЕСКИ после `process.env` (иначе env не виден).
+  - `scripts/auto-confirm-config.mjs`, `e2e-debug.mjs`, `e2e-q-alloha.mjs`, `e2e-host-probe.mjs` —
+    `eonline-*` → `skaz-*` в хардкоде провайдеров.
+- **Тесты:** 290 (288 pass / 2 skip / 0 fail). **Пуш/деплой:** `backup` + `scripts/deploy.sh`
+  (здоровье VPS `{"ok":true,…}`). UI (#10) — ПАУЗА до завершения миграции.
+- **Что дальше:** live E2E на VPS (`/api/lampa/sources` = skaz-* + играют) → все предметы волны
+  миграции → вернуться к UI (#10).
+
 ## 🚨 2026-08-09: CRITICAL AUDIT+REPAIR E2E (запрос пользователя, полный текст в резюме сессии)
 - **Задача:** полный end-to-end аудит и ремонт существующего проекта (НЕ создавать провайдеров
   с нуля, НЕ дублировать). Reference — исходный JS: `http://138.16.184.153:8080/dorofeev200_6c95576dbcb5.js`.

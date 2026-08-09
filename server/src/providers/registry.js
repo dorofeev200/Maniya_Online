@@ -7,7 +7,7 @@ import { RezkaProvider } from './rezka/RezkaProvider.js';
 import { RutubeProvider } from './rutube/RutubeProvider.js';
 import { CollapsProvider } from './collaps/CollapsProvider.js';
 import { HDVBProvider } from './hdvb/HDVBProvider.js';
-import { EoProvider } from './eonline/EoProvider.js';
+import { SkazProvider } from './skaz/SkazProvider.js';
 
 // Названия балансеров E-Online под брендом «Maniya» (для источников).
 // Полная карта из исходного JS (`_0x39b522`, AUDIT 2026-08-09, E-ONLINE-REPORT §10.1):
@@ -83,42 +83,43 @@ const nativeProviders = [
   })
 ];
 
-// E-Online: каждый REST-доступный балансер = отдельный источник «Maniya · …».
-// Без EO_ACCOUNT_EMAIL/EO_UID провайдеры скрыты (enabled()=false) и не
-// светятся в /api/lampa/sources.
+// Skaz-кластер: каждый REST-доступный балансер = отдельный источник «Maniya · …».
+// Без SKAZ_ACCOUNT_EMAIL/SKAZ_UID (или их EO_* алиасов) провайдеры скрыты
+// (enabled()=false) и не светятся в /api/lampa/sources.
 // ❗ Балансер, у которого уже есть ВКЛЮЧЁННЫЙ native-провайдер с тем же id
-// (filmix/rezka/hdvb/rutubemovie/…), не становится видимым источником —
-// в UI его отдаёт native («такой источник должен быть один»), а eonline-
-// близнец регистрируется как СКРЫТЫЙ фолбэк (`twinFor`): если native вернёт
-// 0 items, store.js прозрачно отдаст его результат. Видимым eonline-балансер
+// (filmix/rezka/hdvb/rutubemovie/kodik/…), не становится видимым источником —
+// в UI его отдаёт native («такой источник должен быть один»), а skaz-близнец
+// регистрируется как СКРЫТЫЙ фоллбэк (`twinFor`): если native вернёт 0 items
+// или битые стримы, store.js прозрачно отдаст его результат. Видимым skaz-балансер
 // становится только когда native выключен (нет токена/ключа).
-function buildEonlineProviders() {
-  return (config.eonline.balancers || []).map((balancer) => {
+// E-Online (EoProvider/EoClient) оставлен в дереве для live-сравнения,
+// см. scripts/e2e-skaz-vs-eo.mjs (доказано: клиенты байт-в-байт идентичны).
+function buildSkazProviders() {
+  return (config.skaz.balancers || []).map((balancer) => {
     const nativeTwin = nativeProviders.find((p) => p.id === balancer);
     const hidden = Boolean(nativeTwin?.enabled?.());
-    return new EoProvider({
-      id: `eonline-${balancer}`,
+    return new SkazProvider({
+      id: `skaz-${balancer}`,
       title: EO_TITLES[balancer] || `Maniya · ${capitalize(balancer)}`,
       balancer,
-      hosts: config.eonline.hosts,
-      skazHosts: config.eonline.skazHosts,
-      accountEmail: config.eonline.accountEmail,
-      uid: config.eonline.uid,
-      origin: config.eonline.origin,
+      hosts: config.skaz.hosts,
+      accountEmail: config.skaz.accountEmail,
+      uid: config.skaz.uid,
+      origin: config.skaz.origin,
       show: !hidden,
       hiddenTwinNative: hidden ? balancer : null
     });
   });
 }
 
-const allEonlineProviders = buildEonlineProviders();
-const eonlineProviders = allEonlineProviders.filter((provider) => provider.show);
-const providers = [...nativeProviders, ...eonlineProviders];
+const allSkazProviders = buildSkazProviders();
+const skazProviders = allSkazProviders.filter((provider) => provider.show);
+const providers = [...nativeProviders, ...skazProviders];
 
-/** Скрытый E-Online близнец native-провайдера (id совпадает) или null. */
+/** Скрытый skaz-близнец native-провайдера (id совпадает) или null. */
 export function twinFor(nativeId) {
   const id = String(nativeId || '').trim().toLowerCase();
-  return allEonlineProviders.find((provider) => provider.hiddenTwinNative === id) || null;
+  return allSkazProviders.find((provider) => provider.hiddenTwinNative === id) || null;
 }
 
 export function registeredProviders() {

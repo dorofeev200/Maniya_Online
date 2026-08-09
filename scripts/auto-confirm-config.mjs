@@ -16,5 +16,5 @@ export const config = {
     { key: 'sherlock-s1', title: 'Шерлок', original_title: 'Sherlock', year: '2010', kinopoisk_id: '569838', imdb_id: 'tt1475582', tmdb_id: '1622', serial: '1' }
   ],
   STOCKS: ['filmix', 'kodik', 'rezka', 'rutubemovie', 'cdnvideohub', 'collaps', 'hdvb',
-    'eonline-alloha', 'eonline-videoseed', 'eonline-kinoflix', 'eonline-veoveo', 'eonline-pidtor', 'eonline-solntse']
+    'skaz-alloha', 'skaz-videoseed', 'skaz-kinoflix', 'skaz-veoveo', 'skaz-pidtor', 'skaz-solntse']
 };

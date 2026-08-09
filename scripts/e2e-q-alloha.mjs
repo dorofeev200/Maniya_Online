@@ -36,7 +36,7 @@ function playCheck(raw) {
 
 async function eachAllohaItem() {
   console.log('== ALLOHA: все items eonline-alloha ==');
-  const q = new URLSearchParams({ token, provider: 'eonline-alloha', ...MOVIE });
+  const q = new URLSearchParams({ token, provider: 'skaz-alloha', ...MOVIE });
   const r = await fetch(`${base}/api/lampa/videos?${q}`, { signal: AbortSignal.timeout(30000) }).catch(() => null);
   const json = r ? await r.json().catch(() => ({})) : {};
   const items = Array.isArray(json.items) ? json.items : [];
@@ -49,8 +49,8 @@ async function eachAllohaItem() {
 }
 
 async function qualityMap() {
-  console.log('== QUALITY для filmix (и eonline-filmix) ==');
-  for (const provider of ['filmix', 'eonline-filmix']) {
+  console.log('== QUALITY для filmix (и skaz-filmix) ==');
+  for (const provider of ['filmix', 'skaz-filmix']) {
     const q = new URLSearchParams({ token, provider, ...MOVIE });
     const r = await fetch(`${base}/api/lampa/videos?${q}`, { signal: AbortSignal.timeout(30000) }).catch(() => null);
     if (!r) { console.log(`${provider}: ERR`); continue; }

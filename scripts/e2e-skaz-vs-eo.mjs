@@ -80,13 +80,13 @@ async function comparePage(label, params, slug) {
   const match = same && eoMethod === skMethod ? '✓' : '✗';
   console.log(`${match} ${label.padEnd(36)} Eo:${String(eo.status).padEnd(4)}cards=${String(eoCards).padEnd(3)}${eoMethod.padEnd(22)} || Sk:${String(sk.status).padEnd(4)}cards=${String(skCards).padEnd(3)}${skMethod.padEnd(22)}`);
   if (same && eoCards) {
-    // резолв первого call-потока через оба клиента
+    // резолв первого call-потока через оба клиента (инстансы, не строки!)
     const m = String(eo.text).match(/data-json\s*=\s*(['"])([\s\S]*?)\1/);
     let j = null; try { j = JSON.parse(m[2]); } catch {}
-    const ref = j && j.method === 'call' ? String(j.url || j.stream || '') : '';
+    const ref = j && j.method === 'call' ? String(j.stream || j.url || '') : '';
     if (ref) {
-      const ee = await resolvePlay('eo', 'call', ref);
-      const ss = await resolvePlay('sk', 'call', ref);
+      const ee = await resolvePlay(eoClient(slug), 'call', ref);
+      const ss = await resolvePlay(skazClient(slug), 'call', ref);
       console.log(`     └─ resolve call: Eo=${ee}  Sk=${ss}`);
     }
   }
