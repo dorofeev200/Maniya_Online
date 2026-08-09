@@ -65,6 +65,13 @@
      `Lampa.Select` фокусируем пультом.
 - **Тест/деплой:** `node --check public/maniya-online.js` → коммит → push backup →
   `bash scripts/deploy.sh` → verify `/health`. Коммит ПОСЛЕ КАЖДОГО шага.
+- **СТАТУС #10:**
+  - ✅ **[1] Качество + responsive CSS — СДЕЛАНО live (коммит `6300019`, DEPLOY 09.08):** бейджи
+    качеств в строке; ≥2 варианта → `Lampa.Select` (D-pad) «Смотреть <label>» — конкретный URL;
+    media ≤640/≤420. Проверено на VPS: плагин отдаёт селектор (3× `maniya-online-item__qualities`).
+  - [ ] **[2] Визуальная проверка в Lampa** (мобильный 320×568 + TV D-pad): фокус бейджей/модалки,
+    перенос строки качеств — руками пользователя в Lampa.
+  - [ ] **[3] Если что-то поплыло в Lampa** — правки в этом же блоке `addTemplates`/`draw`, коммит + деплой.
 - **AUDIT исходного `eonline-deob3.js` (деобфускат 198KB плагина) — ОБНОВЛЕНО:**
   - ✅ **Карта балансеров `_0x39b522`** (все 11 источников пользователя + остальные найдены):
     `kinobase:"🔥 Kino"`, `veoveo:"📽️ Ozvuchky"`, `alloha:"📺 Allo-XA"`, `filmix:"🔥 FILMix"`,
