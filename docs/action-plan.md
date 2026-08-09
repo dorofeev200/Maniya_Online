@@ -1,5 +1,17 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ✅ 2026-08-09 (сессия 15): ДЕПЛОЙ a48440c (ретрай) + верификация
+- **Пуш `backup`**: `b492f57..c663813` → `feature/alloha-provider`. **Деплой** `scripts/deploy.sh` OK.
+- **Health/API**: `{"ok":true,"service":"maniya-online-lampa"}`, `ready:true` (uptime 17s — рестарт 18:44:49Z).
+- **Файлы**: md5 локального и серверного `SkazClient.js` **совпадает** (`ac529ba…`); `grep` ретрая: SkazClient 10, EoClient 6.
+- **Ретрай ДОКАЗАН живьём** (`/tmp/verify-retry.mjs`): форсированный 503 на `online3.skaz.tv` → `getLite` вернул
+  HTML-карточки со СЛЕДУЮЩЕГО хоста пула (6 хостов). Без фикса это был бы null → «источник пуст».
+- **Smoke Filmix/Rezka/HDVB** (`/tmp/smoke-deploy.mjs`, через реальные users.json-токен и /api/lampa/videos):
+  - `filmix` (Зловещие мертвецы) — HTTP 200, 1861ms, **8 items, первый item HLS-OK** (proxy 200 mpegurl).
+  - `hdvb` (Матрица) — HTTP 200, 1439ms, **2 items, первый HLS-OK** (ct=text/html, но тело = rewritten m3u8).
+  - `rezka` (Матрица) — HTTP 200, 623ms, **0 items** (известная диагностика: skaz-rezka + native rezka пусто на фильмах).
+- **НЕ трогали** (по заказу): pidtor, veoveo, quality, сериалы. → следующий FIX №2: сериалы skaz (все 13 → GoT 0 items).
+
 ## ✅ 2026-08-09 (сессия 15, вечер): ФИКС №1 «балансер как в Е-Online» + ДИАГНОСТИКА «Script error»
 - **Фикс №1 (закоммичен `a48440c`, НЕ задеплоен): перебор хостов пула при 5xx/сетевой ошибке.**
   SkazClient/EoClient раньше: один запрос на один хост ротации, БЕЗ ретрая → 503 ноды кластера
