@@ -195,6 +195,21 @@ export const config = {
     // Обязательный Origin для потоков skaz/voidboost.
     origin: (process.env.EO_ORIGIN || 'http://lampa.mx').trim()
   },
+  // skaz-кластер (Lampac-протокол): та же логика, что E-Online, но НЕ зависит
+  // от E-Online-плагина (docs/skaz-architecture.md §0-§6). Ключи SKAZ_* —
+  // primary, старый EO_* — фолбэк: VPS server/.env отдаёт EO_* и продолжает
+  // работать без изменений.
+  skaz: {
+    enabled: bool('SKAZ_ENABLED', true),
+    hosts: list('SKAZ_HOSTS', list('EO_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv', 'http://94.249.239.63', 'http://94.249.239.37', 'http://94.249.239.11', 'http://77.90.33.109'])),
+    balancers: list('SKAZ_BALANCERS', list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka'])),
+    // Аккаунт skaz-кластера (вход через Lampa «Настройки — Синхронизация»,
+    // §6.5—6.7 отчёта). Не коммитить — только server/.env.
+    accountEmail: (process.env.SKAZ_ACCOUNT_EMAIL || process.env.EO_ACCOUNT_EMAIL || '').trim(),
+    uid: (process.env.SKAZ_UID || process.env.EO_UID || '').trim(),
+    // Обязательный Origin для потоков skaz/voidboost.
+    origin: (process.env.SKAZ_ORIGIN || process.env.EO_ORIGIN || 'http://lampa.mx').trim()
+  },
   proxy: {
     allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com', 'sevstar933krop.com', 'entouaedon.com', 'vkvideo.cloud', 'cdntogo.net', 'rstprgapipt.com']),
     // E-Online-хосты и CDN-манифест voidboost — http:// (validateProxyTarget по
