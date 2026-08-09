@@ -42,6 +42,8 @@
   (как остальные URL-параметры). Юнит «kinopub (Lime) — link-карточки с postid → follow через
   postid» зелёный. **262 юнита (260 pass +2 skip live)**.
 - **Деплой:** сразу после этой волны, потом commit+pash на `backup`. План обновлён.
+- **Обновление плана (unit-фикс):** деплой выполнен ✓ (`DEPLOY 09.08 08:49` — tar-over-SSH, certbot renew OK,
+  `/health` = `{"ok":true}`), коммит `82987b0` на `feature/alloha-provider`, пушим на `backup`.
 - **AUDIT исходного `eonline-deob3.js` (деобфускат 198KB плагина) — ОБНОВЛЕНО:**
   - ✅ **Карта балансеров `_0x39b522`** (все 11 источников пользователя + остальные найдены):
     `kinobase:"🔥 Kino"`, `veoveo:"📽️ Ozvuchky"`, `alloha:"📺 Allo-XA"`, `filmix:"🔥 FILMix"`,
