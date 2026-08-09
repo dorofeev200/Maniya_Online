@@ -10,6 +10,12 @@ import { HDVBProvider } from './hdvb/HDVBProvider.js';
 import { EoProvider } from './eonline/EoProvider.js';
 
 // Названия балансеров E-Online под брендом «Maniya» (для источников).
+// Полная карта из исходного JS (`_0x39b522`, AUDIT 2026-08-09, E-ONLINE-REPORT §10.1):
+// kinobase/veoveo/alloha/filmix/videoseed/videohub/turboserial/vk/rutube/zagonka/
+// kinopub/hdvb/fancdn/mirage/kodik/fanserials/rezka/mirkino/xvideocdn/hdrezka/aniliberty/…
+// Здесь — только slug, использованные в EO_BALANCERS (конфиг); имена-нарисованные
+// для источников, не отдающихся по lite-REST (vk RUS-1, rutube RUS-2, fans-сериалы …)
+// заведены в конфиге как зарезервированные (см. §10.5) и пока не светятся.
 const EO_TITLES = {
   filmix: 'Maniya · Filmix',
   filmixtv: 'Maniya · FilmixTV',
@@ -17,6 +23,7 @@ const EO_TITLES = {
   videoseed: 'Maniya · VideoSeed',
   hdvb: 'Maniya · HDVB',
   veoveo: 'Maniya · VeoVeo',
+  kinopub: 'Maniya · Lime',
   kinoflix: 'Maniya · KinoFlix',
   alloha: 'Maniya · Alloha',
   pidtor: 'Maniya · PidTor',

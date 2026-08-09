@@ -29,6 +29,12 @@ class FakeEoClient {
       }
       return this.pages.fallback || null;
     }
+    if (params && params.postid != null) {
+      for (const [needle, html] of Object.entries(this.pages)) {
+        if (`postid:${params.postid}` === needle) return html;
+      }
+      return this.pages.fallback || null;
+    }
     return this.lite;
   }
 
@@ -182,6 +188,32 @@ test('movie: primary только похожие link-карточки → follo
   assert.ok(String(followed[1].href).includes('interstellar'), `href выбран по релевантности: ${followed[1].href}`);
   assert.ok(result.items.length >= 2, `items с call-карточек фильма: ${result.items.length}`);
   assert.ok(result.items.every((item) => item.method === 'play'));
+});
+
+test('movie: kinopub (Lime) — link-карточки с postid → follow через postid', async () => {
+  // Живой случай (Lime «Интерстеллар»): primary-страница kinopub — только
+  // link-карточки с `postid` (похожие тайтлы + сам фильм); пост-страница
+  // отдаёт play-карточки переводов (cdntogo). Follow через postid.
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online8.skaz.tv/lite/kinopub?postid=8613&title=Interstellar&original_title=Interstellar","similar":true,"year":2014,"details":"Дубляж, Профессиональный многоголосый"}\'>Интерстеллар</div>',
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online8.skaz.tv/lite/kinopub?postid=123847&title=Interstellar&original_title=Interstellar","similar":true,"year":2026,"title":"Schiller / Interstellar"}\'>Schiller / Interstellar</div>'
+  ].join('');
+  const postHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v.m3u8","stream":"http://1a5af214.cdntogo.net/s/x.m3u8","translate":"Дубляж"}\'>Дубляж</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v2.m3u8","stream":"http://1a5af214.cdntogo.net/s/y.m3u8","translate":"Оригинал"}\'>Оригінал</div>'
+  ].join('');
+
+  const client = new FakeEoClient({ lite: similarHtml, pages: { 'postid:8613': postHtml } });
+  const provider = makeProvider(client, 'kinopub');
+
+  const result = await provider.videos(context({ title: 'Интерстеллар', original_title: 'Interstellar', year: '2014', serial: '0' }));
+
+  const postidCall = client.calls.find(([name, p]) => name === 'getLite' && p && p.postid != null);
+  assert.ok(postidCall, 'должен быть повторный getLite с postid');
+  assert.equal(postidCall[1].postid, '8613', `postid выбран из первой link-карточки: ${postidCall[1].postid}`);
+  assert.ok(result.items.length >= 2, `items с play-карточек перевода: ${result.items.length}`);
+  assert.ok(result.items.every((item) => item.method === 'play'));
+  assert.ok(result.items.every((item) => item.voice_name), 'перевод не пуст');
 });
 
 test('movie: сразу play-карточки — follow НЕ вызывается', async () => {

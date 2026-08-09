@@ -113,10 +113,13 @@ export class EoProvider extends Provider {
   }
 
   /**
-   * Фильм: page с карточками `play`/`call` → играбельные items.
-   * Если на primary-странице только похожие карточки `method:"link"` (без
-   * href): повторный запрос с `href` из этой карточки возвращает страницу
-   * фильма с call-карточками (напр. rezka на «Интерстеллар»).
+   * Фильм: page с карточками «play»/«call» → играбельные items.
+   * Fallback-цепочка (когда primary-страница пустая/только link-карточки):
+   * 1) `follow` по подходящей карточке-ссылке (`method:"link"` → href), как
+   *    у rezka («Интерстеллар»); 2) `postid`-схема Lime (`kinopub`): карточка
+   *    несёт `postid=<id>` — повторный lite-запрос с этим параметром отдаёт
+   *    страницу фильма с play/call (live 09.08: 9 переводов, cdntogo HLS).
+   * 3) если и так пусто — пустой результат (не светим источник).
    */
   async movieVideos(query, requestContext, streamProxy) {
     const pageParams = this.buildPageParams(query);
@@ -126,15 +129,39 @@ export class EoProvider extends Provider {
     const items = await this.movieItemsFromHtml(html, requestContext, streamProxy);
     if (items.length) return { items, seasons: [], voices: [] };
 
-    // Fallback: перейти по похожей карточке (rezka-страница тайтла).
+    // 1) follow-карточка (посительный title-скоринг; rezka/lumina).
     const href = this.movieHref(this.normalizer.cards(html), query);
-    if (!href) return { items: [], seasons: [], voices: [] };
+    if (href) {
+      const pageHtml = await this.client.getLite({ ...pageParams, href });
+      if (pageHtml) {
+        const followed = await this.movieItemsFromHtml(pageHtml, requestContext, streamProxy);
+        if (followed.length) return { items: followed, seasons: [], voices: [] };
+      }
+    }
 
-    const pageHtml = await this.client.getLite({ ...pageParams, href });
-    if (!pageHtml) return { items: [], seasons: [], voices: [] };
+    // 2) postid-схема Lime (kinopub): карточка → postid → перезапрос.
+    const postid = this.postidFromCards(this.normalizer.cards(html));
+    if (postid != null) {
+      const pageHtml = await this.client.getLite({ ...pageParams, postid: String(postid) });
+      if (pageHtml) {
+        const postItems = await this.movieItemsFromHtml(pageHtml, requestContext, streamProxy);
+        if (postItems.length) return { items: postItems, seasons: [], voices: [] };
+      }
+    }
 
-    const followed = await this.movieItemsFromHtml(pageHtml, requestContext, streamProxy);
-    return { items: followed, seasons: [], voices: [] };
+    return { items: [], seasons: [], voices: [] };
+  }
+
+  /** postid из первой карточки-ссылки (Lime). Если нет — null. */
+  postidFromCards(cards) {
+    for (const card of cards || []) {
+      if (!card || card.method !== 'link') continue;
+      const value = paramValueOf(card.url || card.href || '', 'postid');
+      if (value == null || value === '') continue;
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
   }
 
   /** Играбельные items из HTML фильма (play/call карточки без s/e). */

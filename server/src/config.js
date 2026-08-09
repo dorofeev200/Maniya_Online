@@ -176,16 +176,19 @@ export const config = {
     hosts: list('EO_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv', 'http://94.249.239.63', 'http://94.249.239.37', 'http://94.249.239.11', 'http://77.90.33.109']),
     // skaz-кластер — карточки сериалов ссылаются на него (тот же пул).
     skazHosts: list('EO_SKAZ_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv']),
-    // Балансеры (каждый = источник «Maniya · <имя>»). Дефолт — только live-зелёные
-    // (многотайтловая матрица test/eolive.test.js 2026-08-08, 3 фильма/баланс):
-    // alloha 3/3 (100%, call→HLS), videoseed 3/3, veoveo 3/3, pidtor 3/3, solntse 3/3,
-    // kinoflix 2/3. Исключены из дефолта: filmix/rezka/hdvb — их отдают native-провайдеры
-    // (реестр не дублирует); filmixtv — 403-гейт в этом прогоне; link-только — kinopub/lumex/
-    // kodik/animelib; 503/403 под аккаунт — kinobase/animedia/anilibria/rutubemovie и др.
-    // Видимые источники «Maniya · …» + СКРЫТЫЕ фолбэки native-дублей
+    // Балансеры (каждый = источник «Maniya · <source>»). Дефолт — только live-зелёные
+    // (многотайтловая матрица test/eolive.test.js 2026-08-08 + AUDIT 09.08, §10.3):
+    // veoveo/alloha/filmix/rezka/kinoflix/pidtor — 200 PLAY/CALL на skaz-хостах;
+    // kinopub — 200, карточки-ссылки (Lime, двухшаговая follow-схема postid);
+    // videoseed/solntse — 3/3 по матрице 08.08.
+    // Исключены из дефолта: filmix/rezka/hdvb — их отдают native-провайдеры
+    // (реестр не дублирует); filmixtv — 403-гейт; rch/WS-источники (vk RUS-1, rutube RUS-2,
+    // videohub, turboserial, fanserials, zagonka, kinobase, fancdn, mirage) — по lite-REST
+    // 400—503 (аккаунт/WebSocket), зарезервированы в §10.5, в UI не светятся.
+    // Видимые источники «Maniya · …» + СКРЫТЫЕ фоллбэки native-дублей
     // (filmix/rezka/hdvb/rutubemovie регистрируются, но в UI их отдаёт native;
-    // eonline-близнец подхватывает тайтлы, где native вернул 0 items).
-    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie']),
+    // eonline-близнец выигрывает где native вернул 0 items).
+    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie']),
     // Аккаунт E-Online. Не коммитить — только server/.env.
     accountEmail: (process.env.EO_ACCOUNT_EMAIL || '').trim(),
     uid: (process.env.EO_UID || '').trim(),

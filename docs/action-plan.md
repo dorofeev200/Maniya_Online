@@ -22,8 +22,81 @@
   Favorite не меняется; responsive media-queries прежние.
 - **Проверка:** `node --check public/maniya-online.js` → OK; тесты 261 (259 pass / 2 skip / 0 fail).
 
-## ✅ 2026-08-09: AUDIT ИСХОДНОГО JS (E-Online → полный перенос источников) — НАЧАТ
-- **Правила задачи:** Не переписывать проект с нуля; не создавать дубликаты существующих providers; переиспользовать существующие, доработать недостающие, добавить только отсутствующие; перенести XDVB, Videohub и все остальные найденные источники с полной логикой/качествами/озвучками/субтитрами/сериями; динамические токены и подписи переносить как алгоритмы генерации; секреты — только в ENV (не логировать/коммитить); ВСЕ изменения сохранять на VPS, локально и в git-ветке.
+## ✅ 2026-08-09: НОВЫЙ ИСТОЧНИК «Maniya · Lime» (kinopub) — РЕАЛИЗОВАН, LIVE, ДЕПЛОЙ~OK
+- **Задача (сессия 13):** перенести из исходного JS все источники. Audit + mapping готовы (§ выше).
+  Реализован 1-й недостающий REST-живой источник: **Lime = `kinopub`** (2-шаговый follow через
+  `postid`). Новых провайдеров не создавал — доработал `EoProvider` (fallback-цепочка).
+- **Изменения (3 файла):**
+  - `server/src/providers/eonline/EoProvider.js` — `movieVideos` теперь 2-ступенчатая:
+    1) follow через `href` (rezka); 2) **`postid`-схема Lime** (`kinopub`): из карточки-ссылки
+    `postidFromCards()` → повторный `getLite({…, postid})` → страница перевода (play/call).
+  - `server/src/providers/registry.js` — `EO_TITLES.kinopub = 'Maniya · Lime'`.
+  - `server/src/config.js` — `kinopub` в дефолтный `EO_BALANCERS` (между videoseed и kinoflix).
+- **Live-подтверждение (eolive.test.js, 09.08, все 6 хостов):**
+  `kinopub` [Интерстеллар:OK Матрица:OK Тёмный рыцарь:OK] = **3/3**, serial=no-episodes.
+  Итог матрицы: покрение ≥2/3 → **8 из 11** (alloha, kinopub, veoveo, pidtor, solntse, filmix,
+  rezka, hdvb). `rutube` 503 в этот прогон (гейт под аккаунт), `videoseed`/`kinoflix` — хостовые
+  флапы (в прогоне 08.08 были 3/3, 2/3). `EO_BALANCERS_LIVE` в выводе теста.
+- **Unit (доделано): `postidFromCards` обращался к неимпортированному `paramNumber` —**
+  переписан на локальный `paramValueOf` + `Number.parseInt`; `postid` в `getLite` строкой
+  (как остальные URL-параметры). Юнит «kinopub (Lime) — link-карточки с postid → follow через
+  postid» зелёный. **262 юнита (260 pass +2 skip live)**.
+- **Деплой:** сразу после этой волны, потом commit+pash на `backup`. План обновлён.
+- **AUDIT исходного `eonline-deob3.js` (деобфускат 198KB плагина) — ОБНОВЛЕНО:**
+  - ✅ **Карта балансеров `_0x39b522`** (все 11 источников пользователя + остальные найдены):
+    `kinobase:"🔥 Kino"`, `veoveo:"📽️ Ozvuchky"`, `alloha:"📺 Allo-XA"`, `filmix:"🔥 FILMix"`,
+    `videoseed:"🪬 VideoS"`, `videohub:"🗿 VideoH"`, `turboserial:"🐉 Dragon"`,
+    `vk:"🇷🇺 RUS-1"`, `rutube:"🇷🇺 RUS-2"`, `zagonka:"🌏 GET`s TV"`, `kinopub:"🌏 Lime"`,
+    `hdvb:"📻 XDVB"`, `fancdn:"💾 FCD"`, `mirage:"🎦 Miror"`, `kodik:"👀 Kodik"`,
+    `fanserials:"😈 FANS"`, `rezka:"😉 For Serial"`, `mirkino/mir kino:"📼 KinoPUB"`,
+    `xvideocdn:"🗽 VCDN"`, `hdrezka:"🎦 HDRezka"`, `aniliberty:"🌸 AniLiberty"`,
+    `animebesst:"🌸 AniBest"`, `animelib:"🌸 AniTrue"`.
+  - ✅ **skaz-cluster** (lumina-кластер, карточки-переходы): `["skaztv","lumina","солнце",
+    "kinoteatr.kg","ashdi","getstv","lift","eneyida","iremux","fmedia","lumex","spectre","eng",
+    "redheadsound","collaps","tochka","kinogo","animevost","animedia","filmge","geosaitebi",
+    "leproduction","asiage","vibix","ua","zetflix"]`.
+  - ✅ **`getQualityDisplay`** (вытащил в deob3): HDR-детекция (dolby vision/hdr10+/hdr10/hdr),
+    классиф. качества: 4k/2160→4K, 1080/fullhd→Full HD, 720→HD, 480→SD, regex `\d{3,4}`:
+    ≥2160→4K(0x870), ≥1080→Full HD, ≥720→HD, ≥480→SD; cam/ts/telesync→HDRip, `webrip`,
+    `webdl`, `bluray`→BluRay; HDR-суффиксы к базовому (4K HDR10+ / Full HD HDR10 …).
+  - ✅ **Параметры lite-запроса** = `lite/<balancer>?title=<query>` + заголовки
+    `X-Kit-AesGcm` (Lampa.Storage aesgcmkey). `withsearch`/`events` — системные порталы
+    (поиск через eolive «withsearch» — не каталог).
+  - ✅ **Live-проверка slug (09.08, 6 хостов × 6 параметров):** живые REST-play:
+    `veoveo/alloha/filmix/rezka/kinoflix/pidtor`; `kinopub` — 200 link (follow).
+    400/429/403/503: `vk/rutube/videohub/turboserial/fanserials/zagonka/kinobase/fancdn/mirage`
+    → rch(WebSocket)/аккаунт, деобфул REST недоступен (подробно §10.3 отчёта).
+  - Оригинал и деобфускат: `C:\tmp\showy\eonline-check.js` / `C:\tmp\showy\eonline-deob3.js`
+    (НЕ коммитим — в них зашиты токены).
+- **МАРРING (источник из JS → Maniya provider → Action):**
+  | Исходный JS (slug/display) | Maniya provider | Действие |
+  |---|---|---|
+  | `filmix` 🔥 FILMix | native Filmix + eonline twin | ✅ есть (twin fallback) |
+  | `rezka` 😉 For Serial | native Rezka + eonline twin | ✅ есть |
+  | `hdvb` 📻 XDVB | native HDVB + eonline twin | ✅ есть |
+  | `videohub` 🗿 VideoH | native CDNvideohub | ✅ есть (native видимый) |
+  | `alloha` 📺 Allo-OA | EoProvider balancer `alloha` | ✅ есть, live |
+  | `rutube` 🇷🇺 RUS-2 | — | ⛔ REST 400 (rch/аккаунт) — зарезервировать |
+  | `vk` 🇷🇺 RUS-1 | — | ⛔ REST 400 (rch/аккаунт) — зарезервировать |
+  | `kinopub` 🌏 Lime | EoProvider `kinopub` | ✅ **ДОБАВИТЬ**: REST 200 link-карточки → follow (movieHref уже есть) |
+  | `fanserials` 😈 FANS | — | ⛔ REST 429 (rch/аккаунт) — зарезервировать |
+  | `zagonka` 🌏 GET`s TV | — | ⛔ REST 429/400 (rch) — зарезервировать |
+  | `veoveo` 📽️ Ozvuchky | EoProvider `veoveo` | ✅ есть (live 200 PLAY) |
+  | `kinobase` 🔥 Kino | — | ⛔ REST 503 — зарезервировать |
+  | `turboserial` 🐉 Dragon | — | ⛔ REST 429 — зарезервировать |
+  | `fancdn` 💾 FCD | — | ⛔ REST 403 — зарезервировать |
+  | `mirage` 🎦 Miror | — | ⛔ REST 403 — зарезервировать |
+  | `kodik` 👀 Kodik | native Kodik + EoProvider `kodik` | ✅ есть (native; eonline-близнец link) |
+  | `aniliberty/animebesst/animelib` (🌼) | EoProvider `aniliberty` | ⚠️ 503 — зарезервировать |
+- **ИТОГ live-проверки (09.08.2026, пробы GET на всех 6 хостах, Interstellar/BreakingBad):
+  `veoveo/alloha/filmix/rezka/kinoflix/pidtor` = 200 PLAY|CALL (REST работает);
+  `kinopub` = 200 link (Lime, двухшаговая follow-схема — movieHref уже в EoProvider);
+  `vk/rutube/videohub/turboserial/fanserials/zagonka` = 400—429, `kinobase` = 503,
+  `fancdn/mirage` = 403 — **НЕ отдаются lite-REST** (rch/аккаунтные/WS) → реализация =
+  добавить в каталог стрингов провайдера с `enabled()=false` (зарезервированы), без фейкового
+  «работо» в UI. UI-селектор (#10) показывает только ПРОВЕРЕННЫЕ (items>0).**
+- **Мои (не менять при аудите):**
+- Не переписывать project с нуля; не создавать дубликаты существующих providers; переиспользовать существующие, доработать недостающие, добавить только недостающие; перенести XDVB/Videohub/и все остальные найденные источники с полной логикой/качествами/озвучками/субтитрами/сериями; динамические токены и подписи переносить как алгоритмы генерации; секреты — только в ENV (не логировать/коммитить); ВСЕ изменения сохранять на VPS, локально и в git-ветке `backup`.
 - **Задача:** статус-бейдж M-Online рядом с кнопками действий, дни из РЕАЛЬНОЙ подписки (`expires_at`),
   НЕ хардкод; склонения; состояния active/1 день/0 дней/expired/no-подписки/неавторизован; responsive
   1920×1080 → 320×568; не ломать layout/фокус; unit-тесты; деплой сразу.
