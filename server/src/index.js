@@ -91,8 +91,12 @@ async function route(context, response) {
   if (pathname === '/api/lampa/subscription/check') {
     const user = await findUserByRequest(context);
     const active = isSubscriptionActive(user);
+    // Часовой пояс клиента (минуты getTimezoneOffset), чтобы оставшиеся дни
+    // считались по календарю пользователя, а не UTC. Опционально: без tz → UTC.
+    const tzRaw = Number(context.query.tz);
+    const offsetMinutes = Number.isInteger(tzRaw) ? tzRaw : undefined;
     const status = user
-      ? subscriptionStatus({ active, expiresAt: user?.expires_at })
+      ? subscriptionStatus({ active, expiresAt: user?.expires_at, offsetMinutes })
       : { label: null, days: null };
 
     return sendJson(request, response, 200, {

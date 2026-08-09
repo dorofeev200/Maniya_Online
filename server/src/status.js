@@ -3,25 +3,30 @@
  * Единый источник истины для сервера (`/api/lampa/subscription/check` → badge
  * «MOnlineStatus» в Lampa) и unit-тестов. Намеренно чистый модуль без I/O.
  *
- * Принцип расчёта дней: КАЛЕНДАРНЫЕ дни в UTC (не 24-часовые интервалы),
- * чтобы у пользователя не «висел» лишний час у полуночи и часовые пояса
- * не ломали результат. day number = floor(timestamp / 86400000) в UTC,
- * разница дней = календарная дата(истечения) − календарная дата(сейчас).
+ * Принцип расчёта дней: КАЛЕНДАРНЫЕ дни (не 24-часовые интервалы) в часовом
+ * поясе пользователя, чтобы у полуночи не «терялся» день и граница UTC не
+ * сдвигала дату истечения для поясов, отличных от UTC.
+ *
+ * day number = floor((timestamp − offsetMinutes*60000) / 86400000), где
+ * offsetMinutes — `Date.prototype.getTimezoneOffset()` клиента (UTC − local).
+ * По умолчанию offset 0 → UTC-календарь (обратная совместимость для вызовов
+ * без tz). Разница дней = календарная дата(истечения) − календарная дата(сейчас).
  */
 
 export const DAY_MS = 86_400_000;
 
-/** Календарный номер дня по UTC для timestamp (мс). */
-export function utcDay(timestamp) {
-  return Math.floor(timestamp / DAY_MS);
+/** Календарный номер дня для timestamp (мс) в поясе offsetMinutes ({getTimezoneOffset}-стиль). */
+export function utcDay(timestamp, offsetMinutes = 0) {
+  return Math.floor((timestamp - offsetMinutes * 60000) / DAY_MS);
 }
 
 /**
- * Сколько календарных дней осталось до expiresAt (UTC-календарь) на момент now.
+ * Сколько календарных дней осталось до expiresAt на момент now в поясе
+ * options.offsetMinutes (минуты `getTimezoneOffset`, по умолчанию UTC).
  * Возвращает целое (может быть <= 0, если срок истёк). expiresAt — ISO-строка
  * или Date; если отсутствует/невалиден → null (бессрочная подписка).
  */
-export function remainingDays(expiresAt, now = new Date()) {
+export function remainingDays(expiresAt, now = new Date(), options = {}) {
   if (expiresAt == null || expiresAt === '') return null;
   // Только строки ISO/Date — число 42 не должно превращаться в дату 1970-01-01.
   const raw = typeof expiresAt === 'string' ? expiresAt : expiresAt instanceof Date ? expiresAt : null;
@@ -29,7 +34,8 @@ export function remainingDays(expiresAt, now = new Date()) {
   const exp = raw instanceof Date ? raw : new Date(raw);
   if (Number.isNaN(exp.getTime())) return null;
   const n = now instanceof Date ? now : new Date(now);
-  return utcDay(exp.getTime()) - utcDay(n.getTime());
+  const offset = Number.isInteger(options.offsetMinutes) ? options.offsetMinutes : 0;
+  return utcDay(exp.getTime(), offset) - utcDay(n.getTime(), offset);
 }
 
 /**
@@ -55,9 +61,9 @@ export function pluralDays(n) {
  * - days === 0               → «Осталось 0 дней» (активна сегодня).
  * - invalid/отсутствует дата → label по active без дней (без «undefined/NaN»).
  */
-export function subscriptionStatus({ active, expiresAt }, now = new Date()) {
+export function subscriptionStatus({ active, expiresAt, offsetMinutes }, now = new Date()) {
   if (!active) return { label: 'Подписка истекла', days: null };
-  const days = remainingDays(expiresAt, now);
+  const days = remainingDays(expiresAt, now, { offsetMinutes });
   if (days === null) return { label: 'Подписка активна', days: null };
   if (days < 0) return { label: 'Подписка истекла', days };
   const label = days === 1

@@ -656,7 +656,10 @@
     if (root.find && root.find('.maniya-status').length) return;
 
     var network = new Lampa.Reguest();
-    requestJson(network, trimSlash(MANIYA_API_BASE) + '/subscription/check', function (json) {
+    // tz = getTimezoneOffset() (UTC − local, минуты) — бэкенд считает остаток
+    // дней по календарю пользователя, а не по UTC (иначе у полуночи теряется день).
+    var statusUrl = trimSlash(MANIYA_API_BASE) + '/subscription/check?tz=' + new Date().getTimezoneOffset();
+    requestJson(network, statusUrl, function (json) {
       // Неавторизован / подписка не известна — не рисуем ничего (без undefined/NaN).
       if (!json || json.authorized === false || !json.subscription_text) return;
 

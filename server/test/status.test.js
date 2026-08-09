@@ -46,6 +46,69 @@ describe('remainingDays (календарный UTC-счёт)', () => {
   });
 });
 
+describe('remainingDays (локальный календарь, tz MSK = UTC+3)', () => {
+  // «Сейчас» 09.08 21:00 MSK = 18:00 UTC; истечение 11.08 02:59 MSK = 10.08T23:59Z.
+  // Это баг-репорт: бот ceil->2, badge UTC-календарь->1, локальный календарь->2.
+  const NOW_MSK_EVENING = new Date('2026-08-09T18:00:00Z');
+  const MSK = -180; // new Date().getTimezoneOffset() для UTC+3
+
+  it('баг-репорт: UTC-календарь 1, локальный (MSK) календарь 2', () => {
+    const exp = '2026-08-10T23:59:00Z'; // 11.08 02:59 MSK
+    assert.equal(remainingDays(exp, NOW_MSK_EVENING), 1); // дефолт UTC — расхождение
+    assert.equal(remainingDays(exp, NOW_MSK_EVENING, { offsetMinutes: MSK }), 2);
+  });
+
+  it('границы 0/1/2/3 дня в полуденные часы', () => {
+    const now = new Date('2026-08-09T12:00:00Z'); // 15:00 MSK
+    assert.equal(remainingDays('2026-08-09T18:00:00Z', now, { offsetMinutes: MSK }), 0);
+    assert.equal(remainingDays('2026-08-10T05:00:00Z', now, { offsetMinutes: MSK }), 1);
+    assert.equal(remainingDays('2026-08-11T18:00:00Z', now, { offsetMinutes: MSK }), 2);
+    assert.equal(remainingDays('2026-08-12T12:00:00Z', now, { offsetMinutes: MSK }), 3);
+  });
+
+  it('разные часы expiresAt в пределах одного локального дня — тот же остаток', () => {
+    const now = new Date('2026-08-09T00:00:00Z'); // 03:00 MSK
+    assert.equal(remainingDays('2026-08-10T00:00:00Z', now, { offsetMinutes: MSK }), 1);
+    assert.equal(remainingDays('2026-08-10T12:00:00Z', now, { offsetMinutes: MSK }), 1);
+    assert.equal(remainingDays('2026-08-10T21:59:00Z', now, { offsetMinutes: MSK }), 2); // 00:59 MSK уже 11.08
+  });
+
+  it('UTC и локальный календарь сходятся только при нулевом offset', () => {
+    const now = new Date('2026-08-09T00:00:00Z');
+    const exp = '2026-08-10T21:59:00Z'; // UTC день 10, MSK день 11 (00:59)
+    assert.equal(remainingDays(exp, now, { offsetMinutes: 0 }), 1);
+    assert.equal(remainingDays(exp, now, { offsetMinutes: MSK }), 2);
+  });
+
+  it('переход через полночь локального дня не крадёт день', () => {
+    // now 02:30 MSK (ещё 10.08 local, но уже 09.08T23:30Z); exp 03:30 MSK = 10.08 local день.
+    const now = new Date('2026-08-09T23:30:00Z');
+    const exp = '2026-08-10T00:30:00Z';
+    assert.equal(remainingDays(exp, now, { offsetMinutes: 0 }), 1); // UTC-подход ошибочен
+    assert.equal(remainingDays(exp, now, { offsetMinutes: MSK }), 0);
+  });
+
+  it('западный пояс (UTC−4): вечер-в-вечер = 0 дней, не 1', () => {
+    const now = new Date('2026-08-09T23:00:00Z'); // 19:00 UTC−4
+    const exp = '2026-08-10T01:00:00Z'; // 21:00 UTC−4 — тот же локальный день
+    assert.equal(remainingDays(exp, now, { offsetMinutes: 240 }), 0);
+  });
+
+  it('tz не ломает бессрочные/невалидные значения', () => {
+    assert.equal(remainingDays(null, NOW_MSK_EVENING, { offsetMinutes: MSK }), null);
+    assert.equal(remainingDays('not-a-date', NOW_MSK_EVENING, { offsetMinutes: MSK }), null);
+  });
+
+  it('subscriptionStatus прокидывает offsetMinutes в label', () => {
+    const s = subscriptionStatus(
+      { active: true, expiresAt: '2026-08-10T23:59:00Z', offsetMinutes: MSK },
+      NOW_MSK_EVENING
+    );
+    assert.equal(s.label, 'Осталось 2 дня');
+    assert.equal(s.days, 2);
+  });
+});
+
 describe('pluralDays (склонение)', () => {
   it('1, 21, 31 → «день»', () => {
     assert.equal(pluralDays(1), 'день');
