@@ -175,6 +175,38 @@
     return (source.id || source.balanser || source.name || 'main').toLowerCase();
   }
 
+  // --- Селектор качества (#10) ---
+
+  function qualityPriority(label) {
+    var s = String(label || '').toLowerCase();
+    if (s.indexOf('4k') !== -1 || s.indexOf('2160') !== -1) return 6;
+    if (s.indexOf('1080') !== -1 || s.indexOf('full hd') !== -1 || s.indexOf('fullhd') !== -1) return 5;
+    if (s.indexOf('720') !== -1 || s === 'hd') return 4;
+    if (s.indexOf('480') !== -1 || s === 'sd') return 3;
+    return 2;
+  }
+
+  /** Варианты качества из item: мапа {label: url} → [{label, url}], строка-метка → один. */
+  function qualityEntries(item) {
+    var q = item && item.quality;
+    if (!q) return [];
+    if (typeof q === 'string') return q ? [{ label: String(q), url: '' }] : [];
+    var entries = [];
+    for (var label in q) {
+      if (q[label] && typeof q[label] === 'string') entries.push({ label: label, url: q[label] });
+    }
+    return entries;
+  }
+
+  /** Бейджи качеств для строки списка (сортировка: 4K → 1080 → HD → SD). */
+  function qualityChips(item) {
+    return qualityEntries(item).sort(function (a, b) {
+      return qualityPriority(b.label) - qualityPriority(a.label);
+    }).map(function (e) {
+      return '<span class="maniya-online-item__quality">' + e.label + '</span>';
+    }).join('');
+  }
+
   function component(object) {
     var network = new Lampa.Reguest();
     var scroll = new Lampa.Scroll({ mask: true, over: true });
@@ -390,8 +422,10 @@
         item.info = item.voice_name || item.quality || sources[activeSource].name;
         item.time = item.time || '';
         item.quality_label = item.quality_label || '';
+        item.qualities_html = qualityChips(item);
 
         var html = Lampa.Template.get('maniya_video_item', item);
+        if (!item.qualities_html) html.find('.maniya-online-item__qualities').remove();
         html.on('hover:enter', function () {
           self.play(item);
         }).on('hover:focus', function (event) {
@@ -408,6 +442,12 @@
 
     this.play = function (item) {
       var self = this;
+      var entries = qualityEntries(item);
+
+      // Если у потока ≥2 варианта качества — показываем нативный селектор (#10);
+      // D-pad: Lampa.Select фокусируется кнопками ТВ, выбор = «Смотреть <качество>».
+      if (entries.length >= 2) return this.chooseQuality(item, entries);
+
       if (item.method === 'call') {
         Lampa.Loading.start();
         requestJson(network, item.url, function (json) {
@@ -420,6 +460,25 @@
       } else {
         this.runPlayer(item, item);
       }
+    };
+
+    /** Селектор качества: список вариантов → «Смотреть <label>» (конкретный URL). */
+    this.chooseQuality = function (item, entries) {
+      var self = this;
+      Lampa.Select.open({
+        title: item.title || Lampa.Lang.translate('maniya_quality'),
+        items: entries.slice().sort(function (a, b) {
+          return qualityPriority(b.label) - qualityPriority(a.label);
+        }).map(function (entry) {
+          return {
+            title: Lampa.Lang.translate('maniya_watch_quality') + ' ' + entry.label,
+            onSelect: function () {
+              Lampa.Select.close();
+              self.runPlayer(item, { url: entry.url, quality: item.quality });
+            }
+          };
+        })
+      });
     };
 
     this.runPlayer = function (item, stream) {
@@ -470,8 +529,12 @@
     Lampa.Template.add('maniya_css', '<style>' +
       '.maniya-online-item{position:relative;border-radius:.3em;background:rgba(0,0,0,.3);padding:1.2em;margin-bottom:1em}' +
       '.maniya-online-item__title{font-size:1.5em}.maniya-online-item__info{margin-top:.5em;opacity:.75}' +
+      '.maniya-online-item__qualities{display:flex;flex-wrap:wrap;gap:.4em .5em;margin-top:.55em}' +
+      '.maniya-online-item__quality{padding:.12em .65em;border-radius:2em;background:rgba(255,178,62,.16);color:#ffd98f;font-size:.85em;letter-spacing:.02em;line-height:1.35;white-space:nowrap}' +
       '.maniya-online-item.focus::after{content:"";position:absolute;top:-.45em;left:-.45em;right:-.45em;bottom:-.45em;border:.25em solid #fff;border-radius:.6em;pointer-events:none}' +
       '.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}' +
+      '@media (max-width:640px){.maniya-online-item{padding:1em;margin-bottom:.8em}.maniya-online-item__title{font-size:1.25em}}' +
+      '@media (max-width:420px){.maniya-online-item{padding:.85em;margin-bottom:.6em}.maniya-online-item__quality{font-size:.8em}}' +
       '.maniya-online-button{position:relative;width:2.2em;height:2.2em;margin-right:.7em;border-radius:50%;background:radial-gradient(circle at 32% 26%,#ffd98f 0%,#ffb23e 42%,#f58a1b 100%);color:#3a1d02;display:flex;align-items:center;justify-content:center;box-shadow:0 .1em .5em rgba(0,0,0,.38),inset 0 .07em .22em rgba(255,255,255,.5);transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease;flex:0 0 auto}' +
       '.maniya-online-button::after{content:"";position:absolute;top:-6%;left:-6%;width:112%;height:112%;border-radius:50%;border:.09em solid rgba(255,255,255,.4);box-shadow:inset 0 .06em .35em rgba(255,255,255,.28),inset 0 -.06em .28em rgba(0,0,0,.15);pointer-events:none}' +
       '.maniya-online-button.focus,.maniya-online-button:hover{transform:scale(1.12);box-shadow:0 0 0 .22em rgba(255,255,255,.6),0 .18em .7em rgba(0,0,0,.45);outline:none}' +
@@ -490,7 +553,7 @@
     '</style>');
     $('body').append(Lampa.Template.get('maniya_css', {}, true));
     Lampa.Template.add('maniya_content_loading', '<div class="online-empty"><div class="broadcast__scan"><div></div></div></div>');
-    Lampa.Template.add('maniya_video_item', '<div class="maniya-online-item selector"><div class="maniya-online-item__title">{title}</div><div class="maniya-online-item__info">{info}</div></div>');
+    Lampa.Template.add('maniya_video_item', '<div class="maniya-online-item selector"><div class="maniya-online-item__title">{title}</div><div class="maniya-online-item__info">{info}</div><div class="maniya-online-item__qualities">{qualities_html}</div></div>');
     Lampa.Template.add('maniya_empty', '<div class="maniya-online-empty"><div class="maniya-online-empty__title">{title}</div><div class="maniya-online-empty__message">{message}</div></div>');
   }
 
@@ -501,6 +564,8 @@
       maniya_source: { ru: 'Источник', en: 'Source' },
       maniya_season: { ru: 'Сезон', en: 'Season' },
       maniya_voice: { ru: 'Озвучка', en: 'Voice' },
+      maniya_quality: { ru: 'Выбор качества', en: 'Select quality' },
+      maniya_watch_quality: { ru: 'Смотреть', en: 'Watch' },
       maniya_episode: { ru: 'Серия', en: 'Episode' },
       maniya_no_results: { ru: 'Видео не найдено', en: 'Video not found' },
       maniya_nolink: { ru: 'Не удалось получить ссылку', en: 'Failed to fetch link' },
