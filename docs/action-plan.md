@@ -768,3 +768,22 @@ FIX #3/#4 и pidtor (#26) остаются под запретом.
 - **Код обратно совместим:** `PLAY*` не трогали, провайдеры без изменений, только UI/клиент+мета.
 - **Тесты: 345 (343 pass / 2 skip / 0 fail).** Деплой: backup + VPS; `/health` OK.
 - Сырой live-дескриптор: `scripts/raw/live-alloha-20260810.json` (без account_email/uid — маскированы).
+
+## Сессия 18 (2026-08-10): ПОЛНЫЙ E-ONLINE INVENTORY + GAP ANALYSIS
+- **GeoVideo (skaz-geosaitebi) ДОБАВЛЕН и задеплоен** (коммит `738d831`): фикс follow в
+  SkazProvider.movieHref — у link-карточки нет `card.href`, следовать параметру `href=<slug>.html`
+  внутри её URL (`hrefParamOf`). E2E фильм WORKING (Interstellar → 1 play item, манифест #EXTM3U
+  через прокси), сериалы — в каталоге GeoVideo нет (0 карточек у GoT/Breaking Bad) = **movies-only**.
+  `geosaitebi` внесён в EO_BALANCERS/SKAZ_BALANCERS + meta (GeoVideo 🌍 Full HD).
+  Тесты 346 (344 pass / 2 skip / 0 fail).
+- **`docs/eonline-gap-analysis.md`** (коммит `b3bd4d8`): полный реестр 33 источников с честными
+  статусами (WORKING/PARTIAL/BLOCKED/DEAD/UNKNOWN/MISSING), HTTP 200 ≠ WORKING — только E2E.
+  Пробы 2026-08-10: REST-пробинг 32 слагов + E2E-подтверждение кандидатов через SkazProvider.
+- **Кандидаты на добавление (ЖДУТ подтверждения приоритета, НЕ реализованы):**
+  1. `vkmovie` (VKMovie) — жив без кода (21 items, 2160p→144p, live 206 video/mp4), вне карты E-Online;
+  2. `animelib` (AniTrue) — link-карточки 200, тот же follow-фикс, нужен E2E.
+- **DEAD/заблокированные НЕ светятся:** zagonka (503) — сейчас живёт в UI пустым, рекомендую
+  `show=false`; остальные (kinobase/turboserial/vk/rutube/fancdn/mirage/fanserials/mirkino/
+  xvideocdn/hdrezka/aniliberty/animebesst/filmixtv/kinoteatrkg/collaps-skaz) — в реестре meta,
+  вне balancers. account_email/uid — конфигурируемые (SKAZ_*/EO_* фолбэк), механизм не тронут.
+- **СТОП ПО ДИРЕКТИВЕ:** масс-реализация отсутствующих providers не начата — ждёт приоритета.
