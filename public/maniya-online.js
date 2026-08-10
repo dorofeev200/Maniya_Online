@@ -175,6 +175,43 @@
     return (source.id || source.balanser || source.name || 'main').toLowerCase();
   }
 
+  /**
+   * ЕДИНАЯ отображаемая подпись источника: «🎬 Allo-XA - 4K».
+   * icon/quality_label приходят из мета-реестра сервера (meta.js) отдельными
+   * полями — эмодзи НЕ вшивается в id/название провайдера, здесь только
+   * визуальная склейка. Неизвестный источник → fallback-иконка 🎬.
+   * Чистый отображение-слой: сортировка источников (filterSources) не зависит
+   * от этой подписи, остаётся стабильной.
+   */
+  function sourceLabel(source, fallbackName) {
+    var name = (source && source.name) || fallbackName || '';
+    var icon = (source && source.icon) || '🎬';
+    var quality = (source && source.quality_label) || '';
+    var label = icon + ' ' + name;
+    if (quality) label += ' - ' + quality;
+    return label;
+  }
+
+  // --- Постер/изображение результата (#5) ---
+  // RAW Alloha (movie-страница и video-JSON) НЕ содержит poster/image/thumbnail —
+  // эталон E-Online/Online.plugin.js тоже не берёт его у провайдера, а рисует
+  // на клиенте из карточки фильма: Lampa.TMDB.image('t/p/w300' + backdrop_path)
+  // (Online/plugin.js Lampac, строка 1234, onerror→img_broken / onload→loaded).
+  // Hardcoded `https://image.tmdb.org/...` НЕ работает у пользователя: Lampa
+  // использует НАСТРОЕННЫЙ image-CDN (свой домен/миeрт к TMDB), и прямой
+  // image.tmdb.org в его сети блокируется → чёрный прямоугольник / иконка «?».
+  // Резолвим через Lampa.TMDB.image, как работающая реализация E-Online.
+  function moviePoster(movie) {
+    var path = movie && (movie.backdrop_path || movie.poster_path);
+    if (!path) return '';
+    try {
+      if (Lampa.TMDB && typeof Lampa.TMDB.image === 'function') {
+        return Lampa.TMDB.image('t/p/w300' + String(path));
+      }
+    } catch (e) {}
+    return '';
+  }
+
   // --- Селектор качества (#10) ---
 
   function qualityPriority(label) {
@@ -205,6 +242,75 @@
     }).map(function (e) {
       return '<span class="maniya-online-item__quality">' + e.label + '</span>';
     }).join('');
+  }
+
+  /**
+   * Открыть выбор качества. Канонический API рабочего E-Online/Lampac-plигина —
+   * Lampa.Select.show({ title, items, onSelect, onBack }) с ГЛОБАЛЬНЫМ
+   * onSelect(entry) и onBack → Lampa.Controller.toggle(enabled) (online.plugin.js,
+   * строки 1477/1504). Lampa.Select.open в реальной Lampa НЕ СУЩЕСТВУЕТ —
+   * «Script error.: Lampa.Select.open is not a function». Параметр `select`
+   * только для тестов (mock БЕЗ .open — регрессия упадёт тем же TypeError).
+   */
+  function openQualitySelect(item, entries, run, select) {
+    var api = select && typeof select.show === 'function' ? select : Lampa.Select;
+    var enabled = Lampa.Controller.enabled().name;
+    api.show({
+      title: item.title || Lampa.Lang.translate('maniya_quality'),
+      items: entries.slice().sort(function (a, b) {
+        return qualityPriority(b.label) - qualityPriority(a.label);
+      }).map(function (entry) {
+        return {
+          title: Lampa.Lang.translate('maniya_watch_quality') + ' ' + entry.label,
+          label: entry.label,
+          url: entry.url
+        };
+      }),
+      onSelect: function (chosen) {
+        if (api.close) api.close();
+        Lampa.Controller.toggle(enabled);
+        run(item, {
+          url: chosen && chosen.url,
+          quality: item.quality,
+          subtitles: item.subtitles
+        });
+      },
+      onBack: function () {
+        Lampa.Controller.toggle(enabled);
+      }
+    });
+  }
+
+  // ── E-Online: orUrlReserve + setDefaultQuality (Online/plugin.js, строки 631-648) ──
+  // Играем ДЕФОЛТНОЕ качество (настройка Lampa video_quality_default); полная карта
+  // quality уходит в плеер — выбор 1080p/720p/480p/360p делает НАТИВНЫЙ плеер,
+  // как в рабочем E-Online. Отдельного предплеерного селектора НЕТ.
+  function orUrlReserve(data) {
+    if (data && data.url && typeof data.url === 'string' && data.url.indexOf(' or ') !== -1) {
+      var urls = data.url.split(' or ');
+      data.url = urls[0].trim();
+      data.url_reserve = urls[1].trim();
+    }
+  }
+
+  function setDefaultQuality(data) {
+    var map = data && data.quality;
+    if (!map || typeof map !== 'object') return;
+    try {
+      var keys = Lampa.Arrays.getKeys(map);
+      var i;
+      var q;
+      for (i = 0; i < keys.length; i++) {
+        q = keys[i];
+        var value = map[q];
+        if (String(value) !== value) continue;
+        if (parseInt(q, 10) === parseInt(Lampa.Storage.field('video_quality_default'), 10)) {
+          data.url = value;
+          orUrlReserve(data);
+        }
+        if (value.indexOf(' or ') !== -1) map[q] = value.split(' or ')[0].trim();
+      }
+    } catch (e) {}
   }
 
   function component(object) {
@@ -312,8 +418,12 @@
 
         normalizeSources(json).forEach(function (item) {
           var key = sourceKey(item);
+          // Мета (icon/quality_label) приходит КАК ЕСТЬ из единого реестра
+          // сервера (meta.js). Клиент их только отображает — не вычисляет.
           sources[key] = {
             name: item.name || key,
+            icon: item.icon || '🎬',
+            quality_label: item.quality_label || '',
             url: item.url,
             show: item.show !== false
           };
@@ -338,13 +448,13 @@
     this.updateFilter = function () {
       filter.set('sort', filterSources.map(function (key) {
         return {
-          title: sources[key].name,
+          title: sourceLabel(sources[key]),
           source: key,
           selected: key === activeSource,
           ghost: !sources[key].show
         };
       }));
-      filter.chosen('sort', [sources[activeSource].name]);
+      filter.chosen('sort', [sourceLabel(sources[activeSource])]);
     };
 
     this.changeSource = function (key) {
@@ -419,13 +529,31 @@
             item.title = item.voice_name || item.quality || String(index + 1);
           }
         }
-        item.info = item.voice_name || item.quality || sources[activeSource].name;
+        item.info = item.voice_name || item.quality || sourceLabel(sources[activeSource]);
         item.time = item.time || '';
         item.quality_label = item.quality_label || '';
         item.qualities_html = qualityChips(item);
+        item.poster = item.poster || moviePoster(object.movie);
+        item.poster_block = item.poster
+          ? '<img class="maniya-online-item__poster" src="' + item.poster + '" alt=""/>'
+          : '';
 
         var html = Lampa.Template.get('maniya_video_item', item);
         if (!item.qualities_html) html.find('.maniya-online-item__qualities').remove();
+        if (item.poster) {
+          // E-Online online-prestige__img (Online/plugin.js 1204-1236): onerror→img_broken,
+          // onload→loaded, element.thumbnail = img.src — постер/миниатюра уходят в плеер.
+          var posterEl = html.find('.maniya-online-item__poster');
+          posterEl.on('error', function () {
+            posterEl.attr('src', './img/img_broken.svg');
+          });
+          posterEl.on('load', function () {
+            posterEl.addClass('maniya-online-item__poster--loaded');
+          });
+          item.thumbnail = item.poster;
+        } else {
+          html.find('.maniya-online-item__poster-block').remove();
+        }
         html.on('hover:enter', function () {
           self.play(item);
         }).on('hover:focus', function (event) {
@@ -442,12 +570,10 @@
 
     this.play = function (item) {
       var self = this;
-      var entries = qualityEntries(item);
 
-      // Если у потока ≥2 варианта качества — показываем нативный селектор (#10);
-      // D-pad: Lampa.Select фокусируется кнопками ТВ, выбор = «Смотреть <качество>».
-      if (entries.length >= 2) return this.chooseQuality(item, entries);
-
+      // E-Online (Online/plugin.js display→getFileUrl→Player.play): НЕТ предплеерного
+      // селектора. Играем дефолтное качество, карта quality уходит в нативный плеер →
+      // выбор 1080p/720p/480p/360p внутри плеера. Регрессия «Script error.» устранена.
       if (item.method === 'call') {
         Lampa.Loading.start();
         requestJson(network, item.url, function (json) {
@@ -462,40 +588,39 @@
       }
     };
 
-    /** Селектор качества: список вариантов → «Смотреть <label>» (конкретный URL). */
+    /** Селектор качества: Lampa.Select.show — ровно тот вызов, что рабочий E-Online/Online.plugin.js. */
     this.chooseQuality = function (item, entries) {
       var self = this;
-      Lampa.Select.open({
-        title: item.title || Lampa.Lang.translate('maniya_quality'),
-        items: entries.slice().sort(function (a, b) {
-          return qualityPriority(b.label) - qualityPriority(a.label);
-        }).map(function (entry) {
-          return {
-            title: Lampa.Lang.translate('maniya_watch_quality') + ' ' + entry.label,
-            onSelect: function () {
-              Lampa.Select.close();
-              self.runPlayer(item, { url: entry.url, quality: item.quality });
-            }
-          };
-        })
+      openQualitySelect(item, entries, function (sourceItem, stream) {
+        self.runPlayer(sourceItem, stream);
       });
     };
 
     this.runPlayer = function (item, stream) {
-      if (!stream || !stream.url) return Lampa.Noty.show(Lampa.Lang.translate('maniya_nolink'));
-
+      // E-Online toPlayElement + getFileUrl-merge (Online/plugin.js 615-727).
+      var json = stream && typeof stream === 'object' ? stream : {};
       var play = {
         title: item.title,
-        url: stream.url,
-        quality: stream.quality || item.quality,
-        subtitles: stream.subtitles || item.subtitles,
-        headers: stream.headers,
+        url: (json.url || item.url || '').trim(),
+        quality: json.quality || item.quality,
+        subtitles: json.subtitles || item.subtitles,
+        segments: json.segments || item.segments,
+        hls_manifest_timeout: json.hls_manifest_timeout || item.hls_manifest_timeout,
+        headers: json.headers || item.headers,
         timeline: item.timeline,
         season: item.season,
         episode: item.episode,
         voice_name: item.voice_name,
+        thumbnail: item.thumbnail,
+        callback: item.mark,
         isonline: true
       };
+
+      if (!play.url) return Lampa.Noty.show(Lampa.Lang.translate('maniya_nolink'));
+
+      // primary or reserve → url + url_reserve; дефолтное качество из настроек Lampa.
+      orUrlReserve(play);
+      setDefaultQuality(play);
 
       Lampa.Player.play(play);
       Lampa.Player.playlist([play]);
@@ -527,14 +652,17 @@
 
   function addTemplates() {
     Lampa.Template.add('maniya_css', '<style>' +
-      '.maniya-online-item{position:relative;border-radius:.3em;background:rgba(0,0,0,.3);padding:1.2em;margin-bottom:1em}' +
+      '.maniya-online-item{position:relative;border-radius:.3em;background:rgba(0,0,0,.3);padding:1.2em;margin-bottom:1em;display:flex;gap:1em;align-items:flex-start}' +
+      '.maniya-online-item__poster-block{flex:0 0 8.5em;border-radius:.4em;overflow:hidden;background:rgba(0,0,0,.25);align-self:stretch;min-height:4.5em}' +
+      '.maniya-online-item__poster{display:block;width:100%;height:100%;object-fit:cover}' +
+      '.maniya-online-item__body{flex:1 1 auto;min-width:0}' +
       '.maniya-online-item__title{font-size:1.5em}.maniya-online-item__info{margin-top:.5em;opacity:.75}' +
       '.maniya-online-item__qualities{display:flex;flex-wrap:wrap;gap:.4em .5em;margin-top:.55em}' +
       '.maniya-online-item__quality{padding:.12em .65em;border-radius:2em;background:rgba(255,178,62,.16);color:#ffd98f;font-size:.85em;letter-spacing:.02em;line-height:1.35;white-space:nowrap}' +
       '.maniya-online-item.focus::after{content:"";position:absolute;top:-.45em;left:-.45em;right:-.45em;bottom:-.45em;border:.25em solid #fff;border-radius:.6em;pointer-events:none}' +
       '.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}' +
-      '@media (max-width:640px){.maniya-online-item{padding:1em;margin-bottom:.8em}.maniya-online-item__title{font-size:1.25em}}' +
-      '@media (max-width:420px){.maniya-online-item{padding:.85em;margin-bottom:.6em}.maniya-online-item__quality{font-size:.8em}}' +
+      '@media (max-width:640px){.maniya-online-item{padding:1em;margin-bottom:.8em;gap:.7em}.maniya-online-item__poster-block{flex-basis:6em}.maniya-online-item__title{font-size:1.25em}}' +
+      '@media (max-width:420px){.maniya-online-item{padding:.85em;margin-bottom:.6em;gap:.6em}.maniya-online-item__poster-block{flex-basis:5em}.maniya-online-item__quality{font-size:.8em}}' +
       // Кнопка M-ONLINE = ВАРИАНТ СТАНДАРТНОЙ Lampa action-кнопки (.full-start__button):
       // ровно та же геометрия — height 2.8em, border-radius 1em, padding 0 1em,
       // margin-right .75em, font-size 1.3em, flex выравнивание по центру (см. _app.css).
@@ -556,7 +684,7 @@
     '</style>');
     $('body').append(Lampa.Template.get('maniya_css', {}, true));
     Lampa.Template.add('maniya_content_loading', '<div class="online-empty"><div class="broadcast__scan"><div></div></div></div>');
-    Lampa.Template.add('maniya_video_item', '<div class="maniya-online-item selector"><div class="maniya-online-item__title">{title}</div><div class="maniya-online-item__info">{info}</div><div class="maniya-online-item__qualities">{qualities_html}</div></div>');
+    Lampa.Template.add('maniya_video_item', '<div class="maniya-online-item selector"><div class="maniya-online-item__poster-block">{poster_block}</div><div class="maniya-online-item__body"><div class="maniya-online-item__title">{title}</div><div class="maniya-online-item__info">{info}</div><div class="maniya-online-item__qualities">{qualities_html}</div></div></div>');
     Lampa.Template.add('maniya_empty', '<div class="maniya-online-empty"><div class="maniya-online-empty__title">{title}</div><div class="maniya-online-empty__message">{message}</div></div>');
   }
 
@@ -732,4 +860,19 @@
   }
 
   startPlugin();
+
+  // Тестовая ручка для регрессий (server/test/plugin-contract.test.js): vm-заглушка
+  // Lampa без Lampa.Select.open воспроизводит «Script error» при вызове
+  // openQualitySelect. Экспортируем ТОЛЬКО чистые функции, без доступа к замыканию.
+  if (typeof window !== 'undefined') {
+    window.MANIYA_LIB = {
+      openQualitySelect: openQualitySelect,
+      qualityEntries: qualityEntries,
+      qualityChips: qualityChips,
+      moviePoster: moviePoster,
+      orUrlReserve: orUrlReserve,
+      setDefaultQuality: setDefaultQuality,
+      sourceLabel: sourceLabel
+    };
+  }
 })();

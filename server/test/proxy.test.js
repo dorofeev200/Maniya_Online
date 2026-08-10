@@ -60,6 +60,28 @@ function startTestServer() {
         ].join('\n'));
         return;
       }
+      if (req.url.startsWith('/render.m3u8')) {
+        // Точная копия vkvideo render-плейлиста (VOD, X-MAP строка 7, относительные
+        // сегменты) — регрессия 00:00: init-URI должен быть переписан на прокси,
+        // иначе hls.js резолвит его против PROXIED URL → 404 JSON → нет MSE init.
+        const base = `http://127.0.0.1:${server.address().port}`;
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        res.end([
+          '#EXTM3U',
+          '#EXT-X-PLAYLIST-TYPE:VOD',
+          '#EXT-X-VERSION:6',
+          '#EXT-X-TARGETDURATION:6',
+          '#EXT-X-MAP:URI="init-c1-f1-v1-a1.mp4"',
+          '#EXT-X-KEY:METHOD=AES-128,URI="keys/key.bin",IV=0x00000000000000000000000000000001',
+          '#EXTINF:6.000,',
+          'seg-1-f1-v1-a1.m4s',
+          '#EXTINF:6.000,',
+          'seg-2-f1-v1-a1.m4s',
+          '#EXT-X-ENDLIST',
+          ''
+        ].join('\n'));
+        return;
+      }
       const body = Buffer.from('WXYZ');
       const range = req.headers.range;
       if (range) {
@@ -128,6 +150,37 @@ test('proxyMedia: переписывает HLS-манифест на прокс�
     assert.match(body, /https:\/\/maniya\.test\/proxy\?url=.+video_720\.m3u8/);
     assert.match(body, /https:\/\/maniya\.test\/proxy\?url=.+low\.m3u8/);
     assert.match(body, /#EXT-X-STREAM-INF:BANDWIDTH=1280000/);
+  } finally {
+    server.close();
+  }
+});
+
+test('proxyMedia: #EXT-X-MAP init и #EXT-X-KEY URI переписываются на прокси (регрессия 00:00)', async () => {
+  const server = await startTestServer();
+  try {
+    const port = server.address().port;
+    const makeProxyUrl = (url) => `https://maniya.test/proxy?url=${encodeURIComponent(url)}`;
+    const response = new MockResponse();
+    const request = { headers: {} };
+
+    await proxyMedia(`http://127.0.0.1:${port}/render.m3u8`, request, response, {
+      allowHosts: ['127.0.0.1'],
+      makeProxyUrl,
+      maxRedirects: 1,
+      timeoutMs: 3000
+    });
+
+    const body = await collect(response);
+    assert.equal(response.status, 200);
+    // X-MAP:init-c1-f1-v1-a1.mp4 (относительный) — резолв против render-базы → прокси.
+    // Это именно та строка, что не переписывалась раньше и давала hls.js 404 → 00:00.
+    assert.match(body, /#EXT-X-MAP:URI="https:\/\/maniya\.test\/proxy\?url=.+init-c1-f1-v1-a1\.mp4"/);
+    // X-KEY:keys/key.bin (относительный, slash закодирован %2F) — тоже прокси, IV сохранён.
+    assert.match(body, /#EXT-X-KEY:METHOD=AES-128,URI="https:\/\/maniya\.test\/proxy\?url=.+keys%2Fkey\.bin",IV=0x00000000000000000000000000000001/);
+    // Директивы без URI не тронуты.
+    assert.match(body, /#EXT-X-PLAYLIST-TYPE:VOD/);
+    assert.match(body, /#EXTINF:6\.000,/);
+    assert.match(body, /#EXT-X-ENDLIST/);
   } finally {
     server.close();
   }

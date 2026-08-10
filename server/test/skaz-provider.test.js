@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SkazProvider } from '../src/providers/skaz/SkazProvider.js';
 
-async function fixture(name) {
-  return readFile(`C:/tmp/showy/${name}`, 'utf8');
-}
+const FIXTURE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const repoFixture = (name) => readFile(path.join(FIXTURE_DIR, name), 'utf8');
+const fixture = (name) => readFile(`C:/tmp/showy/${name}`, 'utf8'); // dev-фикстуры (RAW-захваты)
 
 /** FakeClient: getLite → lite, openLiteUrl → по подстроке URL, resolve → финальный m3u8. */
 class FakeSkazClient {
@@ -14,6 +16,7 @@ class FakeSkazClient {
     this.lite = String(options.lite ?? '');
     this.pages = options.pages || {};
     this.resolveResult = options.resolveStream || 'http://magic.stream.voidboost.one/s/key/manifest.m3u8';
+    this.videoJson = options.videoJson == null ? null : options.videoJson; // строка JSON или объект для resolveVideoJson
     this.calls = [];
   }
 
@@ -49,6 +52,12 @@ class FakeSkazClient {
   async resolveStream(url) {
     this.calls.push(['resolveStream', url]);
     return this.resolveResult;
+  }
+
+  async resolveVideoJson(streamUrl) {
+    this.calls.push(['resolveVideoJson', streamUrl]);
+    if (this.videoJson == null) return null;
+    return typeof this.videoJson === 'string' ? JSON.parse(this.videoJson) : this.videoJson;
   }
 }
 
@@ -125,6 +134,104 @@ test('movie: call-карточка БЕЗ stream (пустой резолв) —
   const provider = makeProvider(client, 'alloha');
   const result = await provider.videos(context({ serial: '0' }));
   assert.equal(result.items.length, 0);
+});
+
+test('movie: Alloha JSON-режим — item несёт primary or reserve, 4 качества, 7 субтитров, segments.skip', async () => {
+  // RAW-фикстура видео-дескриптора «Человек-паук»: то, что E-Online отдаёт из
+  // /lite/alloha/video (без play). Русская «Студия HDRezka»-подобная карточка.
+  const videoJson = await repoFixture('alloha-spiderman-video.json');
+  const html = [
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/lite/alloha/video.m3u8?t=7&play=true","translate":"HDrezka Studio"}\'>Дубляж</div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: html, videoJson });
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  assert.equal(result.items.length, 1, `items по call-карточке: ${result.items.length}`);
+  const item = result.items[0];
+
+  // JSON-режим: отдельного server-резолва НЕ было.
+  assert.ok(client.calls.some(([name]) => name === 'resolveVideoJson'), 'resolveVideoJson вызван');
+  assert.ok(!client.calls.some(([name]) => name === 'resolveStream'), 'resolveStream фолбэк НЕ вызывался');
+
+  assert.equal(item.method, 'play');
+  assert.equal(item.voice_name, 'HDrezka Studio');
+
+  // primary or reserve — оба через прокси Maniya.
+  assert.match(item.url, / or /, 'url — «primary or reserve»');
+  const parts = String(item.url).split(/\s+or\s+/i);
+  assert.equal(parts.length, 2);
+  for (const part of parts) {
+    assert.ok(String(part).includes('/api/lampa/proxy'), `резервные части через прокси: ${part}`);
+  }
+
+  // качество: 4 ключа из источника, каждый proxied.
+  assert.deepEqual(Object.keys(item.quality).sort(), ['1080p', '360p', '480p', '720p']);
+  for (const [, url] of Object.entries(item.quality)) {
+    assert.ok(String(url).includes('/api/lampa/proxy'), `качество через прокси: ${url}`);
+  }
+
+  // субтитры: 7, каждый proxied.
+  assert.equal(item.subtitles.length, 7, 'субтитры из JSON не потеряны');
+  for (const sub of item.subtitles) {
+    assert.ok(sub.label, 'label субтитра не пуст');
+    assert.ok(String(sub.url).includes('/api/lampa/proxy'), `субтитр через прокси: ${sub.url}`);
+  }
+
+  // segments.skip [1..38] и таймаут проходят в item.
+  assert.deepEqual(item.segments, { ad: [], skip: [{ start: 1, end: 38 }] });
+  assert.equal(item.hls_manifest_timeout, 20000);
+  assert.equal(item.type, 'movie');
+});
+
+test('movie: Alloha JSON-режим недоступен (null) → фолбэк resolveStream, как было', async () => {
+  const html = [
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/lite/alloha/video.m3u8?t=7&play=true","translate":"Дубляж"}\'>Дубляж</div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: html, videoJson: null });
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  assert.equal(result.items.length, 1);
+  const item = result.items[0];
+  assert.ok(client.calls.some(([name]) => name === 'resolveStream'), 'фолбэк на resolveStream');
+  assert.ok(String(item.url).includes('/api/lampa/proxy'), 'резолвнутый URL через прокси');
+  // фолбэк НЕ даёт качества/субтитров (старое поведение — не сломали).
+  assert.equal(item.quality, undefined);
+  assert.deepEqual(item.subtitles, []);
+  assert.equal(item.voice_name, 'Дубляж');
+});
+
+test('serial: Alloha эпизод в JSON-режиме сохраняет season/episode и мапу качеств', async () => {
+  const baseAlloha = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha?title=GOT&s=1","similar":false}\'><span class="videos__item-title">1 сезон</span></div>'
+  ].join('');
+  const season1Html = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha/s?t=138&s=1","similar":false}\'><span class="videos__item-title">Рен-ТВ</span></div>',
+    '<div class="videos__item" data-json=\'{"method":"call","url":"http://h/x","stream":"http://h/video.m3u8?t=138&s=1&e=1&play=true","s":1,"e":1,"name":"1 серия"}\'>s</div>'
+  ].join('');
+  const videoJson = JSON.stringify({
+    method: 'play',
+    url: 'https://a.vkvideo.cloud/e1/master.m3u8 or https://b.vkvideo.cloud/e1/reserve.m3u8',
+    quality: { '1080p': 'https://a.vkvideo.cloud/e1/1080.m3u8', '720p': 'https://a.vkvideo.cloud/e1/720.m3u8' },
+    subtitles: [{ method: 'link', url: 'https://s.skaz.su/sub/e1.vtt', label: 'Русские' }],
+    segments: { ad: [], skip: [] }
+  });
+  const client = new FakeSkazClient({ lite: baseAlloha, pages: { 's=1': season1Html }, videoJson });
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '1', title: 'GOT' }));
+
+  assert.equal(result.items.length, 1, `серия: ${result.items.length}`);
+  const item = result.items[0];
+  assert.equal(item.season, 1);
+  assert.equal(item.episode, 1);
+  assert.equal(item.type, 'serial');
+  assert.equal(item.voice_name, 'Оригінал'); // дефолт-перевод, если у серии голос не указан
+  assert.equal(Object.keys(item.quality).length, 2, 'качества серии из JSON');
+  assert.equal(item.subtitles.length, 1);
 });
 
 test('serial: голоса/сезоны + серии через openLiteUrl', async () => {

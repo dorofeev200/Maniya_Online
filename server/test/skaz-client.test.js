@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { SkazClient, isUsablePage, isRchPayload, isAccsdbPayload } from '../src/providers/skaz/SkazClient.js';
 import { HttpError } from '../src/errors.js';
+
+const FIXTURE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const fixture = (name) => readFile(path.join(FIXTURE_DIR, name), 'utf8');
 
 function fakeFetch(handler) {
   return async (url, options = {}) => handler(String(url), options);
@@ -219,6 +225,91 @@ test('openLiteUrl: 5xx на хосте карточки → страница с 
   assert.ok(seen[0].startsWith('http://online3.skaz.tv/lite/x/serial?s=1'));
   assert.ok(seen[0].includes('account_email=user%40example.com'));
   assert.ok(seen[1].startsWith('http://online8.skaz.tv/lite/x/serial?s=1'));
+});
+
+test('resolveVideoJson: RAW-фикстура Alloha Spider-Man → дескриптор play с качествами/субтитрами', async () => {
+  const raw = await fixture('alloha-spiderman-video.json');
+  const body = JSON.parse(raw);
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'alloha',
+    ...ACCOUNT,
+    fetchImpl: (url, options = {}) => {
+      seen.push({ url: String(url), headers: options.headers || {} });
+      return Promise.resolve(response(200, raw));
+    }
+  });
+
+  const stream = 'http://online3.skaz.tv/lite/alloha/video.m3u8?t=7&token_movie=abc&rjson=False&play=true';
+  const json = await client.resolveVideoJson(stream);
+
+  // запрос — ровно тот путь, что Lampac/E-Online: без .m3u8, без play, с Origin и auth.
+  assert.ok(seen.length >= 1, 'был запрос к кластеру');
+  const url = seen[0].url;
+  assert.ok(url.includes('/lite/alloha/video?'), `path без .m3u8: ${url}`);
+  assert.ok(!url.includes('.m3u8'), 'pathname очищен от .m3u8');
+  assert.ok(!/play=/.test(url), 'play-параметр удалён');
+  assert.ok(url.includes('account_email=user%40example.com') && url.includes('uid=abc123'), 'withAuth дописал авторизацию');
+  const uidCount = (url.match(/uid=/g) || []).length;
+  assert.equal(uidCount, 1, `uid не размножается (ровно один): ${uidCount}`);
+  // fetchResolved строит headers объектом {accept, Origin} ДО нормализации fetch → ключ с большой буквы.
+  assert.equal(seen[0].headers['Origin'], 'http://lampa.mx', 'Origin обязателен для skaz-CDN');
+
+  // сам дескриптор — то, что видит E-Online.
+  assert.ok(json && typeof json === 'object');
+  assert.equal(json.method, 'play');
+  assert.ok(String(json.url).trim(), 'url primary-or-reserve не пуст');
+  const parts = String(json.url).split(/\s+or\s+|\s*%20or%20\s*/i);
+  assert.equal(parts.length, 2, `url = primary %20or%20 reserve (РОВНО 2 части): ${parts.length}`);
+  assert.deepEqual(Object.keys(json.quality || {}).sort(), ['1080p', '360p', '480p', '720p'], 'качества 1080p/720p/480p/360p');
+  for (const [, entry] of Object.entries(json.quality || {})) {
+    assert.equal(typeof entry, 'string');
+    assert.match(entry, /^https?:\/\//, 'каждое качество — абсолютный URL');
+  }
+  assert.equal((json.subtitles || []).length, 7, '7 субтитров из RAW');
+  for (const sub of json.subtitles) {
+    assert.ok(typeof sub.url === 'string' && sub.url, 'субтитр несёт url');
+  }
+  assert.deepEqual(json.segments, { ad: [], skip: [{ start: 1, end: 38 }] }, 'segments.skip [1..38]');
+  assert.equal(json.hls_manifest_timeout, 20000);
+});
+
+test('resolveVideoJson: не-JSON / метод не play / пустой url / 5xx / пустая ссылка → null', async () => {
+  // не-JSON
+  const notJson = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: async () => response(200, '<html>redirect to captcha</html>')
+  });
+  assert.equal(await notJson.resolveVideoJson('http://h/lite/x/video.m3u8?play=true'), null, 'HTML вместо JSON → null');
+
+  // method != play
+  const wrongMethod = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: async () => response(200, '{"method":"link","url":"http://x/y.m3u8"}')
+  });
+  assert.equal(await wrongMethod.resolveVideoJson('http://h/lite/x/video.m3u8'), null);
+
+  // play без url
+  const emptyUrl = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: async () => response(200, '{"method":"play","url":""}')
+  });
+  assert.equal(await emptyUrl.resolveVideoJson('http://h/lite/x/video.m3u8'), null);
+
+  // 503
+  const fivexx = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: async () => response(503, 'disable')
+  });
+  assert.equal(await fivexx.resolveVideoJson('http://h/lite/x/video.m3u8'), null);
+
+  // пустая ссылка — даже fetch не дёргается
+  const none = new SkazClient({ balancer: 'x', ...ACCOUNT, fetchImpl: async () => { throw new Error('не должен вызываться'); } });
+  assert.equal(await none.resolveVideoJson(''), null);
 });
 
 test('resolveStream: НЕ ротирует хосты (потоки CDN-токеновые)', async () => {

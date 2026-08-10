@@ -164,17 +164,9 @@ export class SkazProvider extends Provider {
           subtitles: []
         });
       } else if (card.method === 'call' && card.s == null && card.e == null) {
-        const streamUrl = await this.resolveCardStream(card, requestContext);
-        if (!streamUrl) continue;
-        const voice = card.translate || 'Оригінал';
-        items.push({
-          method: 'play',
-          title: this.normalizerCardTitle(card) || voice,
-          url: streamProxy(streamUrl),
-          voice_name: voice,
-          type: 'movie',
-          subtitles: []
-        });
+        const item = await this.resolveCardItem(card, requestContext, streamProxy);
+        if (!item) continue;
+        items.push(item);
       }
     }
 
@@ -248,22 +240,34 @@ export class SkazProvider extends Provider {
     const items = [];
     for (const episode of episodes) {
       // `play`-серии (veoveo/solntse/kinopub) — готовый CDN-URL, резолв не нужен;
-      // `call`-серии (alloha/videoseed) — резолвим сервером.
-      const streamUrl = episode.method === 'play'
-        ? (episode.url || episode.stream)
-        : await this.resolveStream(episode, requestContext);
-      if (!streamUrl) continue;
-      items.push({
-        method: 'play',
-        title: episode.title || `${episode.episode} серия`,
-        url: streamProxy(streamUrl),
-        quality: {},
-        subtitles: [],
-        season: episode.season,
-        episode: episode.episode,
-        voice_name: episode.voice_name || voice?.name || '',
-        type: 'serial'
-      });
+      // `call`-серии (alloha/videoseed) — JSON-режим (та же логка, что фильм),
+      // фолбэк на серверный RedirectToPlay-резолв.
+      let item;
+      if (episode.method === 'play') {
+        const url = episode.url || episode.stream;
+        if (!url) continue;
+        item = {
+          method: 'play',
+          title: episode.title || `${episode.episode} серия`,
+          url: streamProxy(url),
+          quality: {},
+          subtitles: [],
+          season: episode.season,
+          episode: episode.episode,
+          voice_name: episode.voice_name || voice?.name || '',
+          type: 'serial'
+        };
+      } else {
+        item = await this.resolveCardItem(episode, requestContext, streamProxy, {
+          type: 'serial',
+          season: episode.season,
+          episode: episode.episode,
+          title: episode.title || `${episode.episode} серия`,
+          voice: episode.voice_name || voice?.name || ''
+        });
+        if (!item) continue;
+      }
+      items.push(item);
     }
 
     const seasonsList = seasons.map((entry) => ({ number: entry.number, title: entry.title }));
@@ -295,6 +299,55 @@ export class SkazProvider extends Provider {
     if (!raw) return null;
     const final = await this.client.resolveStream(raw);
     return final || null;
+  }
+
+  /**
+   * Играбельный item из `call`-карточки (фильм или серия). Приоритет —
+   * JSON-режим клиента (`/lite/<balancer>/video` без `play`): item несёт
+   * мапу качеств, субтитры и reserve-фолбэк «primary or reserve» — ровно то,
+   * что видит E-Online/Lampac и чего не хватало single-резолву. Если JSON
+   * недоступен — фолбэк на `resolveStream` (RedirectToPlay), как было.
+   */
+  async resolveCardItem(card, requestContext, streamProxy, overrides = {}) {
+    const voice = String(overrides.voice || card.translate || card.voice_translate || '').trim() || 'Оригінал';
+    const title = String(overrides.title || this.normalizerCardTitle(card) || voice).trim();
+
+    const json = await this.client.resolveVideoJson?.(card.stream);
+    if (json) {
+      const pair = splitOrUrl(json.url);
+      const primary = pair[0];
+      if (!primary) return null;
+      const url = pair[1] ? `${streamProxy(primary)} or ${streamProxy(pair[1])}` : streamProxy(primary);
+      return {
+        method: 'play',
+        title,
+        url,
+        quality: cleanedQualityMap(json.quality, streamProxy),
+        subtitles: normalizeSubtitles(json.subtitles, streamProxy),
+        segments: json.segments && typeof json.segments === 'object' ? json.segments : undefined,
+        hls_manifest_timeout: json.hls_manifest_timeout ? Number(json.hls_manifest_timeout) : undefined,
+        translate: String(card.translate || '').trim(),
+        voice_name: String(card.voice_translate || card.translate || '').trim() || voice,
+        type: overrides.type || 'movie',
+        ...(overrides.season != null ? { season: overrides.season } : {}),
+        ...(overrides.episode != null ? { episode: overrides.episode } : {})
+      };
+    }
+
+    const raw = String(card.stream || card.url || '').trim();
+    if (!raw) return null;
+    const streamUrl = await this.client.resolveStream(raw);
+    if (!streamUrl) return null;
+    return {
+      method: 'play',
+      title,
+      url: streamProxy(streamUrl),
+      voice_name: voice,
+      type: overrides.type || 'movie',
+      subtitles: [],
+      ...(overrides.season != null ? { season: overrides.season } : {}),
+      ...(overrides.episode != null ? { episode: overrides.episode } : {})
+    };
   }
 
   async resolveStream(card, requestContext) {
@@ -346,6 +399,32 @@ function cleanedQualityMap(map, proxy) {
   const out = {};
   for (const [label, urlEntry] of Object.entries(map || {})) {
     if (urlEntry && typeof urlEntry === 'string') out[label] = proxy(urlEntry);
+  }
+  return out;
+}
+
+/**
+ * Разбить `primary or reserve` из JSON video. Сепаратор бывает в двух видах:
+ * `" or "` (Lampac) и URL-закодированный `%20or%20` (E-Online/skaz). Декадируем
+ * ТОЛЬКО сепаратор, тело URL не трогаем.
+ */
+function splitOrUrl(value) {
+  return String(value || '')
+    .split(/\s+or\s+|\s*%20or%20\s*/gi)
+    .map((u) => String(u).trim())
+    .filter(Boolean);
+}
+
+/** Субтитры из JSON video (`{method:'link',url,label}`) → item `[{label,url: proxy}]`. */
+function normalizeSubtitles(list, proxy) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const sub of list) {
+    if (!sub || typeof sub.url !== 'string' || !sub.url) continue;
+    out.push({
+      label: String(sub.label || sub.title || 'Субтитры').trim(),
+      url: proxy(String(sub.url).trim())
+    });
   }
   return out;
 }

@@ -105,6 +105,43 @@ export class SkazClient {
   }
 
   /**
+   * JSON-режим `call`-потока (как Lampac `/lite/<balancer>/video` без `play`):
+   * убираем `.m3u8` и `play=true` → GET с `Origin` → JSON-дескриптор
+   * `{method:'play', url:'primary or reserve', quality:{label:url},
+   *   subtitles[], segments{skip[]}, hls_manifest_timeout}`.
+   *
+   * Это то, что видит E-Online/Lampac и чего НЕ хватает single-резолву
+   * RedirectToPlay (нет мапы качеств, субтитров, reserve-фолбэка).
+   * Возвращает распарсенный объект или null (не JSON/method!=play/url пуст/
+   * сеть) — провайдер в этом случае уйдёт в resolveStream-фолбэк.
+   */
+  async resolveVideoJson(streamUrl) {
+    const raw = String(streamUrl || '').trim();
+    if (!raw) return null;
+    let target;
+    try {
+      const video = new URL(withAuth(raw, this.accountEmail, this.uid));
+      video.pathname = video.pathname.replace(/\.m3u8$/i, '');
+      video.searchParams.delete('play');
+      target = video.toString();
+    } catch {
+      return null;
+    }
+    const { response } = await this.fetchResolvedHosts(target, { Origin: this.origin });
+    if (!response) return null;
+    const text = await response.text().catch(() => null);
+    if (!text) return null;
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== 'object' || parsed.method !== 'play' || !String(parsed.url || '').trim()) return null;
+    return parsed;
+  }
+
+  /**
    * Discovery: GET `lite/withsearch` → список доступных балансеров.
    * Возвращает массив slug или null (недоступен/пусто). Не бросается —
    * вызов всегда «необязательный», конфиг покрывает статическим списком.

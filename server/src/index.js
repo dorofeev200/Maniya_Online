@@ -8,6 +8,7 @@ import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
 import { findUserByRequest, findUserByShortToken, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
 import { subscriptionStatus } from './status.js';
 import { providerById, registeredProviders } from './providers/registry.js';
+import { PROVIDER_FALLBACK_ICON, providerMeta } from './providers/meta.js';
 import { buildProxyUrl, proxyMedia } from './proxy.js';
 import { createTelegramRunner } from './telegram/runner.js';
 
@@ -114,14 +115,19 @@ async function route(context, response) {
     await requireSubscription(context);
 
     const providers = registeredProviders().filter((provider) => provider.enabled());
-    const sources = [
-      ...providers.map((provider) => ({
+    const sources = providers.map((provider) => {
+      // Единый мета-реестр (meta.js): name + icon + quality_label — ОТДЕЛЬНО от
+      // provider.id/логики. Префиксный id (skaz-*) сводится к слагу.
+      const meta = providerMeta(provider.id) || {};
+      return {
         id: provider.id,
-        name: withBrand(provider.title || provider.id),
+        name: meta.name || withBrand(provider.title || provider.id),
+        icon: meta.icon || PROVIDER_FALLBACK_ICON,
+        quality_label: meta.qualityLabel || '',
         url: videosUrl(context, provider.id),
         show: provider.show !== false
-      }))
-    ];
+      };
+    });
 
     return sendJson(request, response, 200, { sources });
   }

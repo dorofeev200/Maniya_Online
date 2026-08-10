@@ -99,17 +99,38 @@ function resolveSegmentUrl(baseUrl, ref) {
   }
 }
 
+/**
+ * Переписать HLS-манифест на прокси-ссылки. #-директивы проходят через
+ * rewriteDirectiveUri — ЛИНИЯ КРИТИЧНА для vkvideo/CDN-рендеров (регрессия 00:00):
+ * `#EXT-X-MAP` init-сегмент резолвится hls.js против ТЕКУЩЕГО URL плейлиста.
+ * Если init-URI остаётся относительным, он резолвится против проксированного
+ * адреса рендера → наш сервер отвечает JSON-404 → нет MSE-инициализации → 00:00.
+ */
 function rewriteHlsManifest(manifest, baseUrl, makeProxy) {
   return manifest
     .split(/\r?\n/)
     .map((line) => {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return line;
+      if (!trimmed) return line;
+      if (trimmed.startsWith('#')) return rewriteDirectiveUri(line, baseUrl, makeProxy);
       const resolved = resolveSegmentUrl(baseUrl, trimmed);
       if (!resolved) return line;
       return makeProxy(resolved);
     })
     .join('\n');
+}
+
+/**
+ * Директивы с `URI="…"` (#EXT-X-MAP init, #EXT-X-KEY ключ шифрования):
+ * относительные ссылки тоже резолвятся против базы манифеста и проксируются.
+ * Не-URI директивы (#EXTINF, #EXTM3U, ENDLIST…) возвращаются не тронутыми.
+ */
+function rewriteDirectiveUri(line, baseUrl, makeProxy) {
+  const match = String(line).match(/^(#EXT-X-(?:MAP|KEY):.*?\bURI=")([^"]+)(".*)$/);
+  if (!match) return line;
+  const resolved = resolveSegmentUrl(baseUrl, match[2]);
+  if (!resolved) return line;
+  return match[1] + makeProxy(resolved) + match[3];
 }
 
 function rewriteMpdManifest(manifest, baseUrl, makeProxy) {

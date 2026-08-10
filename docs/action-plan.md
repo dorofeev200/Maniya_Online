@@ -720,3 +720,51 @@ FIX #3/#4 и pidtor (#26) остаются под запретом.
   пусто для текущего каталога.
 - D (минимум, рекомендация): оставить kodik=работает (enabled true), т.к. на аниме он
   даёт 1-2 голоса; ничего не ломает.
+
+## Сессия 16.3 (2026-08-09) — Применение F1+KA+KC + live-подтверждение
+
+- **F1 (filmix):** `FilmixClient.js` primaryClient timeout 8s→3s (worst-case 32s→~3s),
+  `searchByExternalIds` kp/imdb параллельно (Promise.all). Live (VPS, deployed):
+  фильм «Зловещие мертвецы: Пекло» → **0.3–0.5с × 3, 10 items** (был 30s-таймаут).
+- **KC (kodik гейт):** `withinCatalog()` — только аниме/восточные языки ja/ko/zh/cn/
+  th/vi/tl (как Lampac ModInit.Invoke). Live: западный en → 210мс пусто; аниме ja
+  (Унесённые призраками kp=370) → **8 items** (kgplayable).
+- **KA (kodik фолбэк):** searchByIds пусто → titleSearch + `relevantOnly()` (kp/imdb-
+  хит в записи ИЛИ название+год). Live: нейтральный запрос без языка → честный 0.
+- Тесты: 326 (324 pass / 2 skip / 0 fail). Коммит `6820af8` → backup + VPS, md5
+  совпал (FilmixClient `a6be9ad7…`, KodikProvider `96ee2d33…`), health 200.
+- Порог «Скрипт ерор» на большом MP4-filmix (24ГБ) — не оценён в этом прогоне.
+
+## Сессия 17 (2026-08-10) — Alloha E2E (Spider-Man): POSTER + «Script error.» + МЕТА-РЕЕСТР ИКОНОК
+
+- **Запрос:** по живой проверке Alloha/«Человек-паук: Нет пути домой» (HDrezka Studio) в результатах
+  Two проблемы UI: (a) чёрная/битая картинка-постер, (b) «Script error.». Причина — точно,
+  не заглушкой: порт рабочей логики E-Online (Online/plugin.js Lampac).
+- **(b) «Script error.» НАЙДЕН:** `public/maniya-online.js` вызывал **`Lampa.Select.open`** — этого
+  API в реальной Lampa НЕТ → `TypeError: Lampa.Select.open is not a function` на клике результата.
+  Рабочий E-Online использует только `Lampa.Select.show({title,items,onSelect,onBack})` (контекст-меню);
+  выбор качества у него делается НАТИВНЫМ плеером из карты `play.quality`
+  (`Storage.field('video_quality_default')` + `orUrlReserve` «primary or reserve»).
+- **Фикс:** pre-play `chooseQuality` УДАЛЁН с клика (см. статический guard в тесте: функция не
+  должна существовать), запуск = `runPlayer(item, item)`; отдельный `openQualitySelect` (порт E-Online)
+  остаётся только как LIB-функция/контекст-меню, реализация — `api.show`. Вызов `Lampa.Select.open`
+  больше НЕ встречается в коде (проверяется тестом). Регрессия воспроизводится vm-песочницей БЕЗ
+  `.open` (`plugin-contract.test.js`, 8 поведенческих тестов: select/show/close/toggle,
+  orUrlReserve, setDefaultQuality, moviePoster, qualityEntries, sourceLabel).
+- **(a) POSTER:** RAW Alloha (movie-страница и video-JSON) НЕ несёт изображения → E-Online рисует
+  с карточки фильма `Lampa.TMDB.image('t/p/w300'+backdrop_path)` (настроенный image-CDN клиента),
+  `onerror→'./img/img_broken.svg'`, `onload→--loaded`, `item.thumbnail=src` (в плеер).
+  Hardcoded `image.tmdb.org` был бы чёрным из-за блокировки — убран (guard-тест).
+- **МЕТА-РЕЕСТР ИКОНОК (ВИЗУАЛЬНЫЕ ЗНАЧКИ):** `server/src/providers/meta.js` — ЕДИНАЯ точка
+  `slug → {name, icon, qualityLabel}` (33 слага: skaz + native + резервные rch). `/api/lampa/sources`
+  отдаёт `icon`/`quality_label`/`name` отдельными полями (эмодзи НЕ вшиваются в id/name провайдера);
+  клиент клеит подпись `sourceLabel()` = `«🎬 Allo-XA - 4K»`, fallback 🎬. Сортировка источников
+  (filterSources) не зависит от подписи. Тесты: `meta-registry.test.js` (покрытие/чистота) +
+  `sourceLabel` в plugin-contract.
+- **Live (VPS, задеплоено):** `/api/lampa/sources` → 15 источников с иконками и quality_label
+  (filmix 🔥2160p … skaz-alloha 🎬4K …). E2E `skaz-alloha` Spider-Man → **8 items, item0 = HDrezka
+  Studio, method play, качества 1080p/720p/480p/360p, 7 субтитров, segments.skip [1–38]** — тот же
+  дескриптор, что играет у пользователя; URL через наш прокси (CDN-токен сохранён).
+- **Код обратно совместим:** `PLAY*` не трогали, провайдеры без изменений, только UI/клиент+мета.
+- **Тесты: 345 (343 pass / 2 skip / 0 fail).** Деплой: backup + VPS; `/health` OK.
+- Сырой live-дескриптор: `scripts/raw/live-alloha-20260810.json` (без account_email/uid — маскированы).
