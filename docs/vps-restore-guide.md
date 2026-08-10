@@ -31,8 +31,13 @@
    ```bash
    bash scripts/backup-remote.sh
    ```
-3. Один раз в неделю — тот же `backup-remote.sh` (можно через Планировщик Windows,
-   `schtasks /create /tn maniya-backup /tr "bash C:\Users\Admin\Maniya_Online\scripts\backup-remote.sh" /sc weekly ...`).
+3. **АВТОМАТИЧЕСКИЙ БЕКАП УЖЕ НАСТРОЕН** (задача «Maniya Weekly Backup» в Планировщике
+   Windows): воскресенье 03:17 + при каждом входе в Windows; если ПК был выключен в момент
+   срабатывания — запустится при пробуждении (`StartWhenAvailable`). Обёртка
+   `scripts/backup-weekly.bat`, лог `backup/backup-weekly.log`, секреты остаются локально
+   (backup/ gitignored). Вход на VPS — по SSH-ключу (без пароля). Управление:
+   `Get-ScheduledTask -TaskName 'Maniya Weekly Backup'` /
+   `Unregister-ScheduledTask -TaskName 'Maniya Weekly Backup'`.
 4. НЕ удалять `backup/snapshots/` — это единственная копия секретов и подписок.
 
 ## 2. Новый сервер — подготовка
