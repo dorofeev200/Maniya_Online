@@ -181,7 +181,10 @@ export class SkazProvider extends Provider {
 
     for (const card of cards || []) {
       if (card.method !== 'link' && !card.method) continue;
-      const href = String(card.href || card.url || '').trim();
+      // geosaitebi/animelib-паттерн: у link-карточки нет явного `href`-поля,
+      // но в её URL лежит параметр `href=<slug>.html` («KinoPan/AniTrue»).
+      // Приоритет: явный card.href → внутренний параметр href → сам card.url.
+      const href = String(card.href || '').trim() || hrefParamOf(card.url) || String(card.url || '').trim();
       if (!href) continue;
       if (searched.has(href)) continue;
       searched.add(href);
@@ -435,6 +438,18 @@ function paramValueOf(url, key) {
     return new URL(url).searchParams.get(key);
   } catch {
     return null;
+  }
+}
+
+/** Внутренний `href=<slug>.html` из URL link-карточки (geosaitebi/animelib) или ''. */
+function hrefParamOf(value) {
+  if (!value) return '';
+  try {
+    const parsed = new URL(String(value));
+    const href = parsed.searchParams.get('href');
+    return href == null || href === '' ? '' : String(href);
+  } catch {
+    return '';
   }
 }
 

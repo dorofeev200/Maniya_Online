@@ -328,6 +328,31 @@ test('serial: поиск URL по выбранному сезону из query',
   assert.equal(result.items[0].episode, 1);
 });
 
+test('movie: geosaitebi/animelib — link-карточка без href-поля, но с `href=<slug>.html` в URL → follow слагом', async () => {
+  // RAW-паттерн GeoVideo (проверено 2026-08-10 live): карточка-линк несёт СВОЙ URL
+  // с параметром href=<slug>.html, а не поле href. Следовать нужно этим слагом,
+  // иначе getLite получит весь URL вместо slug → 0 карточек.
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online3.skaz.tv/lite/geosaitebi?title=%D0%98%D0%BD%D1%82%D0%B5%D1%80%D1%81%D1%82%D0%B5%D0%BB%D0%BB%D0%B0%D1%80&original_title=Interstellar&year=2014&serial=0&href=2792-interstelari-qartulad.html"}\'>Интерстеллар</div>'
+  ].join('');
+  const playHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://online3.skaz.tv/proxy/caea9417d22285de34917c3ff77d6189.m3u8","translate":"Интерстеллар"}\'>Интерстеллар</div>'
+  ].join('');
+
+  const client = new FakeSkazClient({ lite: similarHtml, pages: { '2792-interstelari-qartulad.html': playHtml } });
+  const provider = makeProvider(client, 'geosaitebi');
+
+  const result = await provider.videos(context({ title: 'Интерстеллар', original_title: 'Interstellar', year: '2014', serial: '0' }));
+
+  const followed = client.calls.find(([name, p]) => name === 'getLite' && p && p.href);
+  assert.ok(followed, 'должен быть повторный getLite с href');
+  assert.equal(String(followed[1].href), '2792-interstelari-qartulad.html',
+    `href = слаг из URL карточки, не весь URL: ${followed[1].href}`);
+  assert.equal(result.items.length, 1, `play-карточка после follow: ${result.items.length}`);
+  assert.equal(result.items[0].method, 'play');
+  assert.match(String(result.items[0].url), /proxy/, 'url — играбельный (через прокси)');
+});
+
 test('movie: primary только похожие link-карточки → follow href → call-карточки фильма', async () => {
   const similarHtml = [
     '<div class="videos__item" data-json=\'{"method":"link","similar":true,"href":"films/fiction/2259-interstellar-2014.html"}\'>Интерстеллар</div>',

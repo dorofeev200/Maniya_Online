@@ -188,7 +188,7 @@ export const config = {
     // Видимые источники «Maniya · …» + СКРЫТЫЕ фоллбэки native-дублей
     // (filmix/rezka/hdvb/rutubemovie регистрируются, но в UI их отдаёт native;
     // eonline-близнец выигрывает где native вернул 0 items).
-    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka']),
+    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka', 'geosaitebi']),
     // Аккаунт E-Online. Не коммитить — только server/.env.
     accountEmail: (process.env.EO_ACCOUNT_EMAIL || '').trim(),
     uid: (process.env.EO_UID || '').trim(),
@@ -202,7 +202,7 @@ export const config = {
   skaz: {
     enabled: bool('SKAZ_ENABLED', true),
     hosts: list('SKAZ_HOSTS', list('EO_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv', 'http://94.249.239.63', 'http://94.249.239.37', 'http://94.249.239.11', 'http://77.90.33.109'])),
-    balancers: list('SKAZ_BALANCERS', list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka'])),
+    balancers: list('SKAZ_BALANCERS', list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka', 'geosaitebi'])),
     // Аккаунт skaz-кластера (вход через Lampa «Настройки — Синхронизация»,
     // §6.5—6.7 отчёта). Не коммитить — только server/.env.
     accountEmail: (process.env.SKAZ_ACCOUNT_EMAIL || process.env.EO_ACCOUNT_EMAIL || '').trim(),
