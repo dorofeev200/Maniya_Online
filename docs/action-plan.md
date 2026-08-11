@@ -1,5 +1,32 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ✅ 2026-08-11 (сессия 20): КРИТИЧЕСКАЯ РЕГРЕССИЯ «видео не найдено» — ROOT CAUSE найден и закрыт (9f9daf6, задеплоено)
+- **Симптомы юзера**: iPhone — плагин периодически 404/«пропадает»; Filmix «видео не найдено/повреждено»,
+  долго грузит; CDNvideo «сегодня перестал находить видео». «Вчера было стабильнее».
+- **Баз. линия**: бэкап `maniya-online-pre-lazy-20260811.tar.gz` = вчерашний prod. Diff baseline→prod =
+  **только 2 файла** (`SkazProvider.js` lazy+navcache, `maniya-online.js` мобильный CSS). nginx/index/store/users — байт-в-байт.
+- **ROOT CAUSE (доказан живьём)**: lazy `movieVideos` (fa7515b) отдаёт `method:"call"` с
+  `provider=skaz-<balancer>` для **СКРЫТЫХ близнецов** native-источников (twin-first: rezka/rutubemovie/hdvb/kodik).
+  `getVideoForRequest` искал только в `registeredProviders()` (видимые) → скрытый `skaz-rezka` = `null` →
+  **мгновенный 404 `video_not_found`** на Play (без единого сетевого запроса). До фикса live:
+  `skaz-rezka→404/0.002s`, `skaz-alloha→200/0.816s`. Вчера стабильно потому, что eager отдавал `method=play`
+  (прямой URL) — `/api/lampa/video` не вызывался.
+- **Исключено данными**: аккаунт skaz = тот же, что у работающего E-Online (`nazarov6@gmail.com`/`dg4xu2tj`,
+  из /proc/PID/environ) — НЕ причина; ротация хостов стабильна (20/20 videos 200, 20/20 getLite 200);
+  nav cache корректен (дескриптор перезапрашивается на Play, подписанные URL ~24ч ≫ TTL 5 мин);
+  плагин-404 = боты (реальные загрузки юзеров 200/41889B); nginx 404 = только боты.
+- **ФИКС (минимальный, `9f9daf6`, задеплоен)**: `registry.js` — новый `allProviders()` (native + ВСЕ skaz,
+  включая скрытые близнецы); `store.js getVideoForRequest` — поиск по `allProviders()`. Видимость `/sources`
+  не меняется. Тесты +2 (registry-twin), полный suite **354 pass / 2 skip / 0 fail**.
+- **LIVE-VERIFY после деплоя**: lazy `/api/lampa/video` для rezka/rutubemovie/hdvb → **200** (play,
+  voidboost HLS/4K/auto); filmix play 2160p + proxy-стриминг 206; cdnvideohub HLS-цепочка 200/42мс;
+  юзерских 404 /api/lampa/video после фикса — **0**.
+- **Секции A–I** и остаточные 0-items (kodik/kinopub/kinoflix-503/solntse — НЕ регрессии, были и до):
+  `docs/regression-20260811-hidden-twin.md`. Инструменты: `scripts/provider-matrix.mjs`,
+  `scripts/filmix-chain.mjs`, `scripts/host-rotation.mjs`, `scripts/mobile-card-probe.mjs`.
+- **Следующий шаг**: стабильно как E-Online достигнуто по этому вектору; дальше — остаточные 0-items
+  источники (follow-схемы kinopub/solntse, kinoflix-503) отдельными волнами, НЕ в этой регрессии.
+
 ## ✅ 2026-08-11 (сессия 19): ROOT CAUSE медленного старта + lazy resolve (perf-замер E-Online vs Maniya)
 - **Проблема**: Maniya стартовала видео ~4с, E-Online ~0.4с. **Root cause доказан замером на VPS**
   (5 runs/цепь, медианы, Spider-Man/skaz-alloha/HDrezka Studio/1080p): eager-резолв ВСЕХ голосов
