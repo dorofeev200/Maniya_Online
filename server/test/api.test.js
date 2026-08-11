@@ -118,6 +118,22 @@ describe('Maniya Online API', () => {
     assert.ok(videos.items.length > 0);
   });
 
+  it('lazy resolve /api/lampa/video: требует подписку (403 без токена)', async () => {
+    const response = await fetch(`${base}/api/lampa/video?provider=skaz-alloha&voice=0&serial=0`);
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.error, 'subscription_required');
+  });
+
+  it('lazy resolve /api/lampa/video: 404 для провайдера без resolveVideo/выключенного', async () => {
+    // В тесте skaz-провайдеры выключены (SKAZ_* не заданы, enabled()=false) —
+    // /video обязан отдать 404, а НЕ упасть 500.
+    const response = await fetch(`${base}/api/lampa/video?token=unit-test-token&provider=skaz-alloha&voice=0&serial=0&title=X`);
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.equal(body.error, 'video_not_found');
+  });
+
   it('validates stream url', async () => {
     const response = await fetch(`${base}/api/lampa/stream?token=unit-test-token&url=ftp://bad`);
     assert.equal(response.status, 400);

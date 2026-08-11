@@ -661,8 +661,16 @@
       '.maniya-online-item__quality{padding:.12em .65em;border-radius:2em;background:rgba(255,178,62,.16);color:#ffd98f;font-size:.85em;letter-spacing:.02em;line-height:1.35;white-space:nowrap}' +
       '.maniya-online-item.focus::after{content:"";position:absolute;top:-.45em;left:-.45em;right:-.45em;bottom:-.45em;border:.25em solid #fff;border-radius:.6em;pointer-events:none}' +
       '.maniya-online-empty{padding:1.5em;line-height:1.4}.maniya-online-empty__title{font-size:1.8em;margin-bottom:.5em}.maniya-online-empty__message{font-size:1.15em;opacity:.8}' +
-      '@media (max-width:640px){.maniya-online-item{padding:1em;margin-bottom:.8em;gap:.7em}.maniya-online-item__poster-block{flex-basis:6em}.maniya-online-item__title{font-size:1.25em}}' +
-      '@media (max-width:420px){.maniya-online-item{padding:.85em;margin-bottom:.6em;gap:.6em}.maniya-online-item__poster-block{flex-basis:5em}.maniya-online-item__quality{font-size:.8em}}' +
+      // Мобильная карточка (≤640/≤420): компактная высота как E-Online.
+      // Root cause «растянутого» постера: базовый .maniya-online-item__poster-block
+      // имеет align-self:stretch + min-height → высота блока = высоте тела карточки
+      // (длинный Filmix-заголовок + info + 4 бейджа качества → тело высокое → постер
+      // тянется по вертикали). На мобильном отменяем stretch и используем модель
+      // Lampac online-prestige__img (plugin.js 2012-2044): фикс. ширина + min-height,
+      // картинка absolute cover внутри — ratio блока стабилен, контент его не раздувает.
+      // Базовые правила (TV) НЕ тронуты — изменения только в media-запросах.
+      '@media (max-width:640px){.maniya-online-item{padding:1em;margin-bottom:.8em;gap:.7em}.maniya-online-item__poster-block{flex:0 0 6em;align-self:flex-start;min-height:5.1em;position:relative}.maniya-online-item__poster{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}.maniya-online-item__title{font-size:1.15em;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}.maniya-online-item__info{margin-top:.4em;font-size:.9em}}' +
+      '@media (max-width:420px){.maniya-online-item{padding:.85em;margin-bottom:.6em;gap:.6em}.maniya-online-item__poster-block{flex-basis:5em;min-height:4.2em}.maniya-online-item__title{font-size:1.05em}.maniya-online-item__quality{font-size:.8em}.maniya-online-item__qualities{margin-top:.4em}}' +
       // Кнопка M-ONLINE = ВАРИАНТ СТАНДАРТНОЙ Lampa action-кнопки (.full-start__button):
       // ровно та же геометрия — height 2.8em, border-radius 1em, padding 0 1em,
       // margin-right .75em, font-size 1.3em, flex выравнивание по центру (см. _app.css).

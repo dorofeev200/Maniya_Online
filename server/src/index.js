@@ -5,7 +5,7 @@ import { HttpError, toHttpError } from './errors.js';
 import { sendJson, sendPluginForToken, sendStatic } from './http.js';
 import { logger } from './logger.js';
 import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
-import { findUserByRequest, findUserByShortToken, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
+import { findUserByRequest, findUserByShortToken, getVideoForRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
 import { subscriptionStatus } from './status.js';
 import { providerById, registeredProviders } from './providers/registry.js';
 import { PROVIDER_FALLBACK_ICON, providerMeta } from './providers/meta.js';
@@ -139,6 +139,15 @@ async function route(context, response) {
     if (Array.isArray(payload.seasons) && payload.seasons.length) body.seasons = payload.seasons;
     if (Array.isArray(payload.voices) && payload.voices.length) body.voices = payload.voices;
     return sendJson(request, response, 200, body);
+  }
+
+  if (pathname === '/api/lampa/video') {
+    // Ленивый резолв `method:"call"` item'а (голос/серия) → играбельный
+    // дескриптор. Отдельно от /videos: НЕ резолвит все голоса заранее.
+    await requireSubscription(context);
+    const item = await getVideoForRequest(context);
+    if (!item) throw new HttpError(404, 'video_not_found', 'Поток не найден');
+    return sendJson(request, response, 200, item);
   }
 
   if (pathname === '/api/lampa/stream') {

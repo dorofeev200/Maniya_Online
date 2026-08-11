@@ -79,6 +79,23 @@ export async function requireSubscription(context) {
   return user;
 }
 
+/**
+ * Ленивый резолв `method:"call"` item'а (выбранный голос/серия): провайдер
+ * возвращает играбельный дескриптор ровно для ОДНОЙ карточки (resolveVideo),
+ * не пересчитывая все голоса заранее — это и есть источник медленного
+ * старта (eager-резолв 9 голосов ≈ 4.6s → 1 голос ≈ 0.8s).
+ */
+export async function getVideoForRequest(context) {
+  const selected = String(context.query.provider || '').trim().toLowerCase();
+  const provider = selected
+    ? registeredProviders().find((p) => p.enabled() && p.id === selected)
+    : null;
+  if (!provider || typeof provider.resolveVideo !== 'function') {
+    return null;
+  }
+  return provider.resolveVideo(context);
+}
+
 export async function getVideosForRequest(context) {
   const selected = String(context.query.provider || '').trim().toLowerCase();
   const providers = registeredProviders().filter((provider) => provider.enabled() && (!selected || provider.id === selected));

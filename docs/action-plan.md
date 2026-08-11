@@ -1,5 +1,56 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ✅ 2026-08-11 (сессия 19): ROOT CAUSE медленного старта + lazy resolve (perf-замер E-Online vs Maniya)
+- **Проблема**: Maniya стартовала видео ~4с, E-Online ~0.4с. **Root cause доказан замером на VPS**
+  (5 runs/цепь, медианы, Spider-Man/skaz-alloha/HDrezka Studio/1080p): eager-резолв ВСЕХ голосов
+  СЕРИЙНО внутри `/api/lampa/videos` (`movieItemsFromHtml`: `await resolveCardItem` в цикле) =
+  9 голосов × ~475ms ≈ 4с. Мастер/init/сегмент/CDN/прокси — НЕ узкое место (25–135ms постоянно).
+- **Фикс (lazy resolve, uncommitted)**: `movieVideos`/`serialVideos` отдают `method:"call"` item'ы с
+  URL `/api/lampa/video` (buildResolveUrl); новый маршрут `GET /api/lampa/video` + `getVideoForRequest`
+  в `store.js` резолвит ТОЛЬКО выбранный голос/серию (`resolveVideo`/`resolveMovieVideo`/`resolveSerialVideo`,
+  единая навигация `collectMovieCards`/`openSeasonPage`). JSON-дескриптор + фолбэк resolveStream сохранены.
+- **Замеры (median SER_TO_FRAME)**: E-Online прямой **388ms** (6 req) → Maniya BEFORE **4223ms** (5 req,
+  но 9 скрытых серийных резолвов) → Maniya AFTER **953ms** (6 req). `videos()` список: 3975→**214ms (18.6×)**;
+  старт до первого кадра **−3270ms (4.4×)**.
+- **Тесты**: skaz-provider 21/21, api 13/13, полный suite **348 pass · 2 skip · 0 fail** (skip = live EO_LIVE/FILMIX_LIVE).
+- **Отчёт**: `docs/session-19-startup-latency-lazy-resolve.md` (инвентарь 33 + gap в `eonline-gap-analysis.md`).
+- **ДЕПЛОЙ (2026-08-11, разрешён)**: lazy-resolve в prod через `scripts/deploy.sh` (3 src + 2 теста,
+  md5 5/5, backup `/root/maniya-online-pre-lazy-20260811.tar.gz`; .env/data/Telegram/HLS-proxy не тронуты).
+- **PROD-VERIFY (live :3000) PASS**: health ready, videos 9 call-items, `/api/lampa/video` play-дескриптор
+  (HDrezka Studio 1080p, 7 субтитров), голоса Есарев/Украинский, GoT 10 items/8 сезонов/8 голосов,
+  episode 1:1 (2160p→360p, 9 субтитров), качества 1080p/720p/480p/360p все 200 mpegurl.
+- **PROD-PERF (median 5 runs)**: `videos()` **206ms**, startup до первого кадра **927ms** (ожидалось 214/953 —
+  в пределах). E-Online 397ms vs Maniya BEFORE 4223ms vs **Maniya AFTER 927ms** → финальный report в §8.
+- **ДЕПЛОЙ MOBILE-CARD FIX (2026-08-11, разрешён)**: адаптивные карточки источников на мобильных
+  (Lampa-плагин). Root cause: базовый `.maniya-online-item__poster-block{align-self:stretch}` → высота
+  постера = высоте тела (длинный Filmix-заголовок + бейджи 2160/1440/1080/720/480). Фикс (общий
+  компонент, только `@media ≤640/≤420`): stretch → `align-self:flex-start` + фикс. min-height +
+  постер `position:absolute` cover (модель Lampac `online-prestige__img`), заголовок `-webkit-line-clamp:2`.
+  TV-базовые правила НЕ тронуты (проверено тестом + grep проде). Backup `/root/maniya-online-pre-mobile-20260811.tar.gz`.
+  Prod-verify: md5 5/5, health 200, filmix/alloha/hdvb 200, lazy-resolve не откачен (src md5 идентичен),
+  Alloha 1080p playback 206/video/mp4. Тесты: локально 352 (350 pass/2 skip/0 fail), plugin-contract на
+  проде 10/10. Файлы: `public/maniya-online.js`, `server/test/plugin-contract.test.js`,
+  `scripts/mobile-card-probe.mjs` (новый, верификация).
+- **РЕГРЕССИЯ (2026-08-11, пофикшено+задеплоено)**: юзер: «с VPN плагин работает, но playback
+  нестабилен/долго грузится»; «без VPN плагин 404 в Lampa». **404 без VPN серверно НЕ воспроизводится**
+  (все формы плагин-URL — plain + short-links реальных юзеров — 200 и через 127.0.0.1, и через публичный
+  HTTPS, с этой машины без VPN; дельта prod↔local = только кэш, routing/nginx не трогали). Найден
+  латентный nginx-нюанс: на порту 80 certbot-блок `return 404` слушает `[::]:80`, а IPv4:80 — рабочий
+  сайт (A-записи нет → пользователь через домен по IPv6 не ходит; НЕ меняли).
+  **Playback-регрессия найдена и пофикшена минимально**: lazy `resolveVideo` на Play повторно гонял
+  навигацию кластера `collectMovieCards`/`openSeasonPage` (getLite→href→postid, до 3 запросов) — флап
+  кластера во второй поход = «долго думает» + null → 404 `video_not_found` → «видео не найдено».
+  **Фикс: кэш навигации на 5 мин** в `SkazProvider` (`_cachedCollectMovieCards`/`_cachedOpenSeasonPage`,
+  ключ = balancer+pageParams [+voice/season для сериалов], кэшируем только непустое). `videos()` уже
+  сходил в кластер — `/video` на Play берёт те же карточки, навигация не повторяется; lazy-резолв
+  выбранного голоса сохранён. Точки: movieVideos/resolveMovieVideo/serialVideos/resolveSerialVideo.
+  Тесты: +2 (кэш-hit не повторяет follow; кэш-miss навигацию делает), полный suite **353 (351 pass/2 skip/0 fail)**.
+  **Prod-verify**: деплой 1 файл (md5 совпал, `node --check` OK, NRestarts=0); 10/10 OK; **T3b `/video`
+  422→178ms, T2 `/videos` 218→4ms, SER_TO_FRAME 903→398ms** (публичный HTTPS 408ms), пики разброса
+  исчезли; probe E2E: providers 200, lazy→200/278ms/HDrezka/4 качества/7 субтитров, Alloha 1080p
+  chain seg 206/video/mp4. Снапшот проде: `/root/maniya-online-20260811-navcache.tar.gz`.
+- **Следующий шаг**: к новым провайдерам НЕ переходим. Инструменты: `scripts/startup-latency.mjs`, `scripts/mobile-card-probe.mjs`.
+
 ## ✅ 2026-08-09 (сессия 15): ДЕПЛОЙ a48440c (ретрай) + верификация
 - **Пуш `backup`**: `b492f57..c663813` → `feature/alloha-provider`. **Деплой** `scripts/deploy.sh` OK.
 - **Health/API**: `{"ok":true,"service":"maniya-online-lampa"}`, `ready:true` (uptime 17s — рестарт 18:44:49Z).

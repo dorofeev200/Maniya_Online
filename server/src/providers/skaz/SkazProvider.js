@@ -1,7 +1,18 @@
-import { buildProxyUrl } from '../../proxy.js';
+import { config } from '../../config.js';
+import { buildProxyUrl, tokenFromRequest } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { SkazClient } from './SkazClient.js';
 import { SkazNormalizer } from './SkazNormalizer.js';
+
+/**
+ * Кэш навигации кластера (videos → video): финальные карточки, которые videos()
+ * уже построил успешным походом в кластер, переиспользуются resolveVideo() на
+ * Play вместо повторной навигации getLite→href→postid. Второй независимый поход
+ * в flaky-кластер на Play = лишняя латентность («долго думает») + новый шанс
+ * сбоя («видео не найдено»). Короткий TTL; кэшируем только непустой результат
+ * (пусто = транзиент кластера → следующий запрос ретраит).
+ */
+const NAV_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Провайдер одного skaz-балансера (filmix/alloha/rezka/videoseed/…).
@@ -37,6 +48,7 @@ export class SkazProvider extends Provider {
       origin: options.origin
     });
     this.normalizer = options.normalizer || new SkazNormalizer();
+    this._navCache = new Map();
   }
 
   name() {
@@ -106,50 +118,9 @@ export class SkazProvider extends Provider {
   }
 
   async movieVideos(query, requestContext, streamProxy) {
-    const pageParams = this.buildPageParams(query);
-    const html = await this.client.getLite(pageParams);
-    if (!html) return { items: [], seasons: [], voices: [] };
-
-    const items = await this.movieItemsFromHtml(html, requestContext, streamProxy);
-    if (items.length) return { items, seasons: [], voices: [] };
-
-    // 1) follow-карточка (посительный title-скоринг; rezka/lumina).
-    const href = this.movieHref(this.normalizer.cards(html), query);
-    if (href) {
-      const pageHtml = await this.client.getLite({ ...pageParams, href });
-      if (pageHtml) {
-        const followed = await this.movieItemsFromHtml(pageHtml, requestContext, streamProxy);
-        if (followed.length) return { items: followed, seasons: [], voices: [] };
-      }
-    }
-
-    // 2) postid-схема Lime (kinopub): карточка → postid → перезапрос.
-    const postid = this.postidFromCards(this.normalizer.cards(html));
-    if (postid != null) {
-      const pageHtml = await this.client.getLite({ ...pageParams, postid: String(postid) });
-      if (pageHtml) {
-        const postItems = await this.movieItemsFromHtml(pageHtml, requestContext, streamProxy);
-        if (postItems.length) return { items: postItems, seasons: [], voices: [] };
-      }
-    }
-
-    return { items: [], seasons: [], voices: [] };
-  }
-
-  postidFromCards(cards) {
-    for (const card of cards || []) {
-      if (!card || card.method !== 'link') continue;
-      const value = paramValueOf(card.url || card.href || '', 'postid');
-      if (value == null || value === '') continue;
-      const parsed = Number.parseInt(value, 10);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return null;
-  }
-
-  async movieItemsFromHtml(html, requestContext, streamProxy) {
-    const cards = this.normalizer.cards(html);
+    const { cards } = await this._cachedCollectMovieCards(query);
     const items = [];
+    let callIndex = 0;
 
     for (const card of cards) {
       if (card.method === 'play') {
@@ -164,13 +135,160 @@ export class SkazProvider extends Provider {
           subtitles: []
         });
       } else if (card.method === 'call' && card.s == null && card.e == null) {
-        const item = await this.resolveCardItem(card, requestContext, streamProxy);
-        if (!item) continue;
-        items.push(item);
+        // ЛЕНИВЫЙ резолв голоса: item уходит в список как `method:"call"`, URL
+        // дескриптора затребуется у нашего API только на Play выбранного голоса
+        // (resolveVideo → resolveCardItem). Работающий E-Online делает ровно так же:
+        // lite-страница → карточки call → резолв выбранного, НЕ всех последовательно.
+        const title = this.normalizerCardTitle(card);
+        items.push({
+          method: 'call',
+          title,
+          translate: card.translate || card.voice_translate || '',
+          voice_name: card.voice_translate || card.translate || '',
+          type: 'movie',
+          url: this.buildResolveUrl(requestContext, { voice: String(callIndex) }),
+          subtitles: []
+        });
+        callIndex += 1;
       }
     }
 
-    return items;
+    return { items, seasons: [], voices: [] };
+  }
+
+  /**
+   * Единый навигационный путь фильма для videos() и resolveVideo():
+   * getLite → follow href (поиск-карточка) → postid (Lime). Обе стороны
+   * ОБЯЗАНЫ сойтись на одной и той же финальной странице карточек, иначе
+   * voice-индекс ленивого резолва не совпадёт с items в списке.
+   * Возвращает финальные карточки (фильтр-предикат `hasMovieItems`).
+   */
+  async collectMovieCards(query) {
+    const pageParams = this.buildPageParams(query);
+    const firstHtml = await this.client.getLite(pageParams);
+    let cards = this.normalizer.cards(firstHtml || '');
+    if (hasMovieItems(cards)) return { cards };
+
+    // 1) follow-карточка (посительный title-скоринг; rezka/lumina).
+    const href = this.movieHref(cards, query);
+    if (href) {
+      const followed = this.normalizer.cards((await this.client.getLite({ ...pageParams, href })) || '');
+      if (hasMovieItems(followed)) return { cards: followed };
+    }
+
+    // 2) postid-схема Lime (kinopub): карточка → postid → перезапрос.
+    const postid = this.postidFromCards(cards);
+    if (postid != null) {
+      const postCards = this.normalizer.cards((await this.client.getLite({ ...pageParams, postid: String(postid) })) || '');
+      if (hasMovieItems(postCards)) return { cards: postCards };
+    }
+
+    return { cards: [] };
+  }
+
+  /** Кэш-ключ навигации фильма: pageParams (единый для videos() и resolveVideo()). */
+  _movieNavKey(query = {}) {
+    return `M|${this.balancer}|${JSON.stringify(this.buildPageParams(query))}`;
+  }
+
+  /**
+   * collectMovieCards с коротким кэшем: videos() уже сходил в кластер и построил
+   * финальные карточки — resolveVideo() на Play берёт их же, а не повторяет
+   * getLite→href→postid (второй поход = «долго думает» + «видео не найдено» при
+   * флапе кластера). Кэшируем только непустой результат (пусто = транзиент → ретрай).
+   */
+  async _cachedCollectMovieCards(query = {}) {
+    const key = this._movieNavKey(query);
+    const hit = this._navCache.get(key);
+    if (hit && Date.now() - hit.ts < NAV_CACHE_TTL_MS) return { cards: hit.cards };
+    const result = await this.collectMovieCards(query);
+    if (result.cards && result.cards.length) {
+      this._navCache.set(key, { ts: Date.now(), cards: result.cards });
+      this._sweepNavCache();
+    }
+    return result;
+  }
+
+  /** Кэш-ключ навигации сериала: + голос/сезон (openSeasonPage выбирает их). */
+  _serialNavKey(query = {}) {
+    return `S|${this.balancer}|${JSON.stringify(this.buildPageParams(query))}|v${Number(query.voice) || 0}|s${Number(query.season) || 0}`;
+  }
+
+  /** openSeasonPage с тем же кэшем (сериал: videos → resolveSerialVideo). */
+  async _cachedOpenSeasonPage(query = {}) {
+    const key = this._serialNavKey(query);
+    const hit = this._navCache.get(key);
+    if (hit && Date.now() - hit.ts < NAV_CACHE_TTL_MS) return hit.nav;
+    const nav = await this.openSeasonPage(query);
+    if (nav) {
+      this._navCache.set(key, { ts: Date.now(), nav });
+      this._sweepNavCache();
+    }
+    return nav;
+  }
+
+  _sweepNavCache() {
+    if (this._navCache.size <= 512) return;
+    const now = Date.now();
+    for (const [key, entry] of this._navCache) {
+      if (now - entry.ts >= NAV_CACHE_TTL_MS) this._navCache.delete(key);
+    }
+  }
+
+  /** Прямой резолв `method:"call"` item'а (выбранный голос/серия) → дескриптор. */
+  async resolveVideo(context = {}) {
+    const requestContext = context || {};
+    const query = requestContext.query || {};
+    if (!this.enabled()) return null;
+    const streamProxy = (url) => buildProxyUrl(requestContext, url, {
+      origin: this.client.origin,
+      ref: this.client.origin
+    });
+    try {
+      return this.serialQuery(query)
+        ? await this.resolveSerialVideo(query, requestContext, streamProxy)
+        : await this.resolveMovieVideo(query, requestContext, streamProxy);
+    } catch {
+      return null;
+    }
+  }
+
+  async resolveMovieVideo(query, requestContext, streamProxy) {
+    const { cards } = await this._cachedCollectMovieCards(query);
+    const index = Number(query.voice) || 0;
+    const videoCards = cards.filter((card) => card.method === 'call' && card.s == null && card.e == null);
+    // Один и тот же предикат/порядок, что и в movieVideos (callIndex).
+    const card = videoCards[index] || videoCards[0] || null;
+    if (!card) return null;
+    const item = await this.resolveCardItem(card, requestContext, streamProxy, { type: 'movie' });
+    return item;
+  }
+
+  /** URL ленивого резолва: наш API `/api/lampa/video?…` (клиент допишет token). */
+  buildResolveUrl(requestContext = {}, extra = {}) {
+    const query = requestContext.query || {};
+    const url = new URL('/api/lampa/video', config.publicBaseUrl);
+    for (const [key, value] of Object.entries(this.buildPageParams(query))) {
+      if (value) url.searchParams.set(key, value);
+    }
+    url.searchParams.set('provider', `skaz-${this.balancer}`);
+    for (const [key, value] of Object.entries(extra || {})) {
+      if (value != null && value !== '') url.searchParams.set(key, String(value));
+    }
+    const token = tokenFromRequest(query, requestContext?.request);
+    if (token) url.searchParams.set('token', token);
+    return url.toString();
+  }
+
+  postidFromCards(cards) {
+    for (const card of cards || []) {
+      if (!card || card.method !== 'link') continue;
+      const value = paramValueOf(card.url || card.href || '', 'postid');
+      if (value == null || value === '') continue;
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
   }
 
   movieHref(cards, query = {}) {
@@ -202,13 +320,65 @@ export class SkazProvider extends Provider {
   }
 
   async serialVideos(query, requestContext, streamProxy) {
+    const nav = await this._cachedOpenSeasonPage(query);
+    if (!nav) return { items: [], seasons: [], voices: [] };
+    const { seasons, voices, seasonNumber, pageCards, voice } = nav;
+
+    const episodes = this.normalizer.episodeItems(pageCards, seasonNumber || undefined);
+
+    const items = [];
+    for (const episode of episodes) {
+      // `play`-серии (veoveo/solntse/kinopub) — готовый CDN-URL, резолв не нужен;
+      // `call`-серии (alloha/videoseed) — ленивый резолв на Play серии
+      // (resolveSerialVideo), как в E-Online: НЕ резолвим все серии заранее.
+      if (episode.method === 'play') {
+        const url = episode.url || episode.stream;
+        if (!url) continue;
+        items.push({
+          method: 'play',
+          title: episode.title || `${episode.episode} серия`,
+          url: streamProxy(url),
+          quality: {},
+          subtitles: [],
+          season: episode.season,
+          episode: episode.episode,
+          voice_name: episode.voice_name || voice?.name || '',
+          type: 'serial'
+        });
+      } else {
+        items.push({
+          method: 'call',
+          title: episode.title || `${episode.episode} серия`,
+          episode: episode.episode,
+          season: episode.season,
+          voice_name: episode.voice_name || voice?.name || '',
+          type: 'serial',
+          url: this.buildResolveUrl(requestContext, {
+            voice: String(query.voice ?? 0),
+            season: String(episode.season),
+            episode: String(episode.episode)
+          }),
+          subtitles: []
+        });
+      }
+    }
+
+    const seasonsList = seasons.map((entry) => ({ number: entry.number, title: entry.title }));
+    const voicesList = voices.map((entry, index) => ({ name: entry.name, index }));
+    return { items, seasons: seasonsList, voices: voicesList };
+  }
+
+  /**
+   * Навигация сериала (база → перевод+сезон → страница сезона). Единый путь
+   * для serialVideos() и resolveSerialVideo() — обе должны попасть на ту же
+   * страницу сезона, иначе episode-резолв не совпадёт со списком.
+   */
+  async openSeasonPage(query) {
     const html = await this.client.getLite(this.buildPageParams(query));
-    if (!html) return { items: [], seasons: [], voices: [] };
+    if (!html) return null;
 
     const cards = this.normalizer.cards(html);
-
     const inlineEpisodes = this.normalizer.hasEpisodes(cards);
-
     const voices = this.normalizer.voices(cards);
     const seasons = this.normalizer.seasons(cards);
 
@@ -217,9 +387,7 @@ export class SkazProvider extends Provider {
     // только после открытия страницы сезона (alloha/videoseed/kinopub/
     // veoveo/solntse). Если есть сезоны — продолжаем, даже когда голосов
     // на базовой странице нет.
-    if (!seasons.length && !voices.length && !inlineEpisodes) {
-      return { items: [], seasons: [], voices: [] };
-    }
+    if (!seasons.length && !voices.length && !inlineEpisodes) return null;
 
     const voiceIndex = Number(query.voice) || 0;
     const voice = voices.length ? voices[voiceIndex % voices.length] || voices[0] : null;
@@ -230,52 +398,51 @@ export class SkazProvider extends Provider {
 
     const targetHref = this.seasonLinkHref(cards, voice, seasonNumber);
     const pageHtml = targetHref ? await this.client.openLiteUrl(targetHref) : html;
-    if (!pageHtml) return { items: [], seasons: [], voices: [] };
-
+    if (!pageHtml) return null;
     const pageCards = targetHref ? this.normalizer.cards(pageHtml) : cards;
 
     // Голоса могут жить только на странице сезона (alloha/kinopub): базовая
     // страница их не показывает. Собираем переводы оттуда, если базовых нет.
     const effectiveVoices = voices.length ? voices : this.normalizer.voices(pageCards, { withSeason: true });
 
-    const episodes = this.normalizer.episodeItems(pageCards, seasonNumber || undefined);
+    return { cards, voices: effectiveVoices, seasons, voice, seasonNumber, pageCards };
+  }
 
-    const items = [];
-    for (const episode of episodes) {
-      // `play`-серии (veoveo/solntse/kinopub) — готовый CDN-URL, резолв не нужен;
-      // `call`-серии (alloha/videoseed) — JSON-режим (та же логка, что фильм),
-      // фолбэк на серверный RedirectToPlay-резолв.
-      let item;
-      if (episode.method === 'play') {
-        const url = episode.url || episode.stream;
-        if (!url) continue;
-        item = {
-          method: 'play',
-          title: episode.title || `${episode.episode} серия`,
-          url: streamProxy(url),
-          quality: {},
-          subtitles: [],
-          season: episode.season,
-          episode: episode.episode,
-          voice_name: episode.voice_name || voice?.name || '',
-          type: 'serial'
-        };
-      } else {
-        item = await this.resolveCardItem(episode, requestContext, streamProxy, {
-          type: 'serial',
-          season: episode.season,
-          episode: episode.episode,
-          title: episode.title || `${episode.episode} серия`,
-          voice: episode.voice_name || voice?.name || ''
-        });
-        if (!item) continue;
-      }
-      items.push(item);
+  /** Ленивый резолв `call`-серии: (voice, season, episode) from query → дескриптор. */
+  async resolveSerialVideo(query, requestContext, streamProxy) {
+    const nav = await this._cachedOpenSeasonPage(query);
+    if (!nav) return null;
+    const { pageCards, seasonNumber } = nav;
+    const season = Number(query.season) || seasonNumber || 0;
+    const episode = Number(query.episode) || 0;
+    const card = (pageCards || []).find((c) =>
+      (c.method === 'call' || c.method === 'play') &&
+      c.s != null && c.e != null &&
+      Number(c.s) === season && Number(c.e) === episode
+    ) || null;
+    if (!card) return null;
+    if (card.method === 'play') {
+      const url = card.url || card.stream;
+      if (!url) return null;
+      return {
+        method: 'play',
+        title: this.normalizerCardTitle(card) || `${episode} серия`,
+        url: streamProxy(String(url)),
+        quality: {},
+        subtitles: [],
+        season,
+        episode,
+        voice_name: card.translate || nav.voice?.name || '',
+        type: 'serial'
+      };
     }
-
-    const seasonsList = seasons.map((entry) => ({ number: entry.number, title: entry.title }));
-    const voicesList = effectiveVoices.map((entry, index) => ({ name: entry.name, index }));
-    return { items, seasons: seasonsList, voices: voicesList };
+    return this.resolveCardItem(card, requestContext, streamProxy, {
+      type: 'serial',
+      season,
+      episode,
+      title: this.normalizerCardTitle(card) || `${episode} серия`,
+      voice: card.translate || nav.voice?.name || ''
+    });
   }
 
   async videos(context = null) {
@@ -404,6 +571,17 @@ function cleanedQualityMap(map, proxy) {
     if (urlEntry && typeof urlEntry === 'string') out[label] = proxy(urlEntry);
   }
   return out;
+}
+
+/**
+ * Фильм-страница «играбельна»: в пред-резолвном виде это play-карточки
+ * (готовый CDN-URL) ИЛИ call-карточки без s/e (голоса — ленивый резолв).
+ * Тот же предикат, что у items в movieVideos — collectMovieCards и
+ * resolveMovieVideo обязаны считать страницу «той же» одинаково.
+ */
+function hasMovieItems(cards) {
+  return (cards || []).some((card) => card.method === 'play'
+    || (card.method === 'call' && card.s == null && card.e == null));
 }
 
 /**

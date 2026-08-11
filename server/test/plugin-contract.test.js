@@ -264,3 +264,48 @@ test('поведение: qualityEntries — строковое качество
   assert.deepEqual(Array.from(lib.qualityEntries({})), []);
   assert.deepEqual(Array.from(lib.qualityEntries(null)), []);
 });
+
+test('static: мобильная карточка — компактный постер (Lampac-модель), TV-базовый блок не тронут', async () => {
+  const source = await readFile(PLUGIN_PATH, 'utf8');
+  const line640 = source.split('\n').find((l) => l.includes('@media (max-width:640px)'));
+  assert.ok(line640, 'mobile media-запрос (max-width:640px) присутствует');
+
+  // Root cause «растянутого» постера: базовый блок имеет align-self:stretch + min-height
+  // → высота = высоте тела карточки (длинный заголовок/бейджи раздувают постер по вертикали).
+  // На мобильном stretch отменён, постер absolute cover внутри фикс. блока (модель
+  // Lampac online-prestige__img: width + min-height, plugin.js 2012-2044) → карточка компактна.
+  assert.match(line640, /maniya-online-item__poster-block\{[^}]*?align-self:flex-start/,
+    'постер-блок не растягивается по высоте тела на мобильном');
+  assert.doesNotMatch(line640, /maniya-online-item__poster-block\{[^}]*?align-self:stretch/,
+    'в мобильном блоке НЕТ content-driven stretch');
+  assert.match(line640, /maniya-online-item__poster-block\{[^}]*?min-height:/,
+    'у блока есть фиксированная min-height (как online-prestige__img)');
+  assert.match(line640, /maniya-online-item__poster\{[^}]*?position:absolute/,
+    'постер absolute внутри блока (не растягивает блок)');
+  assert.match(line640, /maniya-online-item__poster\{[^}]*?object-fit:cover/,
+    'постер сохраняет object-fit:cover → без искажений');
+  assert.match(line640, /maniya-online-item__title\{[^}]*?-webkit-line-clamp:2/,
+    'длинный заголовок обрезается на 2 строки (truncate)');
+
+  // TV-базовые правила (вне media) — БЕЗ изменений: постер-блок 8.5em + stretch как было.
+  const baseBlock = source.match(/\.maniya-online-item__poster-block\{([^}]*)\}/);
+  assert.ok(baseBlock, 'базовый TV-блок постера присутствует');
+  assert.ok(baseBlock[1].includes('flex:0 0 8.5em'), 'TV ширина постера 8.5em не изменилась');
+  assert.ok(baseBlock[1].includes('align-self:stretch'), 'TV layout сохранил stretch (как было)');
+  assert.match(source, /\.maniya-online-item__poster\{[^}]*?object-fit:cover/,
+    'TV img по-прежнему object-fit:cover');
+});
+
+test('поведение: qualityChips — 1080p/720p/480p/360p компактными бейджами, сортировка 1080→360', async () => {
+  const { lib } = await loadSandbox();
+  const chips = lib.qualityChips({
+    quality: { '480p': 'u1', '1080p': 'u2', '360p': 'u3', '720p': 'u4' }
+  });
+  // Порядок бейджей: 1080p → 720p → 480p → 360p (qualityPriority, Filmix-мапа).
+  assert.deepEqual(
+    Array.from(chips.matchAll(/maniya-online-item__quality">([^<]+)</g)).map((m) => m[1]),
+    ['1080p', '720p', '480p', '360p'],
+    '4 бейджа качества в порядке приоритета'
+  );
+  assert.ok(chips.includes('maniya-online-item__quality'), 'бейджи используют общий класс (не Filmix-хак)');
+});

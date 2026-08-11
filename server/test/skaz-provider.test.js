@@ -102,7 +102,7 @@ test('movie: play-карточки, все URL идут через прокси'
   }
 });
 
-test('movie: call-карточки без s/e (Alloha) → резолв каждого stream → items play', async () => {
+test('movie: call-карточки без s/e (Alloha) → ЛЕНИВЫЕ call-items; резолв только выбранного голоса', async () => {
   const callHtml = [
     '<div class="videos__item" data-json=\'{"method":"call","url":"http://94.249.239.63/lite/alloha/video?t=7&token_movie=abc&rjson=False&play=true","stream":"http://94.249.239.63/lite/alloha/video.m3u8?t=7&play=true","translate":"Дубляж"}\'>x</div>',
     '<div class="videos__item" data-json=\'{"method":"call","url":"http://94.249.239.63/lite/alloha/video?t=8&token_movie=def&rjson=False&play=true","stream":"http://94.249.239.63/lite/alloha/video.m3u8?t=8&play=true","translate":"Оригінал"}\'>y</div>'
@@ -113,30 +113,46 @@ test('movie: call-карточки без s/e (Alloha) → резолв кажд
   const result = await provider.videos(context({ serial: '0' }));
 
   assert.equal(result.items.length, 2, `items по 2 call-карточкам: ${result.items.length}`);
-  const resolved = client.calls.filter(([name]) => name === 'resolveStream');
-  assert.equal(resolved.length, 2, 'каждая call-карточка резолвится');
-  assert.ok(
-    resolved.every(([, url]) => String(url).includes('video.m3u8')),
-    `резолвятся именно stream (не url-страница): ${resolved.map(([, u]) => u).join(' | ')}`
-  );
+  // videos() НЕ резолвит голоса заранее — карточки уходят как `call`.
+  const eagerResolves = client.calls.filter(([name]) => name === 'resolveStream' || name === 'resolveVideoJson');
+  assert.equal(eagerResolves.length, 0, 'нет eager-резолвов при videos()');
   for (const item of result.items) {
-    assert.equal(item.method, 'play');
-    assert.ok(String(item.url).includes('/api/lampa/proxy'), `через прокси: ${item.url}`);
+    assert.equal(item.method, 'call');
+    assert.ok(String(item.url).includes('/api/lampa/video'), `ленивый URL резолва: ${item.url}`);
     assert.ok(item.voice_name, 'голос перевода не пуст');
   }
+  assert.match(result.items[0].url, /voice=0/, 'первый голос → индекс 0');
+  assert.match(result.items[1].url, /voice=1/, 'второй голос → индекс 1');
+
+  // Play ВЫБРАННОГО голоса → резолв ровно ОДНОЙ карточки (не всех).
+  const play = await provider.resolveVideo(context({ serial: '0', voice: '1' }));
+  assert.ok(play, 'дескриптор выбранного голоса');
+  assert.equal(play.method, 'play');
+  assert.ok(String(play.url).includes('/api/lampa/proxy'), `через прокси: ${play.url}`);
+  assert.ok(play.voice_name, 'голос перевода не пуст');
+  const streamResolves = client.calls.filter(([name]) => name === 'resolveStream');
+  assert.ok(
+    streamResolves.every(([, url]) => String(url).includes('video.m3u8') && String(url).includes('t=8')),
+    `резолвится именно выбранный голос (t=8), а не все: ${streamResolves.map(([, u]) => u).join(' | ')}`
+  );
 });
 
-test('movie: call-карточка БЕЗ stream (пустой резолв) — пропускается без падения', async () => {
+test('movie: call-карточка БЕЗ stream — ленивый call-item в списке, резолв → null (без падения)', async () => {
   const callHtml = [
     '<div class="videos__item" data-json=\'{"method":"call","stream":"","url":"","translate":"Х"}\'>x</div>'
   ].join('');
   const client = new FakeSkazClient({ lite: callHtml });
   const provider = makeProvider(client, 'alloha');
   const result = await provider.videos(context({ serial: '0' }));
-  assert.equal(result.items.length, 0);
+  // Лениво карточку не фильтруем (stream неизвестен до резолва) — но и не падаем.
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].method, 'call');
+
+  const resolved = await provider.resolveVideo(context({ serial: '0', voice: '0' }));
+  assert.equal(resolved, null, 'пустой резолв → null, без исключения');
 });
 
-test('movie: Alloha JSON-режим — item несёт primary or reserve, 4 качества, 7 субтитров, segments.skip', async () => {
+test('movie: Alloha JSON-режим — resolveVideo даёт primary or reserve, 4 качества, 7 субтитров, segments.skip', async () => {
   // RAW-фикстура видео-дескриптора «Человек-паук»: то, что E-Online отдаёт из
   // /lite/alloha/video (без play). Русская «Студия HDRezka»-подобная карточка.
   const videoJson = await repoFixture('alloha-spiderman-video.json');
@@ -149,10 +165,18 @@ test('movie: Alloha JSON-режим — item несёт primary or reserve, 4 к
   const result = await provider.videos(context({ serial: '0' }));
 
   assert.equal(result.items.length, 1, `items по call-карточке: ${result.items.length}`);
-  const item = result.items[0];
+  const callItem = result.items[0];
+  // Лениво: при videos() дескриптор НЕ резолвится (главный фикс per iOS-latency).
+  assert.equal(callItem.method, 'call');
+  assert.equal(callItem.voice_name, 'HDrezka Studio');
+  assert.ok(!client.calls.some(([name]) => name === 'resolveVideoJson'), 'videos() не резолвит JSON');
 
-  // JSON-режим: отдельного server-резолва НЕ было.
-  assert.ok(client.calls.some(([name]) => name === 'resolveVideoJson'), 'resolveVideoJson вызван');
+  // Полный дескриптор — только на Play резолва выбранной карточки.
+  const item = await provider.resolveVideo(context({ serial: '0', voice: '0' }));
+  assert.ok(item, 'дескриптор резолвится');
+
+  // JSON-режим: дескриптор из resolveVideoJson, resolveStream-фолбэка нет.
+  assert.ok(client.calls.some(([name]) => name === 'resolveVideoJson'), 'resolveVideoJson вызван при резолве');
   assert.ok(!client.calls.some(([name]) => name === 'resolveStream'), 'resolveStream фолбэк НЕ вызывался');
 
   assert.equal(item.method, 'play');
@@ -185,7 +209,7 @@ test('movie: Alloha JSON-режим — item несёт primary or reserve, 4 к
   assert.equal(item.type, 'movie');
 });
 
-test('movie: Alloha JSON-режим недоступен (null) → фолбэк resolveStream, как было', async () => {
+test('movie: Alloha JSON-режим недоступен (null) → resolveVideo фолбэк resolveStream, как было', async () => {
   const html = [
     '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/lite/alloha/video.m3u8?t=7&play=true","translate":"Дубляж"}\'>Дубляж</div>'
   ].join('');
@@ -195,7 +219,10 @@ test('movie: Alloha JSON-режим недоступен (null) → фолбэк
   const result = await provider.videos(context({ serial: '0' }));
 
   assert.equal(result.items.length, 1);
-  const item = result.items[0];
+  assert.equal(result.items[0].method, 'call', 'в списке — ленивый резолв');
+
+  const item = await provider.resolveVideo(context({ serial: '0', voice: '0' }));
+  assert.ok(item, 'дескриптор через фолбэк');
   assert.ok(client.calls.some(([name]) => name === 'resolveStream'), 'фолбэк на resolveStream');
   assert.ok(String(item.url).includes('/api/lampa/proxy'), 'резолвнутый URL через прокси');
   // фолбэк НЕ даёт качества/субтитров (старое поведение — не сломали).
@@ -204,7 +231,7 @@ test('movie: Alloha JSON-режим недоступен (null) → фолбэк
   assert.equal(item.voice_name, 'Дубляж');
 });
 
-test('serial: Alloha эпизод в JSON-режиме сохраняет season/episode и мапу качеств', async () => {
+test('serial: Alloha эпизод в JSON-режиме — ленивый call-item, resolveSerialVideo даёт season/episode и мапу качеств', async () => {
   const baseAlloha = [
     '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha?title=GOT&s=1","similar":false}\'><span class="videos__item-title">1 сезон</span></div>'
   ].join('');
@@ -225,13 +252,27 @@ test('serial: Alloha эпизод в JSON-режиме сохраняет season
   const result = await provider.videos(context({ serial: '1', title: 'GOT' }));
 
   assert.equal(result.items.length, 1, `серия: ${result.items.length}`);
-  const item = result.items[0];
+  const callItem = result.items[0];
+  // Лениво: серия уходит call-карточкой, серии не резолвятся при videos().
+  assert.equal(callItem.method, 'call');
+  assert.equal(callItem.season, 1);
+  assert.equal(callItem.episode, 1);
+  assert.ok(String(callItem.url).includes('/api/lampa/video'), `ленивый URL резолва: ${callItem.url}`);
+  assert.ok(!client.calls.some(([name]) => name === 'resolveVideoJson'), 'videos() не резолвит JSON серии');
+
+  // Полный дескриптор серии — только на Play (voice/season/episode из карточки).
+  const item = await provider.resolveVideo(context({ serial: '1', title: 'GOT', voice: '0', season: '1', episode: '1' }));
+  assert.ok(item, 'дескриптор серии');
+  assert.equal(item.method, 'play');
   assert.equal(item.season, 1);
   assert.equal(item.episode, 1);
   assert.equal(item.type, 'serial');
   assert.equal(item.voice_name, 'Оригінал'); // дефолт-перевод, если у серии голос не указан
+  assert.ok(String(item.url).includes('/api/lampa/proxy'), 'серия через прокси');
+  assert.ok(String(item.url).includes(' or '), 'primary or reserve');
   assert.equal(Object.keys(item.quality).length, 2, 'качества серии из JSON');
   assert.equal(item.subtitles.length, 1);
+  assert.ok(client.calls.some(([name]) => name === 'resolveVideoJson'), 'JSON-резолв серии при Play');
 });
 
 test('serial: голоса/сезоны + серии через openLiteUrl', async () => {
@@ -246,7 +287,8 @@ test('serial: голоса/сезоны + серии через openLiteUrl', as
   assert.ok(result.seasons.length >= 1, `сезоны: ${result.seasons.length}`);
   assert.ok(result.items.length >= 1, `серии: ${result.items.length}`);
   const item = result.items[0];
-  assert.equal(item.method, 'play');
+  assert.equal(item.method, 'call', 'серии лениво уходят call-карточками');
+  assert.ok(String(item.url).includes('/api/lampa/video'), `ленивый URL резолва: ${item.url}`);
   assert.equal(item.season, 1);
   assert.ok(item.episode >= 1);
 });
@@ -275,7 +317,8 @@ test('serial: alloha-вид — база только с сезонами (не�
   assert.equal(result.seasons.length, 2, `сезоны с базовой: ${result.seasons.length}`);
   assert.ok(result.items.length >= 2, `серии со страницы сезона: ${result.items.length}`);
   assert.equal(result.items[0].episode, 1);
-  assert.equal(result.items[0].method, 'play');
+  assert.equal(result.items[0].method, 'call', 'серии — ленивые call-карточки');
+  assert.ok(String(result.items[0].url).includes('/api/lampa/video'), `ленивый URL резолва: ${result.items[0].url}`);
   const opened = client.calls.find(([name]) => name === 'openLiteUrl');
   assert.ok(opened, 'сезон открывается через openLiteUrl');
 });
@@ -372,7 +415,75 @@ test('movie: primary только похожие link-карточки → follo
   assert.ok(followed, 'должен быть повторный getLite с href');
   assert.ok(String(followed[1].href).includes('interstellar'), `href выбран по релевантности: ${followed[1].href}`);
   assert.ok(result.items.length >= 2, `items с call-карточек фильма: ${result.items.length}`);
-  assert.ok(result.items.every((item) => item.method === 'play'));
+  // call-карточки фильма → ленивые call-items (не резолвим все переводы).
+  assert.ok(result.items.every((item) => item.method === 'call'));
+  assert.ok(result.items.every((item) => String(item.url).includes('/api/lampa/video')));
+});
+
+test('movie: resolveVideo после videos() берёт карточки из КЭША — не повторяет follow (фикс «долго думает/видео не найдено»)', async () => {
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","similar":true,"href":"films/fiction/2259-interstellar-2014.html"}\'>Интерстеллар</div>'
+  ].join('');
+  const filmHtml = [
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/movie.m3u8?t=5&play=true","url":"http://h/x","translate":"Дубляж"}\'>Дубляж</div>'
+  ].join('');
+
+  const client = new FakeSkazClient({ lite: similarHtml, pages: { 'films/fiction/2259': filmHtml } });
+  const provider = makeProvider(client, 'rezka');
+  const query = { title: 'Интерстеллар', original_title: 'Interstellar', year: '2014', serial: '0' };
+
+  const list = await provider.videos(context(query));
+  assert.equal(list.items.length, 1);
+  assert.ok(String(list.items[0].url).includes('voice=0'), 'индекс голоса из списка');
+
+  const play = await provider.resolveVideo(context({ ...query, voice: '0' }));
+  assert.equal(play.method, 'play');
+  assert.ok(String(play.url).includes('/api/lampa/proxy'), 'через прокси');
+  assert.ok(play.voice_name, 'перевод сохранён');
+
+  // Навигация кластера выполнена РОВНО один раз (в videos()): resolveVideo не
+  // повторяет getLite-фоллоу на Play — он берёт карточки из кэша навигации.
+  const followed = client.calls.filter(([name, p]) => name === 'getLite' && p && p.href);
+  assert.equal(followed.length, 1, 'resolveVideo НЕ повторяет follow — кэш карточек (voice/время не в ключе)');
+});
+
+test('movie: resolveVideo БЕЗ videos() (кэш пуст) — навигация выполняется, резолв работает', async () => {
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","similar":true,"href":"films/fiction/2259-interstellar-2014.html"}\'>Интерстеллар</div>'
+  ].join('');
+  const filmHtml = [
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/movie.m3u8?t=5&play=true","url":"http://h/x","translate":"Дубляж"}\'>Дубляж</div>'
+  ].join('');
+
+  const client = new FakeSkazClient({ lite: similarHtml, pages: { 'films/fiction/2259': filmHtml } });
+  const provider = makeProvider(client, 'rezka');
+  const query = { title: 'Интерстеллар', original_title: 'Interstellar', year: '2014', serial: '0' };
+
+  const play = await provider.resolveVideo(context({ ...query, voice: '0' }));
+  assert.equal(play.method, 'play');
+  assert.ok(String(play.url).includes('/api/lampa/proxy'), 'через прокси');
+  const followed = client.calls.filter(([name, p]) => name === 'getLite' && p && p.href);
+  assert.equal(followed.length, 1, 'кэш пуст → resolveVideo сам делает навигацию (фолбэк кэш-miss)');
+});
+
+test('movie: buildResolveUrl несёт provider, page-параметры, voice и токен', () => {
+  const client = new FakeSkazClient({ lite: '' });
+  const provider = makeProvider(client, 'alloha');
+  const url = provider.buildResolveUrl(context({ serial: '1', title: 'GOT', token: 'tok-123' }), { voice: '2', season: '1', episode: '4' });
+  const parsed = new URL(url);
+  assert.equal(parsed.pathname, '/api/lampa/video');
+  assert.equal(parsed.searchParams.get('provider'), 'skaz-alloha');
+  assert.equal(parsed.searchParams.get('serial'), '1');
+  assert.equal(parsed.searchParams.get('title'), 'GOT');
+  assert.equal(parsed.searchParams.get('voice'), '2');
+  assert.equal(parsed.searchParams.get('season'), '1');
+  assert.equal(parsed.searchParams.get('episode'), '4');
+  assert.equal(parsed.searchParams.get('token'), 'tok-123');
+
+  // Фильм (serial=0): параметр serial НЕ попадает в URL (не нужен на резолве).
+  const movieUrl = provider.buildResolveUrl(context({ serial: '0', token: '' }), { voice: '0' });
+  const movieParsed = new URL(movieUrl);
+  assert.equal(movieParsed.searchParams.get('serial'), null);
 });
 
 test('movie: kinopub (Lime) — link-карточки с postid → follow через postid', async () => {
