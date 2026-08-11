@@ -18,9 +18,12 @@ process.env.HDVB_TOKEN = 'probe-token'; // токен → native hdvb включ
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SkazProvider } from '../src/providers/skaz/SkazProvider.js';
 
-const { registeredProviders, providerById, twinFor } = await import('../src/providers/registry.js');
+// ВСЕ импорты локальных модулей — ДИНАМИЧЕСКИЕ (после установки env): статический
+// import SkazProvider hoists config.js до строк env → account пустой → enabled()=false.
+const { registeredProviders, providerById, twinFor, allProviders } = await import('../src/providers/registry.js');
+const { getVideoForRequest } = await import('../src/store.js');
+const { SkazProvider } = await import('../src/providers/skaz/SkazProvider.js');
 
 test('twinFor: скрытый skaz-близнец существует для включённого native', () => {
   const twin = twinFor('filmix');
@@ -58,4 +61,31 @@ test('native выключен (нет токена) → skaz-источник В
 
 test('twinFor неизвестного id → null', () => {
   assert.equal(twinFor('ne-so-suschestvuet'), null);
+});
+
+// РЕГРЕССИЯ (2026-08-11): lazy movieVideos отдаёт call items от СКРЫТОГО близнеца
+// (url → /api/lampa/video?provider=skaz-<balancer>), но getVideoForRequest искал
+// только по registeredProviders() (видимые) → Play падал 404 video_not_found.
+test('allProviders: включает скрытые skaz-близнецы (ленивый резолв call items)', () => {
+  const ids = allProviders().map((p) => p.id);
+  assert.ok(ids.includes('skaz-rezka'), 'скрытый skaz-rezka доступен для резолва');
+  assert.ok(ids.includes('skaz-filmix'), 'скрытый skaz-filmix доступен');
+  assert.ok(ids.includes('skaz-hdvb'), 'скрытый skaz-hdvb доступен');
+  assert.ok(ids.includes('skaz-alloha'), 'видимый skaz-alloha тоже в списке');
+  assert.ok(ids.includes('rezka'), 'native rezka на месте');
+});
+
+test('getVideoForRequest: находит СКРЫТЫЙ близнец по provider=skaz-rezka (не 404)', async () => {
+  const twin = allProviders().find((p) => p.id === 'skaz-rezka');
+  assert.ok(twin, 'скрытый skaz-rezka должен существовать');
+  assert.equal(twin.show, false, 'в sources не светится, но резолвится');
+  twin.resolveVideo = async () => ({ method: 'play', url: 'http://stub/play.m3u8', quality: {} });
+  const item = await getVideoForRequest({ query: { provider: 'skaz-rezka', title: 'Spider-Man' } });
+  assert.ok(item, 'call-карточка скрытого близнеца резолвится (до фикса — null → 404)');
+  assert.equal(item.method, 'play');
+});
+
+test('getVideoForRequest: provider без resolveVideo → null (поведение не изменилось)', async () => {
+  const item = await getVideoForRequest({ query: { provider: 'cdnvideohub' } });
+  assert.equal(item, null);
 });

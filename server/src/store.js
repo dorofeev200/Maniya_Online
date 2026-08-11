@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { HttpError } from './errors.js';
 import { validateToken } from './security.js';
-import { registeredProviders, twinFor } from './providers/registry.js';
+import { allProviders, registeredProviders, twinFor } from './providers/registry.js';
 
 async function readJson(filePath, fallback) {
   if (!filePath) return fallback;
@@ -87,8 +87,12 @@ export async function requireSubscription(context) {
  */
 export async function getVideoForRequest(context) {
   const selected = String(context.query.provider || '').trim().toLowerCase();
+  // Ищем среди ВСЕХ провайдеров (включая скрытые skaz-близнецы): twin-first в
+  // /videos отдаёт call items от skaz-<balancer>, и Play обязан их резолвить.
+  // Запрос с provider=skaz-rezka НЕ должен падать в 404 только потому, что
+  // у native-источника есть видимый одноимённый близнец.
   const provider = selected
-    ? registeredProviders().find((p) => p.enabled() && p.id === selected)
+    ? allProviders().find((p) => p.enabled() && p.id === selected)
     : null;
   if (!provider || typeof provider.resolveVideo !== 'function') {
     return null;
