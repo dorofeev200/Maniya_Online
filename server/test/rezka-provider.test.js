@@ -247,3 +247,65 @@ test('RezkaProvider.movieVideos: передаёт favs в getStreamMovie (Rezka 
 
   assert.equal(client.lastMovieStreamOpts.favs, 'abc123favs_token', 'favs из embed переданы в getStreamMovie через movieVideos');
 });
+
+// --- сезоны per-translator (root cause «Дом Дракона»: только 1 сезон) ---
+
+/** Fake-клиент: getEpisodes возвращает РАЗНЫЕ сезоны для разных переводов. */
+class PerTranslatorClient extends FakeRezkaClient {
+  constructor() {
+    super({ pageHtml: EMBED_SERIAL_HTML, episodeStream: EPISODE_STREAM });
+    // «Дубляж» (7) — только последний сезон; «Оригинал» (13) — все сезоны.
+    this.translatorEpisodes = {
+      '7': {
+        seasons: [{ number: 3, title: '3 сезон' }],
+        episodes: [
+          { season: 3, episode: 1, title: '1 серия' },
+          { season: 3, episode: 2, title: '2 серия' }
+        ]
+      },
+      '13': {
+        seasons: [
+          { number: 1, title: '1 сезон' },
+          { number: 2, title: '2 сезон' },
+          { number: 3, title: '3 сезон' }
+        ],
+        episodes: [
+          { season: 1, episode: 1, title: '1 серия' },
+          { season: 2, episode: 1, title: '1 серия' },
+          { season: 3, episode: 1, title: '1 серия' }
+        ]
+      }
+    };
+  }
+
+  async getEpisodes(id, translatorId) {
+    this.calls.push(['getEpisodes', id, translatorId]);
+    return this.translatorEpisodes[String(translatorId)] || null;
+  }
+}
+
+test('RezkaProvider.videos: сериал → seasons = объединение всех переводов, фолбэк голоса по сезону', async () => {
+  const client = new PerTranslatorClient();
+  const provider = new RezkaProvider({ client });
+
+  // season=1 есть только у «Оригинала» (13) → фолбэк с «Дубляжа» (7).
+  const payload = await provider.videos({ query: { title: 'Тестовый сериал', season: '1', token: 'abc' } });
+
+  assert.deepEqual(payload.seasons.map((s) => s.number), [1, 2, 3], 'фильтр сезонов = объединение, не только первого перевода');
+  assert.deepEqual(payload.voices.map((v) => v.name), ['Дубляж', 'Оригинал']);
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0].season, 1);
+  assert.equal(payload.items[0].voice_name, 'Оригинал', 'сезон 1 резолвится голосом, у которого он есть');
+});
+
+test('RezkaProvider.videos: сериал → выбранный голос, у которого сезон есть, остаётся предпочтительным', async () => {
+  const client = new PerTranslatorClient();
+  const provider = new RezkaProvider({ client });
+
+  // voice=0 (Дубляж), season=3 — есть у Дубляжа → остаётся Дубляж.
+  const payload = await provider.videos({ query: { title: 'Тестовый сериал', voice: '0', season: '3', token: 'abc' } });
+
+  assert.deepEqual(payload.seasons.map((s) => s.number), [1, 2, 3]);
+  assert.equal(payload.items.length, 2, '2 серии 3-го сезона у Дубляжа');
+  assert.ok(payload.items.every((item) => item.voice_name === 'Дубляж' && item.season === 3));
+});

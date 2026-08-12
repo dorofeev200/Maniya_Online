@@ -21,6 +21,12 @@ const DEFAULT_BASE_URL = 'https://rezka.ag';
 const ANUBIS_VERIFY_COOKIE = 'techaro.lol-anubis-cookie-verification';
 const ANUBIS_AUTH_COOKIE = 'techaro.lol-anubis-auth';
 
+// Кэш get_episodes: сезоны/серии Rezka per-translator и не меняются между
+// переключениями голоса/сезона в UI. Непустой результат живёт 10 минут,
+// иначе объединение сезонов по 20+ переводам (как у «Дом Дракона») каждый раз
+// гоняло бы столько же AJAX-запросов.
+const EPISODES_CACHE_TTL_MS = 10 * 60 * 1000;
+
 // Навигационные заголовки (поиск/embed) — как в Lampac Service.cs Search/Embed.
 const DEFAULT_NAV_HEADERS = {
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -118,6 +124,7 @@ export class RezkaClient {
       rateLimiter: new RateLimiter({ intervalMs: 300, maxConcurrent: 2 })
     });
     this.log = loggerImpl || logger;
+    this._episodesCache = new Map();
   }
 
   get isReady() {
@@ -249,10 +256,20 @@ export class RezkaClient {
 
   /** Сезоны/серии выбранного перевода: `{ seasons, episodes }` или null. */
   async getEpisodes(id, translatorId, referer) {
+    const key = `${id}:${translatorId}`;
+    const hit = this._episodesCache.get(key);
+    if (hit && Date.now() - hit.ts < EPISODES_CACHE_TTL_MS) return hit.value;
+
     const body = new URLSearchParams({ id, translator_id: String(translatorId), action: 'get_episodes' });
     const root = await this.ajax(body, referer);
     if (!root || root.success !== true) return null;
-    return parseEpisodesHtml(root.seasons, root.episodes);
+
+    const parsed = parseEpisodesHtml(root.seasons, root.episodes);
+    // Кэшируем только непустой результат: пустой/ошибочный = транзиент → ретрай.
+    if (parsed && (parsed.seasons.length || parsed.episodes.length)) {
+      this._episodesCache.set(key, { ts: Date.now(), value: parsed });
+    }
+    return parsed;
   }
 
   /** Поток фильма: `{ success, url(base64), subtitle, premium }` или null. */

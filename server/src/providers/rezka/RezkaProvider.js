@@ -179,27 +179,27 @@ export class RezkaProvider extends Provider {
 
   /**
    * Сериал: StreamItem[] по сериям выбранного сезона + озвучки.
+   * Сезон/перевод выбираются с учётом того, что у Rezka у каждого перевода
+   * свой набор сезонов (см. pickTranslatorSeason).
    */
   async serialStreams(record, embedInfo, query, streamProxy) {
-    const translator = this.pickTranslator(embedInfo.translators, query);
-    if (!translator) return [];
+    const voices = embedInfo.translators || [];
+    if (!voices.length) return [];
 
-    const source = await this.client.getEpisodes(record.id, translator.id);
-    const seasonNumber = this.pickSeason(source, query);
-    if (seasonNumber == null) return [];
-
-    const seasonEpisodes = (source?.episodes || [])
-      .filter((episode) => Number(episode.season) === Number(seasonNumber));
+    const byTranslator = await this.fetchTranslatorEpisodes(record, voices);
+    const seasonNumbers = this.unionSeasonNumbers(byTranslator);
+    const pick = this.pickTranslatorSeason(byTranslator, voices, query, seasonNumbers);
+    if (!pick) return [];
 
     const referer = this.referer(record);
     const items = [];
-    for (const episode of seasonEpisodes) {
-      const payload = await this.client.getStreamEpisode(record.id, translator.id, seasonNumber, episode.episode, {}, referer);
+    for (const episode of pick.episodes) {
+      const payload = await this.client.getStreamEpisode(record.id, pick.translator.id, pick.season, episode.episode, {}, referer);
       const streams = this.normalizer.resolveStreams(payload, {
         premium: this.premium,
         hls: this.hls,
         referer,
-        voice: translator.name
+        voice: pick.translator.name
       });
       for (const stream of streams) {
         items.push(this.streamItem({
@@ -274,27 +274,29 @@ export class RezkaProvider extends Provider {
   /** Сериал: items по сериям выбранного сезона, фильтры seasons/voices. */
   async serialVideos(record, embedInfo, query, streamProxy) {
     const voices = embedInfo.translators || [];
+    const voicesList = voices.map((voice, index) => ({ name: voice.name, index }));
     if (!voices.length) return { items: [], seasons: [], voices: [] };
 
-    const translator = this.pickTranslator(voices, query);
-    const source = await this.client.getEpisodes(record.id, translator.id);
-    if (!source) return { items: [], seasons: [], voices: [] };
-
-    const seasonNumber = this.pickSeason(source, query);
-    if (seasonNumber == null) return { items: [], seasons: [], voices: [] };
-
-    const seasonEpisodes = (source.episodes || [])
-      .filter((episode) => Number(episode.season) === Number(seasonNumber));
     const referer = this.referer(record);
+    const byTranslator = await this.fetchTranslatorEpisodes(record, voices);
+
+    // seasons = объединение сезонов по всем переводам: у разных озвучек разный
+    // набор сезонов (у «Дубляж» только последний сезон, у LostFilm — все),
+    // фильтр сезонов должен показывать все доступные, а не только избранного.
+    const seasonNumbers = this.unionSeasonNumbers(byTranslator);
+    const seasons = seasonNumbers.map((number) => ({ number, title: `${number} сезон` }));
+
+    const pick = this.pickTranslatorSeason(byTranslator, voices, query, seasonNumbers);
+    if (!pick) return { items: [], seasons, voices: voicesList };
 
     const items = [];
-    for (const episode of seasonEpisodes) {
-      const payload = await this.client.getStreamEpisode(record.id, translator.id, seasonNumber, episode.episode, {}, referer);
+    for (const episode of pick.episodes) {
+      const payload = await this.client.getStreamEpisode(record.id, pick.translator.id, pick.season, episode.episode, {}, referer);
       const streams = this.normalizer.resolveStreams(payload, {
         premium: this.premium,
         hls: this.hls,
         referer,
-        voice: translator.name
+        voice: pick.translator.name
       });
       if (!streams.length) continue;
 
@@ -309,16 +311,12 @@ export class RezkaProvider extends Provider {
         quality,
         headers: first.headers,
         subtitles: first.subtitles,
-        season: Number(seasonNumber),
+        season: Number(pick.season),
         episode: Number(episode.episode),
-        voice_name: translator.name || '',
+        voice_name: pick.translator.name || '',
         type: 'serial'
       });
     }
-
-    const seasons = (source.seasons || [])
-      .map((season) => ({ number: Number(season.number), title: season.title || `${season.number} сезон` }));
-    const voicesList = voices.map((voice, index) => ({ name: voice.name, index }));
 
     return { items, seasons, voices: voicesList };
   }
@@ -331,16 +329,64 @@ export class RezkaProvider extends Provider {
     return voices[index] || voices[0];
   }
 
-  /** Сезон из `seasons` (один либо переданный в query), иначе первый из серий. */
-  pickSeason(source, query = {}) {
-    const seasonNumbers = [...new Set((source?.seasons || []).map((season) => Number(season.number)))];
-    if (seasonNumbers.length) {
-      const requested = Number(query.season);
-      if (seasonNumbers.includes(requested)) return requested;
-      return seasonNumbers[0];
+  /**
+   * Сезоны/серии по всем переводам записи. Rezka отдаёт `get_episodes` только для
+   * одного перевода, и у разных переводов разный набор сезонов (например, «Дубляж»
+   * может иметь лишь последний сезон, а LostFilm — все). Возвращает Map
+   * translator.id → { translator, seasons, episodes } только для переводов с сериями.
+   */
+  async fetchTranslatorEpisodes(record, translators = []) {
+    const results = await Promise.all(
+      translators.map((translator) =>
+        this.client.getEpisodes(record.id, translator.id).then((source) => ({ translator, source }))
+      )
+    );
+    const out = new Map();
+    for (const { translator, source } of results) {
+      if (!source || !(source.episodes || []).length) continue;
+      out.set(String(translator.id), {
+        translator,
+        seasons: source.seasons || [],
+        episodes: source.episodes || []
+      });
     }
-    const episodeSeasons = [...new Set((source?.episodes || []).map((episode) => Number(episode.season)))];
-    return episodeSeasons.length ? episodeSeasons.sort((a, b) => a - b)[0] : null;
+    return out;
+  }
+
+  /** Объединённый, отсортированный список номеров сезонов по всем переводам. */
+  unionSeasonNumbers(byTranslator) {
+    return [...new Set(
+      [...byTranslator.values()]
+        .flatMap((entry) => entry.seasons.map((season) => Number(season.number)))
+        .filter(Number.isFinite)
+    )].sort((left, right) => left - right);
+  }
+
+  /**
+   * Перевод + сезон для сериала. Сезон = запрошенный, иначе первый из
+   * объединённого списка; перевод = выбранный голос, а если у него нет этого
+   * сезона — первый (в порядке списка) перевод, у которого сезон есть.
+   */
+  pickTranslatorSeason(byTranslator, voices, query = {}, seasonNumbers = []) {
+    const requestedSeason = query.season && query.season !== '-1' ? Number(query.season) : NaN;
+    const season = Number.isFinite(requestedSeason) && seasonNumbers.includes(requestedSeason)
+      ? requestedSeason
+      : seasonNumbers[0];
+    if (season == null) return null;
+
+    const voiceIndex = Number(query.voice) || 0;
+    const preferred = voices[voiceIndex] || voices[0];
+    const candidates = preferred ? [preferred, ...voices.filter((voice) => voice !== preferred)] : voices;
+
+    for (const translator of candidates) {
+      const entry = byTranslator.get(String(translator.id));
+      if (!entry) continue;
+      const episodes = (entry.episodes || [])
+        .filter((episode) => Number(episode.season) === Number(season))
+        .sort((left, right) => Number(left.episode) - Number(right.episode));
+      if (episodes.length) return { translator, season, episodes };
+    }
+    return null;
   }
 
   /** Embed-URL записи — используется и как Referer к потокам, и как ключ кэша. */
