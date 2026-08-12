@@ -284,8 +284,13 @@ export class KodikProvider extends Provider {
    */
   relevantOnly(raw, { title, originalTitle, kinopoiskId, imdbId, year } = {}) {
     const norm = (value) => String(value || '').toLowerCase().replace(/ё/g, 'е').trim();
-    const queryTitle = norm(title);
-    const queryOriginal = norm(originalTitle);
+    // Kodik добавляет к сериалам суффикс сезона/части («Атака титанов [ТВ-4,
+    // часть 1]», «Наруто [ТВ-2]»). Чистое название запроса («Атака титанов»)
+    // никогда не совпадёт с суффиксом по точному равенству — отбрасываем
+    // хвостовую группу в [], чтобы сериалы не отсекались как «мусор».
+    const base = (value) => norm(value).replace(/\s*\[[^\]]*\]\s*$/, '');
+    const queryTitle = base(title);
+    const queryOriginal = base(originalTitle);
     const queryKp = kinopoiskId ? String(kinopoiskId) : '';
     const queryImdb = imdbId ? String(imdbId).toLowerCase() : '';
 
@@ -293,7 +298,7 @@ export class KodikProvider extends Provider {
       if (queryKp && String(item.kinopoisk_id || '') === queryKp) return true;
       if (queryImdb && String(item.imdb_id || '').toLowerCase() === queryImdb) return true;
 
-      const names = [item.title, item.title_orig, item.other_title].map(norm);
+      const names = [item.title, item.title_orig, item.other_title].map(base);
       const nameHit = (queryTitle && names.includes(queryTitle)) || (queryOriginal && names.includes(queryOriginal));
       if (!nameHit) return false;
 

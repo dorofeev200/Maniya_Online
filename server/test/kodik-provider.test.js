@@ -410,3 +410,50 @@ test('KodikProvider.search: KA-фильтр — совпадение назва�
 
   assert.equal(records.length, 0);
 });
+
+// --- KA: суффикс сезона/части у сериалов («[ТВ-4, часть 1]») ---
+
+test('KodikProvider.search: KA-фильтр — суффикс [ТВ-N] не отсекает сериал (root cause «0 items»)', async () => {
+  const got = {
+    id: 's1',
+    title: 'Атака титанов [ТВ-4, часть 1]',
+    title_orig: 'Shingeki no Kyojin: The Final Season',
+    other_title: 'Атака титанов: Финал / Атака Титанов [ТВ-4] часть 1',
+    type: 'anime-serial',
+    year: 2020,
+    link: 'https://example.com/player/s1',
+    kinopoisk_id: '164085',
+    imdb_id: 'tt14044016',
+    translation: { title: 'Дубляж' },
+    last_season: 4,
+    seasons: {
+      '4': {
+        link: 'https://example.com/player/s1/4',
+        episodes: { '1': 'https://example.com/ep/4/1', '2': 'https://example.com/ep/4/2' }
+      }
+    }
+  };
+  const client = new FakeKodikClient({ ids: [], byQuery: { 'Атака титанов': [got] } });
+  const provider = new KodikProvider({ client });
+
+  const records = await provider.search({ title: 'Атака титанов' });
+
+  assert.equal(records.length, 1, 'сериал с суффиксом сезона не должен отсекаться');
+  assert.equal(records[0].id, 's1');
+  assert.equal(records[0].type, 'serial');
+});
+
+test('KodikProvider.search: KA-фильтр — суффикс не маскирует чужой тайтл (мусор отсекается)', async () => {
+  // Запрос «Игра престолов»; тайтл «Игра [ТВ-1]» — базовое название другое → мусор.
+  const junk = {
+    id: 'j1', title: 'Игра [ТВ-1]', title_orig: 'Igra',
+    type: 'anime-serial', year: 2010, link: 'https://example.com/player/j1',
+    translation: { title: 'Дубляж' }
+  };
+  const client = new FakeKodikClient({ byQuery: { 'Игра престолов': [junk] } });
+  const provider = new KodikProvider({ client });
+
+  const records = await provider.search({ title: 'Игра престолов' });
+
+  assert.equal(records.length, 0, '«Игра» не матчится с «Игра престолов»');
+});
