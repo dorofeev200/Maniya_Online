@@ -176,14 +176,14 @@ test('FilmixProvider.videos: фолбэк на video-links (фильм) при �
   assert.deepEqual(movie.headers, { Referer: 'https://filmix.my/' });
 });
 
-test('FilmixProvider.videos: бесплатный путь из video-links отдаёт только 480p', async () => {
+test('FilmixProvider.videos: бесплатный путь из video-links ретранслирует все качества', async () => {
   const client = new FakeFilmixClient();
   client.cardNullMode = true;
   const provider = providerWith({ client, token: '', pro: false });
 
   const payload = await provider.videos(context);
   const movie = payload.items.find((item) => item.title === 'Дубляж [4K, SDR, ru, Movie Dubbing]');
-  assert.deepEqual(Object.keys(movie.quality), ['480p']);
+  assert.deepEqual(Object.keys(movie.quality), ['4K', '1440p', '1080p', '720p', '480p']);
 });
 
 test('FilmixProvider.videos: фолбэк на video-links (сериал) — сезоны/озвучки/серии', async () => {

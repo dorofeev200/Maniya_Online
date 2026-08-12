@@ -5,7 +5,7 @@ import { isHttpUrl } from '../shared/utils/Url.js';
 import { normalizeQuality } from '../shared/normalize/QualityNormalizer.js';
 import { normalizeVoice } from '../shared/normalize/VoiceNormalizer.js';
 import { FilmixClient } from './FilmixClient.js';
-import { FilmixNormalizer, qualityAllowed } from './FilmixNormalizer.js';
+import { FilmixNormalizer } from './FilmixNormalizer.js';
 
 const FILMIX_STREAM_HEADERS = { Referer: 'https://filmix.my/' };
 
@@ -19,7 +19,11 @@ export class FilmixProvider extends Provider {
     this.pro = pro;
     this.hls = hls;
     this.hideFree720 = !token;
-    this.client = client || new FilmixClient({ token, host, tvHost });
+    this.client = client || new FilmixClient({
+      token, host, tvHost,
+      tvUser: config.filmix.tvUser,
+      tvPassword: config.filmix.tvPassword
+    });
     this.normalizer = normalizer || this.createNormalizer(streamProxy);
   }
 
@@ -208,7 +212,7 @@ export class FilmixProvider extends Provider {
         method: 'play',
         title: voiceName || 'Озвучка',
         url: streamProxy(first.url),
-        quality: qualityMapFromFiles(sorted),
+        quality: qualityMapFromFiles(sorted, streamProxy),
         headers: { ...FILMIX_STREAM_HEADERS },
         subtitles: [],
         voice_name: voiceName,
@@ -244,7 +248,7 @@ export class FilmixProvider extends Provider {
         method: 'play',
         title: `${Number(episode.episode) || 0} серия`,
         url: first?.url ? streamProxy(first.url) : '',
-        quality: qualityMapFromFiles(sorted),
+        quality: qualityMapFromFiles(sorted, streamProxy),
         headers: { ...FILMIX_STREAM_HEADERS },
         subtitles: [],
         season: Number(seasonKey) || 1,
@@ -300,8 +304,7 @@ export class FilmixProvider extends Provider {
   allowedFiles(files = []) {
     const seen = new Set();
     return (files || [])
-      .filter((file) => file && isHttpUrl(file.url))
-      .filter((file) => qualityAllowed(Number(file.quality), this.normalizer))
+      .filter((file) => file && isHttpUrl(file.url) && Number.isFinite(Number(file.quality)))
       .filter((file) => {
         const key = String(file.quality);
         if (seen.has(key)) return false;
@@ -399,10 +402,10 @@ function qualityMap(streams = []) {
   return qualityByUrl;
 }
 
-function qualityMapFromFiles(files = []) {
+function qualityMapFromFiles(files = [], streamProxy = (url) => url) {
   const qualityByUrl = {};
   for (const file of files) {
-    if (file.quality && file.url) qualityByUrl[normalizeQuality(String(file.quality))] = file.url;
+    if (file.quality && file.url) qualityByUrl[normalizeQuality(String(file.quality))] = streamProxy(file.url);
   }
   return qualityByUrl;
 }
