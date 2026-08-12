@@ -330,3 +330,26 @@ test('поведение: qualityChips — 1080p/720p/480p/360p компактн
   );
   assert.ok(chips.includes('maniya-online-item__quality'), 'бейджи используют общий класс (не Filmix-хак)');
 });
+
+test('поведение: bestQualityLabel — строковая метка (не объект) для info/title', async () => {
+  const { lib } = await loadSandbox();
+  // Регрессия «[object Object]»: info/title падали в item.quality (объект).
+  assert.equal(lib.bestQualityLabel({ quality: { '1080p': 'u1', '4K': 'u2', '480p': 'u3' } }), '4K',
+    'лучшее качество — по приоритету, строка');
+  assert.equal(lib.bestQualityLabel({ quality: { '720p': 'u1' } }), '720p');
+  assert.equal(lib.bestQualityLabel({ quality: '1080p' }), '1080p', 'строковое качество как есть');
+  assert.equal(lib.bestQualityLabel({}), '', 'без качества — пустая строка');
+  assert.equal(lib.bestQualityLabel({ quality: {} }), '', 'пустая мапа — пустая строка');
+});
+
+test('static: info/title не присваивают item.quality (объект) — регрессия «[object Object]»', async () => {
+  const source = await readFile(PLUGIN_PATH, 'utf8');
+  const stripped = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/item\.info\s*=\s*item\.voice_name\s*\|\|\s*item\.quality/.test(stripped),
+    'item.info больше не падает в item.quality (объект)');
+  assert.ok(!/item\.title\s*=\s*item\.voice_name\s*\|\|\s*item\.quality/.test(stripped),
+    'item.title больше не падает в item.quality (объект)');
+  assert.match(stripped, /bestQualityLabel\(item\)/, 'fallback — строковая метка лучшего качества');
+});

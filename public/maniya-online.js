@@ -244,6 +244,16 @@
     }).join('');
   }
 
+  /** Строковая метка лучшего качества (для info/title, где объект качества даёт «[object Object]»). */
+  function bestQualityLabel(item) {
+    var entries = qualityEntries(item);
+    if (!entries.length) return '';
+    entries.sort(function (a, b) {
+      return qualityPriority(b.label) - qualityPriority(a.label);
+    });
+    return entries[0].label;
+  }
+
   /**
    * Открыть выбор качества. Канонический API рабочего E-Online/Lampac-plигина —
    * Lampa.Select.show({ title, items, onSelect, onBack }) с ГЛОБАЛЬНЫМ
@@ -572,10 +582,10 @@
           } else {
             // Фильм, серий нет — не рисуем «Серия N», что при отсутствии title
             // вводит пользователя в заблуждение. Показываем озвучку/качество/индекс.
-            item.title = item.voice_name || item.quality || String(index + 1);
+            item.title = item.voice_name || bestQualityLabel(item) || String(index + 1);
           }
         }
-        item.info = item.voice_name || item.quality || sourceLabel(sources[activeSource]);
+        item.info = item.voice_name || bestQualityLabel(item) || sourceLabel(sources[activeSource]);
         item.time = item.time || '';
         item.quality_label = item.quality_label || '';
         item.qualities_html = qualityChips(item);
@@ -923,6 +933,7 @@
       openQualitySelect: openQualitySelect,
       qualityEntries: qualityEntries,
       qualityChips: qualityChips,
+      bestQualityLabel: bestQualityLabel,
       moviePoster: moviePoster,
       orUrlReserve: orUrlReserve,
       setDefaultQuality: setDefaultQuality,
