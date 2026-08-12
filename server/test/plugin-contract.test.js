@@ -122,6 +122,27 @@ test('static: нет Lampa.Select.open и hardcoded image.tmdb.org; есть к�
     'pre-play выбор качества удалён из клика — играем дефолт, карта уходит в плеер');
 });
 
+test('static: сезоны/озвучки — через канонический filter.set(\'filter\') с stype, а не отдельные типы', async () => {
+  const source = await readFile(PLUGIN_PATH, 'utf8');
+  const stripped = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+
+  // ROOT CAUSE «нет отображения сезонов/серий»: Lampa.Filter рендерит только
+  // sort/filter/search. filter.set('season'/'voice') как ОТДЕЛЬНЫЕ типы не дают
+  // видимого селектора — E-Online кладёт их ПОД-фильтрами одного `filter`
+  // (stype: season/voice). Здесь — тот же канонический механизм.
+  assert.match(stripped, /filter\.set\('filter',\s*select\)/, 'сезоны/озвучки кладутся в один filter.set(\'filter\')');
+  assert.match(stripped, /stype:\s*'season'/, 'под-фильтр сезона имеет stype: season');
+  assert.match(stripped, /stype:\s*'voice'/, 'под-фильтр озвучки имеет stype: voice');
+  assert.ok(!/filter\.set\('season'/.test(stripped), 'filter.set(\'season\') — нестандартный тип, не рендерится');
+  assert.ok(!/filter\.set\('voice'/.test(stripped), 'filter.set(\'voice\') — нестандартный тип, не рендерится');
+  // Индекс выбранного под-элемента мапится обратно в значение через отдельные
+  // массивы (Lampa не сохраняет произвольные поля под-элементов).
+  assert.match(stripped, /seasonNumbers\[subitem\.index\]/, 'сезон берётся из seasonNumbers по subitem.index');
+  assert.match(stripped, /voiceIndexes\[subitem\.index\]/, 'озвучка берётся из voiceIndexes по subitem.index');
+});
+
 test('поведение: Lampa.Select без .open — селектор качества работает через show (регрессия «Script error.»)', async () => {
   const { lib, calls } = await loadSandbox();
 

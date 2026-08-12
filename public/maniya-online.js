@@ -326,6 +326,8 @@
     var last;
     var activeSeason = null;
     var activeVoice = null;
+    var seasonNumbers = [];
+    var voiceIndexes = [];
 
     this.create = function () {
       return this.render();
@@ -381,16 +383,27 @@
       scroll.body().append(Lampa.Template.get('maniya_content_loading'));
 
       filter.render().find('.filter--sort span').text(Lampa.Lang.translate('maniya_source'));
-      filter.onSelect = function (type, item) {
+      filter.onSelect = function (type, item, subitem) {
         if (type === 'sort') {
           Lampa.Select.close();
           self.changeSource(item.source);
-        } else if (type === 'season') {
-          activeSeason = item.value;
-          self.loadVideos();
-        } else if (type === 'voice') {
-          activeVoice = item.value;
-          self.loadVideos();
+        } else if (type === 'filter') {
+          // Канонический Lampa-Filter `filter` (как E-Online Online/plugin.js):
+          // season/voice — под-фильтры с `stype`, индекс выбранного под-элемента
+          // (subitem.index) мапится обратно в season/voice через seasonNumbers/
+          // voiceIndexes (Lampa не гарантирует сохранение произвольных полей).
+          Lampa.Select.close();
+          if (item.reset) {
+            activeSeason = null;
+            activeVoice = null;
+            self.loadVideos();
+          } else if (item.stype === 'season') {
+            activeSeason = seasonNumbers[subitem.index];
+            self.loadVideos();
+          } else if (item.stype === 'voice') {
+            activeVoice = voiceIndexes[subitem.index];
+            self.loadVideos();
+          }
         }
       };
 
@@ -461,6 +474,11 @@
       if (!sources[key]) return;
       activeSource = key;
       activeUrl = sources[key].url;
+      // Разные источники → разные сезоны/озвучки: сбрасываем выбор, чтобы не
+      // тащить season=N/voice=M чужого источника в новый (иначе UI покажет
+      // несуществующий сезон/голос и «не найдёт» серии).
+      activeSeason = null;
+      activeVoice = null;
       Lampa.Storage.set('maniya_online_source', key);
       this.updateFilter();
       this.loadVideos();
@@ -470,8 +488,8 @@
       var self = this;
       this.reset();
       var url = addMovieParams(activeUrl || trimSlash(MANIYA_API_BASE) + '/videos', object.movie, object);
-      if (activeSeason) url = Lampa.Utils.addUrlComponent(url, 'season=' + encodeURIComponent(activeSeason));
-      if (activeVoice) url = Lampa.Utils.addUrlComponent(url, 'voice=' + encodeURIComponent(activeVoice));
+      if (activeSeason !== null) url = Lampa.Utils.addUrlComponent(url, 'season=' + encodeURIComponent(activeSeason));
+      if (activeVoice !== null) url = Lampa.Utils.addUrlComponent(url, 'voice=' + encodeURIComponent(activeVoice));
       requestJson(network, url, function (json) {
         if (json.error === 'subscription_required') return self.empty(json.message);
         self.setFilters(json);
@@ -482,29 +500,57 @@
     };
 
     this.setFilters = function (json) {
+      // Канонический Lampa-Filter `filter` с под-фильтрами season/voice — ровно
+      // как рабочий E-Online (Online/plugin.js this.filter). season/voice это НЕ
+      // отдельные типы `filter.set('season'/'voice')`: Lampa рендерит только
+      // sort/filter/search, отдельный тип молча не отобразится → «сезоны/озвучки
+      // не видны». Значения храним отдельно (seasonNumbers/voiceIndexes), а в
+      // onSelect индекс под-элемента (subitem.index) мапится обратно в значение.
+      var select = [];
+      seasonNumbers = [];
+      voiceIndexes = [];
+
       if (json && json.seasons && json.seasons.length) {
-        var seasons = json.seasons.map(function (season) {
-          return {
-            title: season.title || Lampa.Lang.translate('maniya_season') + ' ' + season.number,
-            value: season.number,
-            selected: activeSeason !== null && String(season.number) === String(activeSeason)
-          };
+        seasonNumbers = json.seasons.map(function (season) { return season.number; });
+        var seasonIndex = 0;
+        if (activeSeason !== null) {
+          for (var i = 0; i < seasonNumbers.length; i++) {
+            if (String(seasonNumbers[i]) === String(activeSeason)) { seasonIndex = i; break; }
+          }
+        }
+        select.push({
+          title: Lampa.Lang.translate('maniya_season'),
+          subtitle: json.seasons[seasonIndex].title || Lampa.Lang.translate('maniya_season') + ' ' + json.seasons[seasonIndex].number,
+          items: json.seasons.map(function (season, index) {
+            return {
+              title: season.title || Lampa.Lang.translate('maniya_season') + ' ' + season.number,
+              selected: index === seasonIndex,
+              index: index
+            };
+          }),
+          stype: 'season'
         });
-        if (activeSeason === null) seasons[0].selected = true;
-        filter.set('season', seasons);
       }
 
       if (json && json.voices && json.voices.length) {
-        var voices = json.voices.map(function (voice) {
-          return {
-            title: voice.name,
-            value: voice.index,
-            selected: activeVoice !== null && String(voice.index) === String(activeVoice)
-          };
+        voiceIndexes = json.voices.map(function (voice) { return voice.index; });
+        var voiceIndex = 0;
+        if (activeVoice !== null) {
+          for (var j = 0; j < voiceIndexes.length; j++) {
+            if (String(voiceIndexes[j]) === String(activeVoice)) { voiceIndex = j; break; }
+          }
+        }
+        select.push({
+          title: Lampa.Lang.translate('maniya_voice'),
+          subtitle: json.voices[voiceIndex].name,
+          items: json.voices.map(function (voice, index) {
+            return { title: voice.name, selected: index === voiceIndex, index: index };
+          }),
+          stype: 'voice'
         });
-        if (activeVoice === null) voices[0].selected = true;
-        filter.set('voice', voices);
       }
+
+      if (select.length) filter.set('filter', select);
     };
 
     this.reset = function () {
