@@ -7,6 +7,7 @@ import {
   SEARCH_HTML,
   EMBED_SERIAL_HTML,
   EMBED_MOVIE_HTML,
+  EMBED_MOVIE_WITH_FAVS_HTML,
   EPISODES_HTML,
   STREAM_ENCODED,
   STREAM_PREMIUM_ENCODED,
@@ -147,4 +148,15 @@ test('resolveQualities: get_movie JSON → {quality: url} (без дублей)'
 test('resolveQualities: успешный ответ без потока → {}', () => {
   assert.deepEqual(normalizer.resolveQualities(null), {});
   assert.deepEqual(normalizer.resolveQualities({ success: true }), {});
+});
+
+test('normalizeEmbed: favs передаётся из parseEmbedHtml (Rezka P0)', () => {
+  const embed = normalizer.normalizeEmbed(EMBED_MOVIE_WITH_FAVS_HTML);
+  assert.equal(embed.favs, 'abc123favs_token', 'favs проходят через normalizeEmbed');
+  assert.equal(embed.translators.length, 3);
+});
+
+test('normalizeEmbed: favs пуст на старых страницах без ctrl_favs', () => {
+  const embed = normalizer.normalizeEmbed(EMBED_MOVIE_HTML);
+  assert.equal(embed.favs, '', 'favs пуст без ctrl_favs в HTML');
 });

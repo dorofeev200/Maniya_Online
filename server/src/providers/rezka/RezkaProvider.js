@@ -158,7 +158,7 @@ export class RezkaProvider extends Provider {
     if (!translator) return [];
 
     const referer = this.referer(record);
-    const payload = await this.fetchMovieStreams(record, translator, embedInfo.cdnStreams, referer);
+    const payload = await this.fetchMovieStreams(record, translator, embedInfo.cdnStreams, embedInfo.favs, referer);
     const streams = this.normalizer.resolveStreams(payload, {
       premium: this.premium,
       hls: this.hls,
@@ -244,7 +244,7 @@ export class RezkaProvider extends Provider {
     const referer = this.referer(record);
     const items = [];
     for (const translator of voices) {
-      const payload = await this.fetchMovieStreams(record, translator, embedInfo.cdnStreams, referer);
+      const payload = await this.fetchMovieStreams(record, translator, embedInfo.cdnStreams, embedInfo.favs, referer);
       const streams = this.normalizer.resolveStreams(payload, {
         premium: this.premium,
         hls: this.hls,
@@ -352,9 +352,10 @@ export class RezkaProvider extends Provider {
   /**
    * Поток фильма: канонический путь get_movie (отдаёт url + subtitle).
    * cdnStreams (base64 из embed) — фолбэк, когда AJAX недоступен (гео/блок).
+   * favs из embed (ctrl_favs) обязателен для Rezka get_movie.
    */
-  async fetchMovieStreams(record, translator, cdnStreams, referer) {
-    const payload = await this.client.getStreamMovie(record.id, translator.id, {}, referer);
+  async fetchMovieStreams(record, translator, cdnStreams, favs, referer) {
+    const payload = await this.client.getStreamMovie(record.id, translator.id, { favs: favs || '' }, referer);
     if (payload) return payload;
     if (cdnStreams) return { success: true, url: cdnStreams, subtitle: '' };
     return null;

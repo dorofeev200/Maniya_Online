@@ -5,6 +5,7 @@ import { RezkaProvider } from '../src/providers/rezka/RezkaProvider.js';
 import {
   SEARCH_HTML,
   EMBED_MOVIE_HTML,
+  EMBED_MOVIE_WITH_FAVS_HTML,
   EMBED_SERIAL_HTML,
   STREAM_ENCODED,
   SUBTITLE_HTML
@@ -209,4 +210,40 @@ test('RezkaProvider.videos: пустой/ошибочный путь → пус�
   const providerFailing = new RezkaProvider({ client: failing });
   const payload = await providerFailing.videos({ query: { title: 'Тестовый', token: 'abc' } });
   assert.deepEqual(payload, { items: [], seasons: [], voices: [] });
+});
+
+// --- favs передача (Rezka P0) ---
+
+/** Fake-клиент, который записывает полный вызов getStreamMovie включая опции. */
+class FavsRecordingClient extends FakeRezkaClient {
+  constructor(opts = {}) {
+    super(opts);
+    this.lastMovieStreamOpts = null;
+    this.lastMovieStreamReferer = null;
+  }
+
+  async getStreamMovie(id, translatorId, opts = {}, referer) {
+    this.lastMovieStreamOpts = opts;
+    this.lastMovieStreamReferer = referer;
+    return super.getStreamMovie(id, translatorId);
+  }
+}
+
+test('RezkaProvider.movieStreams: передаёт favs в getStreamMovie (Rezka P0)', async () => {
+  const client = new FavsRecordingClient({ pageHtml: EMBED_MOVIE_WITH_FAVS_HTML, movieStream: MOVIE_STREAM });
+  const provider = new RezkaProvider({ client });
+
+  await provider.streams({ id: '12345', href: 'https://rezka.ag/films/12345-x.html', title: 'Тестовый фильм' });
+
+  assert.equal(client.lastMovieStreamOpts.favs, 'abc123favs_token', 'favs из embed переданы в getStreamMovie');
+  assert.equal(client.lastMovieStreamReferer, 'https://rezka.ag/films/12345-x.html');
+});
+
+test('RezkaProvider.movieVideos: передаёт favs в getStreamMovie (Rezka P0)', async () => {
+  const client = new FavsRecordingClient({ pageHtml: EMBED_MOVIE_WITH_FAVS_HTML, movieStream: MOVIE_STREAM });
+  const provider = new RezkaProvider({ client });
+
+  await provider.videos({ query: { title: 'Тестовый', provider: 'rezka', token: 'abc' } });
+
+  assert.equal(client.lastMovieStreamOpts.favs, 'abc123favs_token', 'favs из embed переданы в getStreamMovie через movieVideos');
 });

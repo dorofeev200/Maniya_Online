@@ -198,30 +198,63 @@ export function extractItemId(href) {
 }
 
 /**
- * Embed HTML (`/{href}.html`) → `{ id, isSerial, translators, cdnStreams }`.
+ * Embed HTML (`/{href}.html`) → `{ id, isSerial, translators, cdnStreams, favs }`.
  * `translators` = `{ name: id }` из `data-translator_id`.
  * `cdnStreams` = base64-поток из `"id":"cdnplayer","streams":"..."` (фильм без
  * переводов), либо null.
+ * `favs` = значение `id="ctrl_favs" value="..."` (требуется для get_movie AJAX).
+ *
+ * Для фильмов секция переводчиков изолируется как в Lampac:
+ * `ctrl_token_id` → `translators-list` → только этот блок. Если `ctrl_token_id`
+ * на странице нет (старые фикстуры/нетипичная вёрстка) — ищем по всему HTML.
  */
 export function parseEmbedHtml(html) {
   const source = String(html || '');
   const isSerial = /data-season_id=|\.initCDNSeriesEvents\(/.test(source);
+
+  // Область поиска переводчиков: для фильмов — секция translators-list
+  // (как Lampac Embed: split ctrl_token_id → split translators-list);
+  // для сериалов — весь HTML (парсинг и так находит).
+  let contentSection = source;
+
+  if (!isSerial) {
+    const ctrlParts = source.split('ctrl_token_id');
+    if (ctrlParts.length > 1) {
+      const tlParts = ctrlParts[1].split('translators-list');
+      if (tlParts.length > 1) {
+        contentSection = tlParts[1];
+      }
+    }
+  }
+
+  // favs — из контентной секции (для фильмов — внутри translators-list,
+  // для сериалов — со всей страницы). Lampac Tpl извлекает его там же,
+  // где ищет переводчиков.
+  const favsMatch = contentSection.match(/id="ctrl_favs"\s+value="([^"]*)"/);
+  const favs = favsMatch ? favsMatch[1] : '';
 
   const translators = {};
   // Охватываем весь элемент переводчика (внутри могут быть вложенные теги),
   // затем выдираем из него видимый текст.
   const re = /data-translator_id="(\d+)"[^>]*>([\s\S]*?)<\/[a-z]+>/g;
   let m;
-  while ((m = re.exec(source))) {
+  while ((m = re.exec(contentSection))) {
     const id = m[1];
     const name = (m[2] || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     if (name && !Object.values(translators).includes(id)) translators[name] = id;
   }
 
+  // cdnStreams — ищется по всему HTML (не только в секции переводчиков).
   const cdn = source.match(/"id":"cdnplayer",\s*"streams":"([^"]+)"/);
   const cdnStreams = cdn ? cdn[1].replace(/\\/g, '').trim() : null;
 
-  return { id: extractItemId(source.match(/<link\s+rel="canonical" href="([^"]+)"/)?.[1] || ''), isSerial, translators, cdnStreams };
+  return {
+    id: extractItemId(source.match(/<link\s+rel="canonical" href="([^"]+)"/)?.[1] || ''),
+    isSerial,
+    translators,
+    cdnStreams,
+    favs
+  };
 }
 
 /** `get_episodes` → `{ seasons:[{number,title}], episodes:[{season,episode,title}] }`. */

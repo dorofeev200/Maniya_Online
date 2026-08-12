@@ -23,6 +23,8 @@ import {
   SEARCH_HTML,
   EMBED_SERIAL_HTML,
   EMBED_MOVIE_HTML,
+  EMBED_MOVIE_WITH_FAVS_HTML,
+  EMBED_MOVIE_NO_CTRL_HTML,
   EPISODES_HTML,
   SUBTITLE_HTML,
   anubisHtml
@@ -144,4 +146,57 @@ test('solveAnubisChallenge: невалидный челлендж → null', () 
   assert.equal(solveAnubisChallenge(''), null);
   assert.equal(solveAnubisChallenge(anubisHtml({ difficulty: 'not-a-number' })), null);
   assert.equal(solveAnubisChallenge(anubisHtml({ difficulty: 200 })), null);
+});
+
+// --- favs + translator scoping (Rezka P0) ---
+
+test('parseEmbedHtml: фильм с ctrl_token_id + ctrl_favs → favs извлекается, переводчики только из translators-list', () => {
+  const embed = parseEmbedHtml(EMBED_MOVIE_WITH_FAVS_HTML);
+  assert.equal(embed.isSerial, false);
+  assert.equal(embed.favs, 'abc123favs_token', 'favs из ctrl_favs');
+  // 3 переводчика из translators-list
+  assert.equal(Object.keys(embed.translators).length, 3);
+  assert.equal(embed.translators['Дубляж'], '7');
+  assert.equal(embed.translators['Оригинал'], '13');
+  assert.equal(embed.translators['LostFilm'], '22');
+  // cdnStreams из всего HTML
+  assert.ok(embed.cdnStreams, 'cdnStreams присутствует');
+  assert.ok(embed.cdnStreams.startsWith('#h'));
+});
+
+test('parseEmbedHtml: фильм без ctrl_token_id → favs пуст, переводчики из всего HTML (фолбэк)', () => {
+  const embed = parseEmbedHtml(EMBED_MOVIE_NO_CTRL_HTML);
+  assert.equal(embed.isSerial, false);
+  assert.equal(embed.favs, '', 'favs пуст без ctrl_favs');
+  assert.equal(Object.keys(embed.translators).length, 1);
+  assert.equal(embed.translators['Дубляж'], '5');
+});
+
+test('parseEmbedHtml: в секции translators-list нет посторонних data-translator_id (изоляция)', () => {
+  // EMBED_MOVIE_WITH_FAVS_HTML содержит ctrl_token_id и translators-list —
+  // переводчики вне этой секции не должны попасть в результат.
+  // Создаём HTML с переводчиком ДО ctrl_token_id (вне секции) и двумя ВНУТРИ.
+  const htmlWithOutside = `<!DOCTYPE html>
+<html>
+<body>
+  <div class="b-translator__item" data-translator_id="99"><span>Снаружи</span></div>
+  <div class="ctrl_token_id">
+    <div class="b-translator__wrapper">
+      <ul id="translators-list">
+        <li class="b-translator__item" data-translator_id="7"><span>Дубляж</span></li>
+        <li class="b-translator__item" data-translator_id="13"><span>Оригинал</span></li>
+      </ul>
+      <input type="hidden" id="ctrl_favs" value="isolated_favs">
+    </div>
+  </div>
+</body>
+</html>`;
+
+  const embed = parseEmbedHtml(htmlWithOutside);
+  assert.equal(embed.favs, 'isolated_favs');
+  // Только переводчики внутри translators-list, не "Снаружи" (99)
+  assert.equal(Object.keys(embed.translators).length, 2);
+  assert.equal(embed.translators['Дубляж'], '7');
+  assert.equal(embed.translators['Оригинал'], '13');
+  assert.equal(embed.translators['Снаружи'], undefined, 'переводчик вне translators-list не попадает');
 });

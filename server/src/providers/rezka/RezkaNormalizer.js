@@ -43,14 +43,15 @@ export class RezkaNormalizer {
     };
   }
 
-  /** Embed HTML → `{ id, isSerial, translators, cdnStreams }`. */
+  /** Embed HTML → `{ id, isSerial, translators, cdnStreams, favs }`. */
   normalizeEmbed(embedHtml) {
     const embed = parseEmbedHtml(embedHtml);
     return {
       id: embed.id || null,
       isSerial: Boolean(embed.isSerial),
       translators: this.normalizeTranslations(embed.translators),
-      cdnStreams: embed.cdnStreams || null
+      cdnStreams: embed.cdnStreams || null,
+      favs: embed.favs || ''
     };
   }
 

@@ -75,6 +75,43 @@ const EMBED_MOVIE_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+// Реальный embed фильма с ctrl_token_id, ctrl_favs и translators-list
+const EMBED_MOVIE_WITH_FAVS_HTML = `<!DOCTYPE html>
+<html>
+<body>
+  <div class="b-post__wrapper">
+    <link rel="canonical" href="https://rezka.ag/films/12345-testovyy-film-2024.html">
+    <div class="ctrl_token_id">
+      <div class="b-translator__wrapper">
+        <ul id="translators-list">
+          <li class="b-translator__item" data-translator_id="7"><span>Дубляж</span></li>
+          <li class="b-translator__item" data-translator_id="13"><span>Оригинал</span></li>
+          <li class="b-translator__item" data-translator_id="22"><span>LostFilm</span></li>
+        </ul>
+        <input type="hidden" id="ctrl_favs" value="abc123favs_token">
+      </div>
+    </div>
+  </div>
+  <script>
+    var player = {"id":"cdnplayer","streams":"${STREAM_PREMIUM_ENCODED.replace(/\\/g, '\\\\')}"};
+  </script>
+</body>
+</html>`;
+
+// Embed фильма без ctrl_token_id — старые/нетипичные страницы, фолбэк на весь HTML
+const EMBED_MOVIE_NO_CTRL_HTML = `<!DOCTYPE html>
+<html>
+<body>
+  <div class="b-post__wrapper">
+    <link rel="canonical" href="https://rezka.ag/films/99999-old-film-2020.html">
+    <ul id="translators-list">
+      <li class="b-translator__item" data-translator_id="5"><span>Дубляж</span></li>
+    </ul>
+    <!-- нет ctrl_token_id, нет ctrl_favs -->
+  </div>
+</body>
+</html>`;
+
 const EPISODES_HTML = {
   seasons: `<ul class="b-simple_season__item_wrap"><li class="b-simple_season__item" data-tab_id="1">1 сезон</li><li class="b-simple_season__item" data-tab_id="2">2 сезон</li></ul>`,
   episodes: `<ul><li class="b-simple_episode__item" data-season_id="1" data-episode_id="1">1 серия</li><li class="b-simple_episode__item" data-season_id="1" data-episode_id="2">2 серия</li><li class="b-simple_episode__item" data-season_id="2" data-episode_id="1">1 серия</li></ul>`
@@ -97,6 +134,8 @@ export {
   SEARCH_HTML,
   EMBED_SERIAL_HTML,
   EMBED_MOVIE_HTML,
+  EMBED_MOVIE_WITH_FAVS_HTML,
+  EMBED_MOVIE_NO_CTRL_HTML,
   EPISODES_HTML,
   SUBTITLE_HTML,
   anubisHtml
