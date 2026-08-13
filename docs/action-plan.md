@@ -1,5 +1,26 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ✅ 2026-08-13 (BALANCER-002): per-card source availability — задеплоено (a105320, push backup), production-сверка пройдена
+- **Задача**: Maniya отдавала статический `/sources` без per-card проверки (мёртвые источники светились,
+  живые пропадали). BALANCER-002 реплицирует динамику E-Online: параллельный `checksearch=true` по каждому
+  видимому skaz-балансеру → `show:true/false` per card → кэш.
+- **Сделано**: `server/src/availability.js` (+446) — `checkSearchPredicate` (точный предикат Lampac),
+  `createAvailabilityChecker`/`defaultChecker`, кэш fnv1a(`id:serial:source:count:uid`) TTL 5 мин (hide — 60 с);
+  **`confirmWithBackoff`** — подтверждённый «нет» перепроверяется повторной прямой пробой (3 независимых сигнала,
+  лечит рецидив насыщения кластера 11:24/11:32); `GET /api/lampa/sources/card` в `index.js` (+34);
+  registry: rhsprem → видимый, zagonka/kinobase/videocdn/lumex убраны, ashdi/kinoukr/eneyida + remux/kinotochka —
+  rch-reserved; UI `public/maniya-online.js` `applyCardAvailability`; Rezka P0-фикс resolveRecord (TMDB id без
+  href → поиск, закрыт «видео не найдено» с 08.08). 25 availability-тестов + hidden-twin + route + rezka 56.
+- **Гейт**: SHADOW/COMPARE OLD∩NEW зелёный во всех 8 прогонах (Run 8 с усилением) — ни один OLD-рабочий
+  источник не скрыт.
+- **Production-сверка (§13 отчёта)**: 16 видимых источников; per-card HOTD 14/16 (скрыты kinoflix, geosaitebi),
+  Forrest Gump 15/16 (videoseed), The OA 12/16 (alloha+geosaitebi+solntse+videoseed); cold 3.7–9.0с, cache hit 0мс;
+  `/videos` filmix/rezka/skaz-alloha/skaz-rhsprem/skaz-kinopub — items=100 play,call; remux/kinotochka/ashdi/kinoukr/
+  eneyida отсутствуют в `/sources`. WebSocket/RCH — НЕ реализованы (решение юзера).
+- **Замечание**: английский title в ручном HTTP-запросе без original_title → 403/«нет» → скрытие — артефакт
+  проверки, не баг (реальный клиент шлёт русский `movie.title`, эндпоинт совпадает с shadow).
+- Полный отчёт: `docs/balancer-002-report.md`.
+
 ## ✅ 2026-08-13 (сессия FILMIX-004): НАЗВАНИЯ СЕРИЙ — real episode.title + русский TMDB во всех сезонах
 - **Задача**: реальное устройство показывало `07 7серия Дом Дракона` (недопустимо). Ожидание — `07 Название реальной серии`.
 - **ROOT CAUSE (доказан живьём, VPS post 160598)**: `provider=filmix&serial=1` обслуживал skaz-близнец

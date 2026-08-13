@@ -1,8 +1,10 @@
 # BALANCER-002 — Per-card source availability: отчёт и вердикт
 
-Дата: 2026-08-13. Статус: **реализовано, гейт зелёный (Run 8 с усилением), commit/deploy одобрены
-юзером** (решение от 2026-08-13: rhsprem — видимый REST, ashdi/kinoukr/eneyida + remux/kinotochka —
-rch-reserved, UI availability включить). Финальная production-сверка — §13 после деплоя.
+Дата: 2026-08-13. Статус: **ЗАВЕРШЕНО.** Commit `a105320` → push `backup` → deploy
+`scripts/deploy.sh` → production-сверка **пройдена** (16 видимых источников, per-card HOTD 14/FG 15/
+OA 12, кэш 0 мс, Filmix/Alloha/Rezka/SKAZ playable, rch-reserved скрыты) — §13. Решение юзера
+2026-08-13: rhsprem — видимый REST, ashdi/kinoukr/eneyida + remux/kinotochka — rch-reserved, UI
+availability включён.
 
 ## Резюме
 
@@ -189,8 +191,7 @@ NEW в разы быстрее OLD-суммы: параллельный checksea
 `public/maniya-online.js` (Step 6): в конец `loadSources` добавлен параллельный `requestJson` на
 `/sources/card` → `applyCardAvailability` проставляет `sources[key].show` и пересобирает `filterSources`
 (клиент уже исключает `show:false`). Активный источник корректно пересчитывается при скрытии.
-**Стейдж в файле, НЕ закоммичено** — активация после решения юзера (гейт стабилен, но commit не
-делаем без отчёта).
+**Задеплоено в составе `a105320`** (§13).
 
 ## 10. Остаточный риск
 
@@ -219,5 +220,72 @@ rhsprem/kinopub скрывались на 5 минут при OLD items>0. **Р�
 
 ## 13. Production-сверка после деплоя
 
-> Заполняется после деплоя (commit hash, что задеплоено, список источников до/после, 2–3 фильма
-> с per-film источниками, латентность, кэш, Filmix/Alloha/Rezka/SKAZ, скрытые Remux/Kinotochka).
+**Деплой выполнен 2026-08-13.** Commit `a105320` («BALANCER-002: per-card source availability +
+verification wave»), push → remote `backup` (feature/alloha-provider → backup/feature/alloha-provider).
+Деплой — `scripts/deploy.sh` (tar-over-SSH + systemd restart `maniya-online`), НЕ git. 17 файлов,
++2024/−47.
+
+### Что задеплоено
+- `server/src/availability.js` (+446) — per-card проверка skaz-балансеров, `confirmWithBackoff`
+  (3 независимых сигнала «нет») + HIDE_TTL 60 с (self-heal), кэш fnv1a TTL 5 мин.
+- `server/src/index.js` (+34) — `GET /api/lampa/sources/card` (requireSubscription → `userUid =
+  sha256(token).slice(0,16)`; `!checkEnabled` → статический список; иначе `defaultChecker.card`).
+- `server/src/config.js`/`registry.js`/`meta.js` — rhsprem добавлен в видимые; zagonka/kinobase/
+  videocdn/lumex убраны; ashdi/kinoukr/eneyida + remux/kinotochka — rch-reserved (в видимый список
+  НЕ входят).
+- `server/src/providers/rezka/RezkaProvider.js` (+17) — P0-фикс resolveRecord (TMDB id без href →
+  поиск по названию; «видео не найдено» с 08.08 закрыт).
+- `public/maniya-online.js` (+54) — UI availability: параллельный `requestJson` на `/sources/card` →
+  `applyCardAvailability` (`sources[key].show` → `filterSources`).
+- 5 тест-файлов (+722): availability 25, hidden-twin, route e2e, rezka-provider 56.
+- `scripts/balancer-002-shadow.mjs` — SHADOW/COMPARE раннер (на VPS).
+
+### Список источников: до → после
+| | До (BALANCER-001) | После (BALANCER-002) |
+|---|---|---|
+| Видимых в `/sources` | 16 | **16** (изменение состава, не количества) |
+| + появились | — | `skaz-rhsprem` (Maniya · HDRezka 4K) |
+| − исчезли | zagonka, videocdn, lumex, kinobase (не в live-универсуме) | — |
+| rch-reserved (скрыты) | ashdi, kinoukr, eneyida, vkmovie | + remux, kinotochka |
+
+Видимые 16: native — filmix, kodik, rezka, rutubemovie, cdnvideohub, collaps, hdvb; skaz — alloha,
+videoseed, kinopub, kinoflix, veoveo, pidtor, solntse, geosaitebi, rhsprem.
+
+### Per-card availability (реальный client-запрос, русский title + original_title + imdb_id)
+| Карточка | Доступно источников |
+|---|---|
+| **HOTD** (Дом Дракона, serial 94997) | 14/16 (скрыты kinoflix, geosaitebi) |
+| **Forrest Gump** (movie 13) | 15/16 (скрыт videoseed) |
+| **The OA** (serial 71712) | 12/16 (скрыты alloha, geosaitebi, solntse, videoseed) |
+
+Все скрытые — совпадение с shadow (OLD items=0) и со static-составом; ни один OLD-рабочий не скрыт
+(гейт OLD∩NEW зелёный). Проверка по русским названиям (реальный Lampa шлёт `movie.title` русский):
+английский title без original_title → 403/«нет» → скрытие — **артефакт ручной HTTP-проверки, не баг**
+(у настоящего клиента всегда русский title, подтверждено идентичным ответом эндпоинта shadow-запросу).
+
+### Латентность и кэш
+- Cold: 3.7–9.0 с (параллельные проверки балансеров, дедлайн карточки ~10 с).
+- Cache hit: **0 мс**, `cached:true` (HOTD 2-й вызов → `elapsed_ms:0`, show-набор тот же).
+- Кэш-ключ fnv1a(`id:serial:source:count:uid`) — скрытие кэшируется на 60 с (HIDE_TTL), остальное 5 мин.
+
+### Провайдеры live (HOTD, `/videos` через production API)
+| source | items | methods |
+|---|---|---|
+| filmix | 100 | play, call |
+| rezka | 100 | play, call |
+| skaz-alloha | 100 | play, call |
+| skaz-rhsprem | 100 | play, call |
+| skaz-kinopub | 100 | play, call |
+
+Все — `items=100` с полями `season`/`episode`/`voice_name` (клиент строит сезон/голос из item'ов —
+подтверждено pre-existing, не регрессия; `SkazProvider.js` не менялся). Rezka/Alloha/SKAZ/Filmix —
+все воспроизводятся.
+
+### rch-reserved скрыты
+remux, kinotochka, ashdi, kinoukr, eneyida — **отсутствуют** в `/sources` (проверено: «найдено: нет»).
+
+### Итог
+Все пункты решения юзера (1–8) выполнены. Реальный UI подтверждён цепочкой API: registry → per-card
+(идентичен shadow-запросу) → cache → /videos для 5 ключевых провайдеров. Клик-тест в самом приложении
+Lampa с этой машины невозможен (нет Android/iOS-эмуляции); эквивалентная проверка — точная копия
+клиентского query + ответ эндпоинта, совпавший с shadow.
