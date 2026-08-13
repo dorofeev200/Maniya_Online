@@ -67,10 +67,11 @@ function setup({ native, twin }) {
   return { calls, restore: () => { filmix.videos = origNative; skaz.videos = origTwin; } };
 }
 
+// Реальное устройство (nginx-лог): id=94997 (TMDB id HOTD), source=tmdb, БЕЗ tmdb_id.
 const serialQuery = {
-  provider: 'filmix', id: '1396', title: 'Дом Дракона', original_title: 'House of the Dragon',
+  provider: 'filmix', id: '94997', title: 'Дом Дракона', original_title: 'House of the Dragon',
   serial: '1', year: '2022', original_language: 'en', source: 'tmdb', clarification: '0',
-  similar: 'false', tmdb_id: '1396'
+  similar: 'false', imdb_id: 'tt11198330'
 };
 
 test('FILMIX-004: сериал serial=1 → native первым, реальные названия доходят без «N серия»', async () => {

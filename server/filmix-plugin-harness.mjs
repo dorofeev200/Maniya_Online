@@ -213,7 +213,7 @@ function runFlow(label, movieObj) {
 }
 
 const serialInst = runFlow('СЕРИАЛ (Дом Дракона, 3 сезона)', {
-  id: 1396, name: 'Дом Дракона', original_name: 'House of the Dragon', first_air_date: '2022-08-21'
+  id: 94997, name: 'Дом Дракона', original_name: 'House of the Dragon', first_air_date: '2022-08-21'
 });
 
 // фильм — контроль, что movie flow не сломан

@@ -280,7 +280,9 @@ async function loadComponentSandbox(payload, opts = {}) {
 
   activity = { loader: () => {}, toggle: () => {} };
   const inst = { activity };
-  lampa._component.call(inst, { movie: { id: 1396, name: 'Дом Дракона', original_name: 'House of the Dragon', first_air_date: '2022-08-21' } });
+  // Реальное устройство шлёт source=tmdb, id=94997 (TMDB id HOTD), БЕЗ tmdb_id
+  // (у TMDB-карточки movie.id и есть TMDB id). Плагин берёт movie.id → 94997.
+  lampa._component.call(inst, { movie: { id: 94997, source: 'tmdb', name: 'Дом Дракона', original_name: 'House of the Dragon', first_air_date: '2022-08-21' } });
   inst.start();
 
   return { filterCalls, drawn, network, filterInstances };
