@@ -43,7 +43,13 @@ describe('/api/lampa/sources/card', () => {
     const body = await r.json();
     assert.ok(Array.isArray(body.sources), 'sources — массив');
     assert.ok(body.sources.length >= 1, 'есть видимые источники (natives)');
-    assert.ok(body.sources.every((s) => s.id && s.show === true), 'без skaz — всё show:true');
+    assert.ok(body.sources.every((s) => s.id && typeof s.show === 'boolean'), 'у каждого источника id + boolean show');
+    // RULE-3: cdnvideohub в реальном Lampa-запросе без kinopoisk_id → authoritative «нет»
+    // (не вечный inconclusive-show). Прочие native без сети (таймаут = вердикта нет) — show:true.
+    const cdn = body.sources.find((s) => s.id === 'cdnvideohub');
+    assert.ok(cdn, 'cdnvideohub присутствует в карточке');
+    assert.equal(cdn.show, false, 'cdnvideohub без kp → «нет» (RULE-3)');
+    assert.ok(body.sources.filter((s) => s.id !== 'cdnvideohub').every((s) => s.show === true), 'прочие native — show:true');
     assert.equal(typeof body.meta.count, 'number');
     assert.equal(typeof body.meta.elapsed_ms, 'number');
     assert.equal(typeof body.meta.cached, 'boolean');

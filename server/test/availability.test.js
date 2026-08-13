@@ -94,6 +94,51 @@ test('checkSearchPredicate: data-json / type / rch → work=true; пусто/acc
   assert.equal(checkSearchPredicate('<html>"2160p" HDR</html>').quality, '2160p');
 });
 
+// ===== RULE-1 (NATIVE-AVAILABILITY-002): similar-link-карточки против запрошенного фильма =====
+
+test('checkSearchPredicate (RULE-1): link-карточка на ДРУГОЙ фильм → absent (work=false)', () => {
+  const odyssey = { title: 'Одиссея', original_title: 'The Odyssey', year: '2026', imdb_id: 'tt33764258' };
+  // kodik: «Бесконечная Одиссея капитана Харлока» 2002 — реальное тело из nginx-лога.
+  const kodik = '<html>data-json={"similar":true,"method":"link","title":"Бесконечная Одиссея капитана Харлока","year":2002,"url":"http://x/lite/kodik?kinopoisk_id=46491"}</html>';
+  const k = checkSearchPredicate(kodik, odyssey);
+  assert.equal(k.work, false, 'substring data-json= БОЛЬШЕ не даёт work');
+  assert.equal(k.verdict, 'absent', 'чужой год/тайтл → другой фильм');
+  // kinopub: namesake-сериал 1997 (постid=1362) вместо фильма 2026.
+  const kinopub = '{"similar":true,"method":"link","title":"Одиссей / The Odyssey","year":1997,"url":"http://x/lite/kinopub?postid=1362"}';
+  const kp = checkSearchPredicate(kinopub, odyssey);
+  assert.equal(kp.work, false, 'namesake-сериал 1997 ≠ фильм 2026');
+  assert.equal(kp.verdict, 'absent');
+});
+
+test('checkSearchPredicate (RULE-1): link совпал по KP/год/тайтл → content (work=true)', () => {
+  const odyssey = { title: 'Одиссея', original_title: 'The Odyssey', year: '2026', imdb_id: 'tt33764258' };
+  // hdvb: kp-туннель к ТОМУ ЖЕ фильму (год совпадает; kp эха сравнить не с чем — q без kp).
+  const hdvb = '<html>data-json={"method":"link","year":2026,"url":"http://x/lite/hdvb?kinopoisk_id=6385370&title=The+Odyssey"}</html>';
+  assert.equal(checkSearchPredicate(hdvb, odyssey).verdict, 'content');
+  // geosaitebi: другой алфавит (грузинский), НЕ «чужой title» → год совпал → контент.
+  const geo = '{"method":"link","title":"ოდისეა","year":2026,"url":"http://x/lite/geosaitebi?t=1"}';
+  assert.equal(checkSearchPredicate(geo, odyssey).verdict, 'content', 'несопоставимый алфавит не «чужой title»');
+  // Точное совпадение названия.
+  const same = '{"method":"link","title":"Одиссея","year":2026,"url":"http://x/lite/kodik?d=1"}';
+  assert.equal(checkSearchPredicate(same, odyssey).verdict, 'content');
+  // Совпавший imdb в url.
+  const imdbMatch = '{"method":"link","url":"http://x/lite/kodik?imdb_id=tt33764258"}';
+  assert.equal(checkSearchPredicate(imdbMatch, odyssey).verdict, 'content');
+});
+
+test('checkSearchPredicate (RULE-1): link без данных для сравнения → inconclusive (work=true)', () => {
+  const odyssey = { title: 'Одиссея', original_title: 'The Odyssey', year: '2026', imdb_id: 'tt33764258' };
+  const bare = '{"method":"link","url":"http://x/lite/kodik?d=9"}';
+  const r = checkSearchPredicate(bare, odyssey);
+  assert.equal(r.verdict, 'inconclusive', 'ничего для сравнения → вердикта нет');
+  assert.equal(r.work, true, 'inconclusive → показываем (не прячем без доказательства)');
+  // method:call/play — контент (даже без data-json-обёртки).
+  assert.equal(checkSearchPredicate('{"method":"call","url":"http://x"}', odyssey).verdict, 'content');
+  // Сущности в data-json атрибуте.
+  const entities = '<html>data-json="{&quot;method&quot;:&quot;call&quot;,&quot;url&quot;:&quot;http://x&quot;}"</html>';
+  assert.equal(checkSearchPredicate(entities, odyssey).verdict, 'content');
+});
+
 test('fnv1aKey: стабильный и разный для разных ключей', () => {
   const a = fnv1aKey('13:0:tmdb:4:uid-1');
   const b = fnv1aKey('94997:0:tmdb:4:uid-1');
@@ -165,7 +210,7 @@ test('card: таймаут балансера изолирован — НЕ пр
         signal?.addEventListener('abort', () => reject(new Error('aborted')));
       });
     }
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { timeoutMs: 120 });
 
   const result = await checker.card(QUERY, 'uid-1');
@@ -180,7 +225,7 @@ test('card: 404/500 на всех хостах — кластер ответил
     const b = balancerOf(url);
     if (b === 'filmix') return Promise.resolve(response(404, 'not found'));
     if (b === 'kinopub') return Promise.resolve(response(500, 'disable'));
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   });
   const result = await checker.card(QUERY, 'uid-1');
   assert.equal(byId(result, 'skaz-filmix').show, true, 'trusted → видим даже при 404 кластера');
@@ -201,9 +246,9 @@ test('card: checksearch «нет» + прямой lite-page «да» → show:tr
     const search = String(url).includes('checksearch=true');
     if (b === 'kinopub') {
       if (search) return Promise.resolve(response(503, 'disable')); // search флакнул
-      return Promise.resolve(response(200, '<html>data-json={"v":1}</html>')); // карточка есть
+      return Promise.resolve(response(200, '<html>data-json={"method":"play","url":"http://x/m.m3u8"}</html>')); // карточка есть
     }
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   });
   const result = await checker.card(QUERY, 'uid-1');
   assert.equal(byId(result, 'skaz-kinopub').show, true, 'прямой lite-page подтвердил источник → показываем');
@@ -217,7 +262,7 @@ test('card: checksearch «нет» + прямой lite-page «да» → show:tr
 test('card: checksearch «нет» + прямой lite-page «нет» → show:false (двойная проверка скрыла)', async () => {
   const checker = makeChecker((url) => {
     if (balancerOf(url) === 'kinopub') return Promise.resolve(response(503, 'disable'));
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   });
   const result = await checker.card(QUERY, 'uid-1');
   const row = byId(result, 'skaz-kinopub');
@@ -226,7 +271,7 @@ test('card: checksearch «нет» + прямой lite-page «нет» → show:
   assert.equal(row.confirmed, true, 'прошёл подтверждение');
 });
 
-test('card: подтверждение инконклюзивно (таймаут прямого lite-page) → show:true, карточка не кэшируется', async () => {
+test('card: подтверждение инконклюзивно (таймаут прямого lite-page) → первичное «нет» сохраняется (RULE-4), карточка не кэшируется', async () => {
   let fetches = 0;
   const checker = makeChecker((url, options = {}) => {
     fetches += 1;
@@ -240,11 +285,14 @@ test('card: подтверждение инконклюзивно (таймау�
         signal?.addEventListener('abort', () => reject(new Error('aborted')));
       });
     }
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { timeoutMs: 120, ttlMs: 60_000 });
   const first = await checker.card(QUERY, 'uid-1');
-  assert.equal(byId(first, 'skaz-kinopub').show, true, 'нет вердикта → оптимистично показываем');
-  assert.equal(byId(first, 'skaz-kinopub').inconclusive, true, 'подтверждение не дало ответа');
+  // Первичный checksearch = ЧИСТЫЙ «нет» (503); подтверждение вердикта НЕ дало (таймаут).
+  // RULE-4: инконклюзивное подтверждение не переворачивает definitive «нет» в показ.
+  assert.equal(byId(first, 'skaz-kinopub').show, false, 'definitive «нет» от checksearch не переворачивается инконклюзивным подтверждением');
+  assert.equal(byId(first, 'skaz-kinopub').inconclusive, true, 'подтверждение не дало ответа → ряд inconclusive');
+  assert.equal(byId(first, 'skaz-kinopub').confirmInconclusive, true, 'диагностический флаг инконклюзивного подтверждения');
   const second = await checker.card(QUERY, 'uid-1');
   assert.equal(second.cached, false, 'стрессовая карточка не фиксируется на 5 минут');
 });
@@ -256,7 +304,7 @@ test('card: все accsdb-отказы — вердикта нет → show:true
     const b = balancerOf(url);
     // Кластер отвечает отказом учётки, но «да» — через подтверждение (эмуляция флака).
     if (b === 'kinopub' && String(url).includes('checksearch=true')) return Promise.resolve(response(200, '{"accsdb":true,"msg":"Войдите в аккаунт"}'));
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { ttlMs: 60_000 });
   const first = await checker.card(QUERY, 'uid-1');
   assert.equal(byId(first, 'skaz-kinopub').show, true, 'accsdb = вердикта нет → показываем оптимистично');
@@ -298,9 +346,9 @@ test('card: retry подтверждения — первый прямой «н�
       directFetches += 1;
       // Первый прямой прогон (оба хоста) — «нет» (окно насыщения); retry — «да».
       if (directFetches <= 2) return Promise.resolve(response(503, 'disable'));
-      return Promise.resolve(response(200, '<html>data-json={"v":1}</html>'));
+      return Promise.resolve(response(200, '<html>data-json={"method":"play","url":"http://x/m.m3u8"}</html>'));
     }
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { backoffMs: 1 });
   const result = await checker.card(QUERY, 'uid-1');
   const row = byId(result, 'skaz-kinopub');
@@ -342,7 +390,7 @@ test('card: inconclusive-ряд (таймаут) НЕ кэшируется — 2
         signal?.addEventListener('abort', () => reject(new Error('aborted')));
       });
     }
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { timeoutMs: 120, ttlMs: 60_000 });
 
   const first = await checker.card(QUERY, 'uid-1');
@@ -361,7 +409,7 @@ test('card: параллельно — все НЕ-trusted балансеры з
     maxActive = Math.max(maxActive, active);
     await new Promise((r) => setTimeout(r, 30));
     active -= 1;
-    return response(200, '<html>data-json={}</html>');
+    return response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>');
   });
   await checker.card(QUERY, 'uid-1');
   assert.equal(maxActive, 3, `все 3 не-trusted балансера в полёте одновременно (maxActive=${maxActive}; filmix trusted без пробы)`);
@@ -371,7 +419,7 @@ test('card: кэш-hit — второй вызов без повторного f
   let fetches = 0;
   const checker = makeChecker(() => {
     fetches += 1;
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { ttlMs: 60_000 });
 
   const first = await checker.card(QUERY, 'uid-1');
@@ -389,7 +437,7 @@ test('card: кэш-miss — другой id → повторный fetch', async
   let fetches = 0;
   const checker = makeChecker(() => {
     fetches += 1;
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { ttlMs: 60_000 });
 
   await checker.card(QUERY, 'uid-1');
@@ -401,7 +449,7 @@ test('card: кэш разделён по userUid', async () => {
   let fetches = 0;
   const checker = makeChecker(() => {
     fetches += 1;
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   }, { ttlMs: 60_000 });
 
   await checker.card(QUERY, 'uid-1');
@@ -416,7 +464,7 @@ test('checkBalancer: хост-фолбэк 503 → 200 content на следую
   const checker = makeChecker((url) => {
     seen.push(String(url));
     if (String(url).includes('h1')) return Promise.resolve(response(503, 'disable'));
-    return Promise.resolve(response(200, '<html>data-json={}</html>'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
   });
   const row = await checker.checkBalancer('alloha', QUERY, Date.now() + 10_000);
   assert.equal(row.show, true);
@@ -433,7 +481,7 @@ test('checkBalancer: online8 — резерв, идёт ПОСЛЕ primary (да
     uid: 'abc123',
     fetchImpl: fakeFetch((url) => {
       seen.push(String(url));
-      return Promise.resolve(response(200, '<html>data-json={}</html>'));
+      return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
     })
   });
   const row = await checker.checkBalancer('alloha', QUERY, Date.now() + 10_000);
@@ -488,7 +536,7 @@ test('checkBalancer: accsdb на первом хосте, контент на в
       seen.push(String(url));
       const isH2 = String(url).startsWith('http://h2');
       return Promise.resolve(isH2
-        ? response(200, '<html>data-json={"v":1}</html>')
+        ? response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>')
         : response(200, '{"accsdb":true,"msg":"Нет доступа"}'));
     })
   });

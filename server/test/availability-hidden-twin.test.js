@@ -178,11 +178,11 @@ function cdnStub(playlistImpl) {
   return { id: 'cdnvideohub', client: { playlist: playlistImpl } };
 }
 
-test('nativeProbe cdnvideohub: без kp → inconclusive (show)', async () => {
+test('nativeProbe cdnvideohub: без kp → authoritative «нет» (RULE-3)', async () => {
   const probe = cdnStub(async () => { throw new Error('не должен дёргаться без kp'); });
   const v = await nativeProbe(probe, { title: 'Форрест Гамп' }, {}, FUTURE_DEADLINE);
-  assert.equal(v.show, true);
-  assert.equal(v.inconclusive, true);
+  assert.equal(v.show, false);
+  assert.equal(v.authoritative, true);
   assert.equal(v.reason, 'no-key');
 });
 

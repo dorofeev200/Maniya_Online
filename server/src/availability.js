@@ -53,6 +53,26 @@ import { registeredProviders, twinFor } from './providers/registry.js';
  * дополнительно перепроверяется с retry-with-backoff (confirmWithBackoff) — окно
  * насыщения успевает отойти; выживший «нет» = три независимых сигнала. Подтверждённые
  * ряды помечаются `confirmed` (и `retried` при повторе) и кэшируются на HIDE_TTL_MS.
+ *
+ * NATIVE-AVAILABILITY-002 (docs/native-availability-001-report.md — 4 доказанных false-positive):
+ *   RULE-1  Предикат извлекает data-json-карточки и различает контент по method/type:
+ *           `method:call/play` или type movie/episode/season → доступен; `method:link` —
+ *           сравнение title/KP/год с запрошенным фильмом: совпало → доступен, ЧУЖОЙ
+ *           title/KP/год → authoritative «нет»; данных недостаточно → inconclusive (показ).
+ *           Substring `data-json=` УБРАН: similar-link-карточка на ДРУГОЙ тайтл
+ *           (kodik → «Бесконечная Одиссея капитана Харлока», kinopub → сериал 1997) — не контент.
+ *   RULE-2  accsdb с msg «Ожидаем фильм в хорошем качестве...» = «контента пока нет» →
+ *           authoritative «нет» (как non-content хост); прочие accsdb — по-прежнему
+ *           «вердикта нет» (inconclusive, показ).
+ *   RULE-3  native без карточного ключа (cdnvideohub: key ТОЛЬКО kinopoisk_id, которого в
+ *           реальном Lampa-запросе НЕТ, а кластерного балансера нет) → authoritative «нет»,
+ *           а НЕ вечный inconclusive-show.
+ *   RULE-4  Дедлайн/таймаут НЕ переворачивают полученное «нет» в показ: fallback show:true —
+ *           только когда definitive ответа вообще не было. «Нет» от ЧИСТОГО ответа всех
+ *           хостов сохраняется даже при исчерпании дедлайна (инконклюзивное подтверждение
+ *           не переворачивает первичное «нет»). СМЕШАННЫЙ вердикт (часть хостов «нет» +
+ *           часть не ответила) = действительно inconclusive → показ (защита рабочих
+ *           источников: rutubemovie 503+abort, но 11 items).
  */
 
 const TTL_MS = 5 * 60 * 1000;
@@ -78,20 +98,192 @@ function reorderHosts(hosts) {
   return [...primary, ...reserve];
 }
 
+/** Сопоставимы ли названия по алфавиту (кириллица↔кириллица / латиница↔латиница). */
+function comparableScripts(a, b) {
+  const aCyr = /[Ѐ-ӿ]/.test(String(a));
+  const bCyr = /[Ѐ-ӿ]/.test(String(b));
+  const aLat = /[a-z]/i.test(String(a));
+  const bLat = /[a-z]/i.test(String(b));
+  return (aCyr && bCyr) || (aLat && bLat);
+}
+
+/** Нижний регистр, без пунктуации/пробелов (для сравнения названий). */
+function normalizeTitle(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKC')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
 /**
- * Точный предикат checkSearch из Lampac (OnlineApi.cs:975):
- * `work = rch || res.Contains("data-json=") || res.Contains("\"type\":\"movie\"") ||
- *        res.Contains("\"type\":\"episode\"") || res.Contains("\"type\":\"season\"")`.
- * Качество — информативно (для shadow-сравнения), как в Lampac (<!--q:-->/2160p/HDR).
+ * Извлечь все data-json-карточки из HTML-ответа кластера. Реальные тела Lampac
+ * используют `data-json="{...}"` с кавычками (иногда `data-json='{...}'` или
+ * экранированные сущности), поэтому значение ищется сбалансированными скобками
+ * с учётом строк и экранирования — кавычки атрибута не ломают парсинг.
  */
-export function checkSearchPredicate(text) {
+function extractDataJsonCards(html) {
+  const cards = [];
+  const raw = String(html || '');
+  let pos = 0;
+  while (true) {
+    const idx = raw.indexOf('data-json', pos);
+    if (idx === -1) break;
+    const brace = raw.indexOf('{', idx + 'data-json'.length);
+    if (brace === -1 || brace > idx + 200) { pos = idx + 9; continue; }
+    let depth = 0;
+    let inStr = false;
+    let strQ = '';
+    let closed = -1;
+    for (let j = brace; j < raw.length; j += 1) {
+      const c = raw[j];
+      if (inStr) {
+        if (c === '\\') { j += 1; continue; }
+        if (c === strQ) inStr = false;
+        continue;
+      }
+      if (c === '"' || c === "'") { inStr = true; strQ = c; continue; }
+      if (c === '{') depth += 1;
+      else if (c === '}') { depth -= 1; if (depth === 0) { closed = j; break; } }
+    }
+    if (closed === -1) { pos = idx + 9; continue; }
+    const value = raw.slice(brace, closed + 1);
+    pos = closed + 1;
+    let parsed = null;
+    try { parsed = JSON.parse(value); }
+    catch {
+      try {
+        // HTML-сущности (data-json="{&quot;method&quot;:...}") — декодируем и пробуем снова.
+        parsed = JSON.parse(value
+          .replace(/&quot;/g, '"').replace(/&#34;/g, '"')
+          .replace(/&apos;/g, "'").replace(/&#39;/g, "'")
+          .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+      } catch { parsed = null; }
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) cards.push(parsed);
+    else cards.push({ __unparsed: true });
+  }
+  return cards;
+}
+
+/** Идентификаторы из url link-карточки (реальные kp/imdb, не эхо параметров запроса). */
+function linkTargetIds(url) {
+  let kp = 0;
+  let imdb = '';
+  try {
+    const parsed = new URL(String(url || ''));
+    kp = Number(parsed.searchParams.get('kinopoisk_id') || parsed.searchParams.get('kp') || 0) || 0;
+    imdb = String(parsed.searchParams.get('imdb_id') || '').trim().toLowerCase();
+  } catch { /* url не парсится — идентификаторов нет */ }
+  return { kp, imdb };
+}
+
+/**
+ * RULE-1: классификация link-карточки против запрошенного фильма.
+ *  - совпавший KP/IMDb/title → контент;
+ *  - чужой KP/IMDb/title/год → другой фильм (definitive absent);
+ *  - данных недостаточно → inconclusive.
+ */
+function classifyLinkCard(card, query) {
+  const cardTitle = normalizeTitle(card.title);
+  const cardYear = Number(card.year) || 0;
+  const { kp, imdb } = linkTargetIds(card.url);
+
+  const qKp = Number(query.kinopoisk_id || query.kp || 0) || 0;
+  const qImdb = String(query.imdb_id || query.imdb || '').trim().toLowerCase();
+  const qYear = Number(query.year) || 0;
+  const qTitle = normalizeTitle(query.title);
+  const qOriginalTitle = normalizeTitle(query.original_title);
+
+  // Идентификаторы: чужой → чужой фильм; совпавший → контент.
+  if (kp && qKp && kp !== qKp) return 'absent';
+  if (imdb && qImdb && imdb !== qImdb) return 'absent';
+  if (kp && qKp && kp === qKp) return 'content';
+  if (imdb && qImdb && imdb === qImdb) return 'content';
+
+  // Title (только сопоставимые алфавиты): точное совпадение → контент; чужой → чужой фильм.
+  const titleText = qTitle || qOriginalTitle;
+  const comparable = cardTitle && titleText && comparableScripts(cardTitle, titleText);
+  const titleMatch = comparable && (cardTitle === qTitle || cardTitle === qOriginalTitle);
+  if (titleMatch) return 'content';
+  if (comparable && !titleMatch) return 'absent';
+
+  // Год: чужой → чужой фильм; совпал → контент (слабое совпадение, но по ТЗ RULE-1).
+  const yearKnown = cardYear > 0 && qYear > 0;
+  if (yearKnown && cardYear !== qYear) return 'absent';
+  if (yearKnown && cardYear === qYear) return 'content';
+
+  return 'inconclusive';
+}
+
+/**
+ * RULE-1: предикат checkSearch (основа Lampac OnlineApi.cs:975), но вместо substring
+ * `data-json=` — извлечение карточек и разбор method/type. `method:call/play` или
+ * type movie/episode/season → доступен; `method:link` → сравнение с запрошенным фильмом
+ * (classifyLinkCard); карточек нет → «нет» на этой ноде; карточка есть, но не
+ * классифицирована → inconclusive (показываем). `rch` — как в Lampac («доступен»).
+ * Вердикт: 'content' | 'absent' | 'inconclusive'.
+ */
+export function checkSearchPredicate(text, query = {}) {
   const raw = String(text || '');
   const rch = /"rch"\s*:\s*true/i.test(raw);
-  const work = rch
-    || raw.includes('data-json=')
-    || raw.includes('"type":"movie"')
+
+  const cards = extractDataJsonCards(raw);
+  let sawContent = false;
+  let sawAbsent = false;
+  let sawInconclusive = false;
+  for (const card of cards) {
+    if (card.__unparsed) { sawInconclusive = true; continue; }
+    const method = String(card.method || '').toLowerCase();
+    const type = String(card.type || '').toLowerCase();
+    if (method === 'play' || method === 'call' || ['movie', 'episode', 'season'].includes(type)) {
+      sawContent = true;
+    } else if (method === 'link') {
+      const verdict = classifyLinkCard(card, query);
+      if (verdict === 'content') sawContent = true;
+      else if (verdict === 'absent') sawAbsent = true;
+      else sawInconclusive = true;
+    } else {
+      sawInconclusive = true;
+    }
+  }
+  // Тело целиком — bare JSON-объект карточки (без data-json-обёртки), только если у него
+  // есть method: play/call → контент; link → classifyLinkCard (чужой фильм → «нет»);
+  // без method (accsdb/ошибка) → как раньше, карточек нет → «нет» на этой ноде.
+  if (cards.length === 0 && /^\s*\{/.test(raw)) {
+    let top = null;
+    try { top = JSON.parse(raw); } catch { top = null; }
+    if (top && typeof top === 'object' && !Array.isArray(top)) {
+      const method = String(top.method || '').toLowerCase();
+      const type = String(top.type || '').toLowerCase();
+      if (method === 'play' || method === 'call' || ['movie', 'episode', 'season'].includes(type)) {
+        sawContent = true;
+      } else if (method === 'link') {
+        const verdict = classifyLinkCard(top, query);
+        if (verdict === 'content') sawContent = true;
+        else if (verdict === 'absent') sawAbsent = true;
+        else sawInconclusive = true;
+      }
+    }
+  }
+
+  const typeMarker = raw.includes('"type":"movie"')
     || raw.includes('"type":"episode"')
     || raw.includes('"type":"season"');
+
+  let work;
+  let verdict;
+  if (rch || sawContent || typeMarker) {
+    work = true;
+    verdict = 'content';
+  } else if (sawInconclusive) {
+    // Карточка есть (data-json или bare-JSON), но не классифицирована — вердикта нет.
+    work = true;
+    verdict = 'inconclusive';
+  } else {
+    // Карточек нет вовсе — «нет источника» на этой ноде (authoritative).
+    work = false;
+    verdict = 'absent';
+  }
 
   let quality = '';
   const qMark = raw.match(/<!--q:([^>]+)-->/);
@@ -99,7 +291,7 @@ export function checkSearchPredicate(text) {
   else if (raw.includes('"2160p"') || raw.includes('2160p')) quality = '2160p';
   else if (/\bHDR\b/i.test(raw)) quality = 'HDR';
 
-  return { work, rch, quality };
+  return { work, rch, quality, verdict };
 }
 
 /** Запрос сериала (та же сигнатура, что SkazProvider.serialQuery). */
@@ -155,7 +347,8 @@ export function isTrustedAlwaysVisible(providerId) {
  * (cdnvideohub, collaps; docs/balancer-002-postdeploy-report.md §5.2, §7).
  *
  * Правила (безопасность на стороне «показать», как в checkBalancer):
- *  - карточного ключа для этого провайдера нет        → inconclusive → show;
+ *  - карточного ключа нет: noKeyVerdict='absent' (cdnvideohub, RULE-3) → «нет»
+ *    (authoritative); у прочих → inconclusive → show;
  *  - поиск нашёл контент                              → show (authoritative);
  *  - поиск вернул пусто ПРИ НАЛИЧИИ ключа             → «нет» (authoritative);
  *  - сеть/HTTP-ошибка/таймаут/неоднозначный результат → inconclusive → show.
@@ -171,8 +364,14 @@ export function isTrustedAlwaysVisible(providerId) {
  */
 export const NATIVE_PROBES = {
   // Ключуется ТОЛЬКО по kinopoisk_id: без kp сервис не отвечает (поиска по названию нет).
+  // RULE-3: реальный Lampa-запрос kinopoisk_id НЕ содержит (nginx-лог; docs/
+  // native-availability-001-report.md §2.3), кластерного балансера для пробы нет
+  // (lite/videohub=404, lite/cdnvideohub=503/null) → без kp провайдер не может дать
+  // контент для ЭТОЙ карточки → noKeyVerdict='absent' (authoritative «нет», а не вечный
+  // inconclusive-show).
   cdnvideohub: {
     hasKey: (query) => Boolean(Number(query.kinopoisk_id || query.kp || 0) || 0),
+    noKeyVerdict: 'absent',
     async present(provider, query) {
       const kp = Number(query.kinopoisk_id || query.kp || 0) || 0;
       const root = await provider.client.playlist(kp); // бросает HttpError на ошибке
@@ -234,6 +433,13 @@ export async function nativeProbe(provider, query, requestContext, deadline) {
   try {
     if (probe) {
       if (!probe.hasKey(query)) {
+        // RULE-3: провайдер без карточного ключа. noKeyVerdict='absent' (cdnvideohub:
+        // key ТОЛЬКО kinopoisk_id, в реальном запросе его нет) → authoritative «нет», а
+        // НЕ inconclusive-show. Прочие (collaps — ключи kp/imdb/orid/title есть всегда,
+        // фактически не попадает) — как раньше: no-key → inconclusive → показ.
+        if (probe.noKeyVerdict === 'absent') {
+          return { show: false, authoritative: true, status: 0, reason: 'no-key' };
+        }
         return { show: true, authoritative: false, inconclusive: true, status: 0, reason: 'no-key' };
       }
       const present = await attempt(probe.present(provider, query, requestContext));
@@ -360,8 +566,13 @@ export function createAvailabilityChecker(options = {}) {
     let sawAccsdb = false;       // хоть один хост отказал учётке (accsdb) — вердикта нет
     for (let index = 0; index < hosts.length; index += 1) {
       if (Date.now() >= deadline) {
-        // Дедлайн карточки — вердикта нет, показываем (транзиентный тормоз не
-        // должен прятать рабочий источник).
+        // RULE-4: «нет» от ЧИСТОГО ответа хостов (без no-response) при исчерпании
+        // дедлайна НЕ переворачиваем в показ. Смешанный вердикт / вовсе нет ответа →
+        // действительно inconclusive → показываем (транзиентный тормоз не прячет
+        // рабочий источник).
+        if (sawDefinitiveNo && !sawNoResponse) {
+          return { show: false, rch: false, quality: '', status: lastStatus, host: lastHost, authoritative: true, verdict: 'absent', timedOut: true };
+        }
         return { show: true, rch: false, quality: '', status: lastStatus, host: lastHost, authoritative: false, inconclusive: true, timedOut: true };
       }
       const target = index === 0 ? base : swapHost(base, hosts[index]);
@@ -384,13 +595,29 @@ export function createAvailabilityChecker(options = {}) {
         sawNoResponse = true;
         continue;
       }
-      // accsdb — отказ учётной записи («Войдите в аккаунт Настройки - Синхронизация»),
-      // а НЕ «источника нет»: вердикта нет, как при таймауте/сети. Отказ авторизации
-      // не доказывает отсутствие контента; прятать по нему — скрывать рабочий источник
+      // accsdb. RULE-2: «Ожидаем фильм в хорошем качестве...» = «контента пока нет»
+      // (кластер честно сообщает: источник добавит позже) → «нет» на ЭТОЙ ноде (как
+      // не-2xx, продолжаем ротацию). Прочие accsdb-отказы («Войдите в аккаунт
+      // Настройки - Синхронизация») — отказ учётной записи, а НЕ «источника нет»:
+      // вердикта нет, как при таймауте/сети. Отказ авторизации не доказывает
+      // отсутствие контента; прятать по нему — скрывать рабочий источник
       // (эмпирический кейс 2026-08-13: кластер на миг отказывал учётке → закэшированный
-      // hide на 5 минут при OLD items>0). Продолжаем ротацию: следующий хост может
-      // ответить контентом (авторитетно) или тоже accsdb (→ inconclusive ниже).
+      // hide на 5 минут при OLD items>0). Следующий хост может ответить контентом
+      // (авторитетно) или тоже accsdb (→ inconclusive ниже).
       if (String(text).trim().startsWith('{') && /"accsdb"\s*:\s*true/i.test(String(text))) {
+        // msg приходит в escaped-unicode («Ож...»), regex по сырому телу
+        // не видит кириллицу → декодируем msg из JSON перед проверкой шаблона
+        // (иначе шаблон «Ожидаем фильм...» никогда не сматчится в живых ответах).
+        let msg = String(text);
+        try {
+          const parsed = JSON.parse(String(text));
+          if (parsed && typeof parsed.msg === 'string' && parsed.msg) msg = parsed.msg;
+        } catch { /* остаёмся на сыром тексте */ }
+        if (/ожидаем\s+фильм\s+в\s+хорошем\s+качестве/i.test(msg)) {
+          sawDefinitiveNo = true;
+          lastHost = host;
+          continue;
+        }
         sawAccsdb = true;
         sawNoResponse = true;
         lastHost = host;
@@ -401,24 +628,32 @@ export function createAvailabilityChecker(options = {}) {
         sawDefinitiveNo = true;
         continue;
       }
-      // 2xx content-bearing — авторитетно: предикат, стоп.
-      const predicate = checkSearchPredicate(text);
+      // 2xx content-bearing — авторитетно: предикат, стоп. RULE-1: предикат возвращает
+      // вердикт; inconclusive (карточка есть, но не классифицирована) — «вердикта нет» →
+      // показываем (authoritative=false, inconclusive=true).
+      const predicate = checkSearchPredicate(text, query);
       return {
         show: predicate.work,
         rch: predicate.rch,
         quality: predicate.quality,
         status: response.status,
         host,
-        authoritative: true
+        authoritative: predicate.verdict !== 'inconclusive',
+        ...(predicate.verdict === 'inconclusive' ? { inconclusive: true, reason: 'predicate-inconclusive' } : {})
       };
     }
-    // Все хосты без content-вердикта. Прячем ТОЛЬКО при явном «нет» от кластера;
-    // хоть один no-response (таймаут/сеть/accsdb) = вердикта нет → показываем
-    // оптимистично (транзиентный сбой не должен прятать рабочий источник).
+    // Все хосты без content-вердикта.
+    // RULE-4: показываем оптимистично ТОЛЬКО когда definitive ответа НЕТ вовсе (ни
+    // одного «нет» от кластера — всё таймауты/сеть/accsdb-учётка). Чистый «нет» (все
+    // хосты ответили) → authoritative absent (прячем). СМЕШАННЫЙ вердикт (часть «нет» +
+    // часть no-response) → действительно inconclusive → показываем: неполный скан не
+    // должен прятать рабочий источник (эмпирика: rutubemovie/Одиссея 503+abort, но
+    // 11 items — docs/native-availability-001-report.md §2).
     if (sawNoResponse) {
       return {
         show: true, rch: false, quality: '', status: lastStatus, host: lastHost,
         authoritative: false, inconclusive: true,
+        ...(sawDefinitiveNo ? { mixed: true } : {}),
         ...(sawAccsdb ? { accsdb: true } : {})
       };
     }
@@ -607,9 +842,21 @@ export function createAvailabilityChecker(options = {}) {
         if (settledConfirm.status === 'rejected') continue; // сбой подтверждения — оставляем первичный вердикт
         const { index, value, retried } = settledConfirm.value;
         const row = rows[index];
+        // RULE-4: инконклюзивное подтверждение (дедлайн исчерпан / сеть — вердикта НЕТ)
+        // не переворачивает первичное authoritative «нет» в показ: fallback show:true по
+        // timeout — только когда definitive ответа не было вовсе. Здесь первичный вердикт
+        // definitive («нет» от ЧИСТОГО ответа кластера) → оставляем его; ряд помечаем
+        // inconclusive → карточка не кэшируется (self-heal: следующий запрос перепроверит,
+        // и появившийся контент вернёт источник). Мотивация — docs/native-availability-
+        // 001-report.md §2.4: kinoflix/pidtor/solntse «Одиссеи» подтверждённо отсутствуют,
+        // но исчерпание card-дедлайна (12 004мс > 10 000мс) превращало их в show:true.
+        if (value.inconclusive) {
+          row.inconclusive = true;
+          row.confirmInconclusive = true;
+          continue;
+        }
         row.show = Boolean(value.show);
         row.authoritative = Boolean(value.authoritative);
-        if (value.inconclusive) row.inconclusive = true;
         if (value.rch !== undefined) row.rch = value.rch;
         if (value.quality) row.quality = value.quality;
         if (value.status !== undefined) row.status = value.status;
