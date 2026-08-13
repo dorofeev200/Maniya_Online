@@ -32,7 +32,9 @@ const EO_TITLES = {
   rutubemovie: 'Maniya · RutubeMovie',
   vkmovie: 'Maniya · VKMovie',
   geosaitebi: 'Maniya · GeoVideo',
-  aniliberty: 'Maniya · AniLiberty'
+  aniliberty: 'Maniya · AniLiberty',
+  // BALANCER-002: rhsprem — live probe 2026-08-13: data-json=true на online3 (REST).
+  rhsprem: 'Maniya · HDRezka 4K'
 };
 
 const nativeProviders = [

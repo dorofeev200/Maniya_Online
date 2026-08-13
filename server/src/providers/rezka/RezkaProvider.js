@@ -82,21 +82,26 @@ export class RezkaProvider extends Provider {
   }
 
   /**
-   * Единый резолв записи для streams()/videos(): если в запросе уже есть
-   * href/id — берём напрямую, иначе ищем по названию. Возвращает null, если
-   * ничего не нашлось.
+   * Единый резолв записи для streams()/videos(): если в запросе уже есть href —
+   * берём напрямую (карточка после поиска); иначе ищем по названию. Возвращает
+   * null, если ничего не нашлось.
+   *
+   * Короткое замыкание ТОЛЬКО на href: голый `id` из карточки Lampa — это
+   * TMDB id (напр. 94997), для Rezka бессмысленный. Раньше `href || id`
+   * превращал его в запись с href:'' → гард videos()/streams() давал пусто →
+   * «видео не найдено» на каждый клик Rezka в UI. Идём через поиск по названию,
+   * как остальные провайдеры.
    */
   async resolveRecord(queryOrContext = {}, context = null) {
     const requestContext = context || (queryOrContext?.request || queryOrContext?.query ? queryOrContext : undefined);
     const query = { ...(requestContext?.query || queryOrContext || {}) };
 
-    const id = String(query.id || '').trim();
     const href = String(query.href || '').trim();
 
-    if (href || id) {
+    if (href) {
       return {
         provider: this.id,
-        id,
+        id: String(query.id || '').trim(),
         href,
         title: String(query.title || this.title),
         year: query.year ? Number(query.year) : null,

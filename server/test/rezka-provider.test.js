@@ -212,6 +212,27 @@ test('RezkaProvider.videos: пустой/ошибочный путь → пус�
   assert.deepEqual(payload, { items: [], seasons: [], voices: [] });
 });
 
+test('RezkaProvider.videos: карточка TMDB (id+title, без href) → резолв через поиск, не пусто', async () => {
+  const client = new FakeRezkaClient({
+    pageHtml: EMBED_SERIAL_HTML,
+    episodes: EPISODES,
+    episodeStream: EPISODE_STREAM
+  });
+  const provider = new RezkaProvider({ client });
+
+  // Ровно то, что шлёт клиент Lampa на карточке: TMDB id + title, без Rezka href.
+  const payload = await provider.videos({
+    query: { id: '94997', title: 'Тестовый сериал', original_title: 'Test Serial', year: '2022', serial: '1', season: '1', token: 'abc' }
+  });
+
+  assert.equal(payload.items.length, 2, 'id без href не должен глушить резолв (ui-регресс P0)');
+  assert.equal(payload.items[0].method, 'play');
+  assert.deepEqual(payload.seasons.map((s) => s.number), [1, 2]);
+  // Первый ход — поиск по названию; page тянет найденный href, не корень сайта.
+  assert.equal(client.calls[0][0], 'searchHtml');
+  assert.ok(client.calls.every((call) => call[0] !== 'page' || call[1] !== 'https://rezka.ag/'), 'не должен ходить на главную');
+});
+
 // --- favs передача (Rezka P0) ---
 
 /** Fake-клиент, который записывает полный вызов getStreamMovie включая опции. */

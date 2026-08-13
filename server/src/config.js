@@ -186,14 +186,19 @@ export const config = {
     // veoveo/alloha/filmix/rezka/kinoflix/pidtor — 200 PLAY/CALL на skaz-хостах;
     // kinopub — 200, карточки-ссылки (Lime, двухшаговая follow-схема postid);
     // videoseed/solntse — 3/3 по матрице 08.08.
-    // Исключены из дефолта: filmix/rezka/hdvb — их отдают native-провайдеры
-    // (реестр не дублирует); filmixtv — 403-гейт; rch/WS-источники (vk RUS-1, rutube RUS-2,
-    // videohub, turboserial, fanserials, zagonka, kinobase, fancdn, mirage) — по lite-REST
-    // 400—503 (аккаунт/WebSocket), зарезервированы в §10.5, в UI не светятся.
+    // BALANCER-002 (2026-08-13): добавлен rhsprem (live probe: data-json=true на
+    // online3, REST-играемый); исключены zagonka/videocdn/lumex/kinobase — их НЕТ в
+    // live-универсуме lite/events, светились мёртвыми. rch/WS-источники — зарезервированы
+    // (§10.5): vk RUS-1, rutube RUS-2, videohub, turboserial, fanserials, fancdn, mirage,
+    // а также ashdi/kinoukr/eneyida (BALANCER-002: `{"rch":true}` — WebSocket-only, Maniya
+    // REST-клиент играть их не может) — в дефолт НЕ входят.
+    // ПОСЛЕ отчёта (2026-08-13, решение юзера): remux/kinotochka тоже rch-reserved
+    // (`{"rch":true}` стабильно на каждой карточке; REST-клиент их не воспроизводит —
+    // OLD videos()=0, на Play «видео не найдено»). Из видимого списка убраны.
     // Видимые источники «Maniya · …» + СКРЫТЫЕ фоллбэки native-дублей
     // (filmix/rezka/hdvb/rutubemovie регистрируются, но в UI их отдаёт native;
     // eonline-близнец выигрывает где native вернул 0 items).
-    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka', 'geosaitebi', 'kinobase', 'remux', 'videocdn', 'lumex', 'kinotochka']),
+    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'geosaitebi', 'rhsprem']),
     // Аккаунт E-Online. Не коммитить — только server/.env.
     accountEmail: (process.env.EO_ACCOUNT_EMAIL || '').trim(),
     uid: (process.env.EO_UID || '').trim(),
@@ -207,7 +212,17 @@ export const config = {
   skaz: {
     enabled: bool('SKAZ_ENABLED', true),
     hosts: list('SKAZ_HOSTS', list('EO_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv', 'http://94.249.239.63', 'http://94.249.239.37', 'http://94.249.239.11', 'http://77.90.33.109'])),
-    balancers: list('SKAZ_BALANCERS', list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka', 'geosaitebi', 'kinobase', 'remux', 'videocdn', 'lumex', 'kinotochka'])),
+    balancers: list('SKAZ_BALANCERS', list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'geosaitebi', 'rhsprem'])),
+    // BALANCER-002: per-card availability (/api/lampa/sources/card).
+    // checkEnabled=false → эндпоинт возвращает статический список (все show:true),
+    // без походов в кластер (rollback-переключатель, менять без деплоя нельзя).
+    checkEnabled: bool('SKAZ_CHECK_ENABLED', true),
+    // Таймаут одного хоста при checksearch (на один балансер × хостов ≤ дедлайн).
+    // 10с = паритет с E-Online (OnlineApi.cs checkSearch timeoutSeconds: 10):
+    // при 8с под 18-ю параллельными запросами кластер не успевал ответить для
+    // части балансеров → таймаут трактовался как «нет источника» (ложный скрыт —
+    // провал OLD∩NEW гейта в live-сверке, kinopub/27190).
+    checkTimeoutMs: integer('SKAZ_CHECK_TIMEOUT_MS', 10_000),
     // Аккаунт skaz-кластера (вход через Lampa «Настройки — Синхронизация»,
     // §6.5—6.7 отчёта). Не коммитить — только server/.env.
     accountEmail: (process.env.SKAZ_ACCOUNT_EMAIL || process.env.EO_ACCOUNT_EMAIL || '').trim(),

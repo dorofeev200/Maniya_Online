@@ -9,6 +9,7 @@ import { findUserByRequest, findUserByShortToken, getVideoForRequest, getVideosF
 import { subscriptionStatus } from './status.js';
 import { providerById, registeredProviders } from './providers/registry.js';
 import { PROVIDER_FALLBACK_ICON, providerMeta } from './providers/meta.js';
+import { defaultChecker } from './availability.js';
 import { buildProxyUrl, proxyMedia } from './proxy.js';
 import { createTelegramRunner } from './telegram/runner.js';
 
@@ -23,6 +24,10 @@ function requestContext(request) {
     query: Object.fromEntries(url.searchParams.entries()),
     requestId: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
   };
+}
+
+function sha256Hex(text) {
+  return crypto.createHash('sha256').update(String(text || '')).digest('hex');
 }
 
 function sourceUrl(context) {
@@ -130,6 +135,35 @@ async function route(context, response) {
     });
 
     return sendJson(request, response, 200, { sources });
+  }
+
+  // BALANCER-002: per-card availability. Статический /sources остаётся реестром;
+  // этот эндпоинт (SHADOW-фаза, клиент НЕ вызывает пока не прошла live-сверка)
+  // отдаёт динамический show:true/false по карточке (checksearch на кластер).
+  if (pathname === '/api/lampa/sources/card') {
+    const user = await requireSubscription(context);
+    const userUid = sha256Hex(user.token).slice(0, 16);
+
+    // Rollback-переключатель: без походов в кластер — все show:true (как /sources).
+    if (!config.skaz.checkEnabled) {
+      const staticSources = registeredProviders()
+        .filter((provider) => provider.enabled())
+        .map((provider) => ({ id: provider.id, show: provider.show !== false }));
+      return sendJson(request, response, 200, {
+        sources: staticSources,
+        meta: { cached: false, elapsed_ms: 0, count: staticSources.length }
+      });
+    }
+
+    const payload = await defaultChecker.card(context.query, userUid);
+    return sendJson(request, response, 200, {
+      sources: payload.sources.map(({ id, show }) => ({ id, show })),
+      meta: {
+        cached: payload.cached,
+        elapsed_ms: payload.elapsedMs,
+        count: payload.count
+      }
+    });
   }
 
   if (pathname === '/api/lampa/videos') {

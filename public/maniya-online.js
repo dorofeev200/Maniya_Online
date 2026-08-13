@@ -464,9 +464,63 @@
         activeUrl = sources[activeSource].url;
         self.updateFilter();
         self.loadVideos();
+
+        // BALANCER-002 §8 (врезано после live-сверки OLD∩NEW — гейт пройден):
+        // статический /sources — реестр, карточная доступность (show:true/false
+        // per card, кэш 5 мин на сервере) приходит отдельным параллельным запросом.
+        // Пока сверка идёт — юзер видит реестр (поведение до врезки); по ответу
+        // мёртвые источники гостятся (show:false), скрытый активный заменяется.
+        self.loadCardAvailability();
       }, function () {
         self.empty(Lampa.Lang.translate('maniya_server_error'));
       });
+    };
+
+    this.loadCardAvailability = function () {
+      var self = this;
+      var url = addMovieParams(trimSlash(MANIYA_API_BASE) + '/sources/card', object.movie, object);
+      requestJson(network, url, function (json) {
+        self.applyCardAvailability(json);
+      }, function () {
+        // Сверка недоступна (сеть/сервер) — остаёмся на статическом реестре.
+      });
+    };
+
+    this.applyCardAvailability = function (json) {
+      var self = this;
+      if (!json || !Lampa.Arrays.isArray(json.sources)) return;
+
+      var changed = false;
+      json.sources.forEach(function (row) {
+        var key = sourceKey(row);
+        if (!sources[key]) return; // реестр — источник истины для СПИСКА; тут только флаги
+        var show = row.show !== false;
+        if (sources[key].show !== show) {
+          sources[key].show = show;
+          changed = true;
+        }
+      });
+
+      // Активный источник мог стать скрытым ещё до сверки (хранимое значение с
+      // прошлой карточки) — проверяем всегда, не только при изменении флагов.
+      filterSources = Lampa.Arrays.getKeys(sources).filter(function (key) {
+        return sources[key].show;
+      });
+
+      if (!filterSources.length) return self.empty(Lampa.Lang.translate('maniya_empty_sources'));
+
+      var activeChanged = !sources[activeSource] || !sources[activeSource].show;
+      if (activeChanged) {
+        activeSource = filterSources[0];
+        activeUrl = sources[activeSource].url;
+        activeSeason = null;
+        activeVoice = null;
+        Lampa.Storage.set('maniya_online_source', activeSource);
+      }
+      if (changed || activeChanged) {
+        self.updateFilter();
+        if (activeChanged) self.loadVideos();
+      }
     };
 
     this.updateFilter = function () {

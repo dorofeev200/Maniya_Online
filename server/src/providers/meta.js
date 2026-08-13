@@ -44,6 +44,13 @@ export const PROVIDER_META = {
   mirkino: { name: 'KinoPUB', icon: '📀', qualityLabel: 'Full HD' },
   hdrezka: { name: 'HDRezka', icon: '🎞️', qualityLabel: '4K' },
   aniliberty: { name: 'AniLiberty', icon: '🌸', qualityLabel: 'Full HD' },
+  // BALANCER-002: rhsprem — видимый источник (live probe: data-json=true, REST).
+  rhsprem: { name: 'HDRezka 4K', icon: '🎞️', qualityLabel: '4K' },
+  // BALANCER-002 rch-резерв (WebSocket-only, Maniya REST не играет; §10.5):
+  // ashdi/kinoukr/eneyida — мета готово, в balancers НЕ входят (не светятся).
+  ashdi: { name: 'Ashdi', icon: '⚡', qualityLabel: '4K' },
+  kinoukr: { name: 'KinoUkr', icon: '🎬', qualityLabel: 'Full HD' },
+  eneyida: { name: 'Eneyida', icon: '🛡️', qualityLabel: 'Full HD' },
   animebesst: { name: 'AniBest', icon: '🌸', qualityLabel: 'Full HD' },
   animelib: { name: 'AniTrue', icon: '🌸', qualityLabel: 'Full HD' },
 
