@@ -1,5 +1,33 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## ⏳ 2026-08-13 (BALANCER-002 POST-DEPLOY): TRUSTED_ALWAYS_VISIBLE — filmix всегда видим; SHADOW пройден, ждёт решения юзера (коммит/деплой НЕ делались)
+- **Задача**: POST-DEPLOY shadow (docs/balancer-002-postdeploy-shadow-report.md) остановил унификацию
+  per-card availability (docs/balancer-002-postdeploy-report.md §7): `filmix`/Seven-Per-Cent — NEW=false при
+  EO=show (кластер честно «нет» на всех формах/хостах, EO-плагин «есть»; `lite/filmix` НЕ воспроизводит
+  внутренний checkSearch EO). Юзер выбрал **вариант A**: provider-specific policy **TRUSTED_ALWAYS_VISIBLE** —
+  filmix доверенный стабильный источник Maniya → **всегда show:true** (playback уже проверен; скрывать из-за
+  false-negative availability неправильно; другим провайдерам исключение — только с отдельным доказательством).
+- **Сделано (НЕ закоммичено, НЕ задеплоено)**: `server/src/availability.js` — `TRUSTED_ALWAYS_VISIBLE =
+  {'filmix','skaz-filmix'}`, short-circuit в `card()` → `{show:true,authoritative:true,trusted:true}` БЕЗ
+  пробы; гейт «нет» исключает trusted (`!row.trusted`, инвариант «trusted → видим»). НЕ менялись:
+  `provider.videos()`, `resolveVideo()`, store.js, playback. Остальные native/skaz/twin — per-card как было
+  (twin-check для native-с-твином, nativeProbe для без-твина). Тесты: availability 39/39
+  (+3 TRUSTED: всегда виден при «нет» кластера, виден при inconclusive, membership без лишних исключений);
+  полный suite **473 (465 pass / 2 fail / 6 skip)**, fail — предсуществующие дата-тесты подписки api.test.js.
+- **SHADOW (повторный, 5 карточек, живой VPS, scratch `/tmp/shadow-new`): 0 БЛОКЕРОВ, 0 OLD∩NEW конфликтов.**
+  1) **filmix видим на 5/5** — включая блокировавший Seven-Per-Cent (`{show:true,trusted:true,authoritative:true}`),
+     payload подтверждён. 2) kodik скрыт на FG; cdnvideohub скрыт на Seven-Per-Cent (kp валиден, контента нет,
+     confirmed+absent); rutubemovie скрыт на HOTD/Seven-Per-Cent; collaps — где probe нашёл/Old>0.
+     kodik +visible на 4 карточках = задокументированный navigation-gap (`lite/kodik` 302→title-search→
+     data-json), НЕ регрессия. 3) hidden twins целы (visible=16 без дублей, rutubemovie/FG виден через твин).
+     4) OLD-рабочие не скрыты — 0 конфликтов. Правило #7 (NEW не скрывает EO-показы) — нарушений нет.
+- **Следующий шаг (решение за юзером)**: прочитать `docs/balancer-002-trusted-always-visible-report.md` →
+  подтвердить политику → коммит (availability.js + 2 теста + отчёт + этот план, ветка
+  `feature/alloha-provider`, push `backup`) → деплой `scripts/deploy.sh` → prod-verify `/sources/card`
+  (filmix show:true везде, kodik/cdnvideohub скрыты на мёртвых). Navigation-gap kodik/filmix/pidtor/kinoflix —
+  отдельные волны.
+- Полный отчёт: `docs/balancer-002-trusted-always-visible-report.md`.
+
 ## ✅ 2026-08-13 (BALANCER-002): per-card source availability — задеплоено (a105320, push backup), production-сверка пройдена
 - **Задача**: Maniya отдавала статический `/sources` без per-card проверки (мёртвые источники светились,
   живые пропадали). BALANCER-002 реплицирует динамику E-Online: параллельный `checksearch=true` по каждому

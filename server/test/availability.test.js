@@ -121,17 +121,19 @@ test('card: фильм с несколькими источниками — show
   assert.equal(result.cached, false);
   assert.equal(byId(result, 'skaz-alloha').show, true, 'data-json → доступен');
   assert.equal(byId(result, 'skaz-rezka').show, true, 'type movie → доступен');
-  assert.equal(byId(result, 'skaz-filmix').show, false, 'null на всех хостах → нет источника');
+  // TRUSTED_ALWAYS_VISIBLE: skaz-filmix (native выключен → видимый skaz) НЕ пробируется
+  // и всегда показывается, даже когда кластер отвечает «нет».
+  assert.equal(byId(result, 'skaz-filmix').show, true, 'trusted → видим (кластер «нет» не прячет)');
+  assert.equal(byId(result, 'skaz-filmix').trusted, true, 'политика помечена trusted');
   assert.equal(byId(result, 'skaz-kinopub').show, false, '503 на всех хостах → нет источника');
 
-  for (const b of ['alloha', 'rezka', 'filmix', 'kinopub']) {
+  for (const b of ['alloha', 'rezka', 'kinopub']) {
     assert.ok(seen.some((u) => balancerOf(u) === b), `запрошен балансер ${b}`);
   }
+  assert.ok(!seen.some((u) => balancerOf(u) === 'filmix'), 'trusted filmix НЕ запрашивается');
   assert.ok(seen.every((u) => u.includes('account_email=user%40example.com') && u.includes('uid=abc123')), 'auth в URL каждого запроса');
-  assert.ok(seen.some((u) => u.includes('checksearch=true') && balancerOf(u) === 'filmix'), 'pass1 filmix — checksearch');
   assert.ok(seen.some((u) => u.includes('checksearch=true') && balancerOf(u) === 'kinopub'), 'pass1 kinopub — checksearch');
-  // filmix/kinopub вернули «нет» → подтверждение прямым lite-page (без checksearch).
-  assert.ok(seen.some((u) => !u.includes('checksearch=true') && balancerOf(u) === 'filmix'), 'filmix подтверждение — прямой lite-page');
+  // kinopub вернул «нет» → подтверждение прямым lite-page (без checksearch).
   assert.ok(seen.some((u) => !u.includes('checksearch=true') && balancerOf(u) === 'kinopub'), 'kinopub подтверждение — прямой lite-page');
 });
 
@@ -181,9 +183,10 @@ test('card: 404/500 на всех хостах — кластер ответил
     return Promise.resolve(response(200, '<html>data-json={}</html>'));
   });
   const result = await checker.card(QUERY, 'uid-1');
-  assert.equal(byId(result, 'skaz-filmix').show, false, '404 на всех хостах → нет источника');
+  assert.equal(byId(result, 'skaz-filmix').show, true, 'trusted → видим даже при 404 кластера');
+  assert.equal(byId(result, 'skaz-filmix').trusted, true);
   assert.equal(byId(result, 'skaz-kinopub').show, false, '500 на всех хостах → нет источника');
-  assert.equal(byId(result, 'skaz-filmix').authoritative, true, 'это вердикт, не транзиент');
+  assert.equal(byId(result, 'skaz-kinopub').authoritative, true, 'это вердикт, не транзиент');
   assert.equal(byId(result, 'skaz-alloha').show, true);
   assert.equal(byId(result, 'skaz-rezka').show, true);
 });
@@ -269,18 +272,21 @@ test('card: подтверждённый «нет» кэшируется (дво
     fetches += 1;
     return Promise.resolve(response(503, 'disable'));
   }, { ttlMs: 60_000 });
-  // Все 4 балансера «нет» на 2 хостах:
-  //   pass1 (checksearch)    = 4×2
-  //   подтверждение (прямой) = 4×2
-  //   retry подтверждения    = 4×2 (hide выжил после паузы — настоящий absent)
-  // Итого 24; 2-й вызов — кэш (hide TTL 60с).
+  // 3 не-trusted балансера (filmix trusted — без пробы) «нет» на 2 хостах:
+  //   pass1 (checksearch)    = 3×2
+  //   подтверждение (прямой) = 3×2
+  //   retry подтверждения    = 3×2 (hide выжил после паузы — настоящий absent)
+  // Итого 18; 2-й вызов — кэш (hide TTL 60с). filmix при этом виден (trusted).
   const first = await checker.card(QUERY, 'uid-1');
   const second = await checker.card(QUERY, 'uid-1');
-  assert.ok(first.sources.every((s) => s.show === false), 'все скрыты (двойной «нет» + retry)');
-  assert.ok(first.sources.every((s) => s.confirmed === true), 'каждый «нет» прошёл подтверждение');
-  assert.ok(first.sources.every((s) => s.retried === true), 'hide перепроверен с retry');
+  const nonTrusted = first.sources.filter((s) => !s.trusted);
+  assert.equal(nonTrusted.length, 3, '3 не-trusted + filmix trusted');
+  assert.equal(first.sources.filter((s) => s.show === false).length, 3, 'все 3 не-trusted скрыты (двойной «нет» + retry)');
+  assert.equal(byId(first, 'skaz-filmix').show, true, 'filmix trusted → видим');
+  assert.ok(nonTrusted.every((s) => s.confirmed === true), 'каждый не-trusted «нет» прошёл подтверждение');
+  assert.ok(nonTrusted.every((s) => s.retried === true), 'hide перепроверен с retry');
   assert.equal(second.cached, true, 'двойной вердикт — кэшируется');
-  assert.equal(fetches, 24, '4 балансера × (2 pass1 + 2 подтверждение + 2 retry) = 24, 2-й вызов без fetch');
+  assert.equal(fetches, 18, '3 не-trusted × (2 pass1 + 2 подтверждение + 2 retry) = 18; filmix без пробы; 2-й вызов без fetch');
 });
 
 test('card: retry подтверждения — первый прямой «нет», повтор нашёл карточку → show:true, retried', async () => {
@@ -344,10 +350,10 @@ test('card: inconclusive-ряд (таймаут) НЕ кэшируется — 2
   assert.equal(first.cached, false);
   assert.equal(second.cached, false, 'стрессовая карточка не фиксируется на 5 минут');
   assert.equal(byId(second, 'skaz-rezka').show, true);
-  assert.equal(fetches, 10, 'повторный полный прогон (3×1 контент-стоп + 2 таймаут = 5, ×2 карточки)');
+  assert.equal(fetches, 8, 'повторный полный прогон (2×1 контент-стоп + 2 таймаут = 4, ×2 карточки; filmix trusted не пробируется)');
 });
 
-test('card: параллельно — все балансеры запрошены одновременно', async () => {
+test('card: параллельно — все НЕ-trusted балансеры запрошены одновременно', async () => {
   let active = 0;
   let maxActive = 0;
   const checker = makeChecker(async () => {
@@ -358,7 +364,7 @@ test('card: параллельно — все балансеры запроше�
     return response(200, '<html>data-json={}</html>');
   });
   await checker.card(QUERY, 'uid-1');
-  assert.equal(maxActive, 4, `все 4 балансера в полёте одновременно (maxActive=${maxActive})`);
+  assert.equal(maxActive, 3, `все 3 не-trusted балансера в полёте одновременно (maxActive=${maxActive}; filmix trusted без пробы)`);
 });
 
 test('card: кэш-hit — второй вызов без повторного fetch', async () => {
@@ -372,7 +378,7 @@ test('card: кэш-hit — второй вызов без повторного f
   const second = await checker.card(QUERY, 'uid-1');
   assert.equal(first.cached, false);
   assert.equal(second.cached, true);
-  assert.equal(fetches, 4, 'после кэша новых fetch нет (4 = первый прогон)');
+  assert.equal(fetches, 3, 'после кэша новых fetch нет (3 = первый прогон; filmix trusted без пробы)');
   assert.deepEqual(
     second.sources.map((s) => [s.id, s.show]),
     first.sources.map((s) => [s.id, s.show])
@@ -388,7 +394,7 @@ test('card: кэш-miss — другой id → повторный fetch', async
 
   await checker.card(QUERY, 'uid-1');
   await checker.card({ ...QUERY, id: '94997' }, 'uid-1');
-  assert.equal(fetches, 8, 'другой id → новый прогон (4+4)');
+  assert.equal(fetches, 6, 'другой id → новый прогон (3+3; filmix trusted без пробы)');
 });
 
 test('card: кэш разделён по userUid', async () => {
@@ -400,7 +406,7 @@ test('card: кэш разделён по userUid', async () => {
 
   await checker.card(QUERY, 'uid-1');
   await checker.card(QUERY, 'uid-2');
-  assert.equal(fetches, 8, 'разные пользователи → разные кэши');
+  assert.equal(fetches, 6, 'разные пользователи → разные кэши (3+3; filmix trusted без пробы)');
 });
 
 // ===== checkBalancer: host-политика =====

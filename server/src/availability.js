@@ -1,5 +1,5 @@
 import { config } from './config.js';
-import { registeredProviders } from './providers/registry.js';
+import { registeredProviders, twinFor } from './providers/registry.js';
 
 /**
  * BALANCER-002 — per-card source availability (`/api/lampa/sources/card`).
@@ -9,6 +9,21 @@ import { registeredProviders } from './providers/registry.js';
  * skaz-балансеру, предикат «карточка есть» (data-json/type/rch), кэш 5 минут.
  *
  * Отличия от SkazClient (намеренные, не трогаем существующую videos()-логику):
+ * - ЕДИНЫЙ per-card availability для native + skaz + СКРЫТЫЙ твин (BALANCER-002
+ *   POST-DEPLOY, docs/balancer-002-postdeploy-report.md §7): «native → всегда
+ *   show:true» УБРАНО. native с hidden twin проверяется через свой twin-балансер
+ *   (тот же skaz-checksearch, что использует E-Online для этого балансера) —
+ *   твин в ответ не попадает (без дублей в UI), но его вердикт решает
+ *   видимость native; native БЕЗ твина (cdnvideohub, collaps) — native search-level
+ *   probe: пустой результат при НАЛИЧИИ карточного ключа → «нет» (show:false),
+ *   отсутствие ключа / ошибка / таймаут / неоднозначный результат → inconclusive
+ *   → показываем. `provider.videos()`/`resolveVideo()`/store.js НЕ менялись —
+ *   availability определяет только видимость, не воспроизведение;
+ * - TRUSTED_ALWAYS_VISIBLE — provider-specific исключение: filmix — доверенный
+ *   источник (playback проверен; публичный lite/filmix checksearch НЕ воспроизводит
+ *   внутренний checkSearch E-Online; E-Online стабильно его показывает) → всегда
+ *   show:true без пробы. Остальные native/skaz/twin — per-card как выше. Другим
+ *   провайдерам правило НЕ распространяется (каждому — отдельное доказательство);
  * - предикат checkSearch — ТОЧНЫЙ как в Lampac OnlineApi.cs:975
  *   (`work = rch || data-json= || "type":"movie|episode|season"`), а НЕ
  *   `isUsablePage` (rch-ответ в E-Online считается ДОСТУПНЫМ, у нас — тоже,
@@ -104,6 +119,140 @@ export function fnv1aKey(text) {
     hash = Math.imul(hash, 16777619);
   }
   return Buffer.from(String(hash >>> 0)).toString('base64url');
+}
+
+/**
+ * TRUSTED_ALWAYS_VISIBLE — provider-specific policy (docs/balancer-002-shadow-report.md §10
+ * вариант A; финальный отчёт docs/balancer-002-trusted-always-visible-report.md).
+ *
+ * Filmix считается доверенным стабильным источником Maniya и НЕ проходит per-card
+ * availability:
+ *  - playback filmix уже проверен (live: play-карточки 2160p/HLS через прокси);
+ *  - публичный `lite/filmix` checksearch НЕ воспроизводит внутренний checkSearch
+ *    E-Online: filmix/Seven-Per-Cent — кластер честно отвечает «нет» на всех формах
+ *    и всех хостах (503/403 disable/пусто), при этом EO-плагин на той же ноде через
+ *    свой lite/events стабильно отвечает «есть» (расхождение источников истины,
+ *    docs/balancer-002-postdeploy-shadow-report.md §6);
+ *  - E-Online стабильно показывает filmix при свежих проверках.
+ * Скрывать filmix из-за false-negative availability считается неправильным →
+ * всегда show:true.
+ * Другим провайдерам правило НЕ распространяется (каждому — отдельное доказательство).
+ * `provider.videos()`/`resolveVideo()`/playback НЕ затрагиваются — доступность решает
+ * только видимость.
+ */
+// Фильм-источник «Filmix» может светиться как native `filmix` (обычный случай) либо,
+// если native выключен (нет токена), как видимый skaz-близнец `skaz-filmix` — политика
+// покрывает ОБЕ формы: это один и тот же Filmix-провайдер, не отдельное исключение.
+export const TRUSTED_ALWAYS_VISIBLE = new Set(['filmix', 'skaz-filmix']);
+
+/** Подпадает ли источник под TRUSTED_ALWAYS_VISIBLE (trusted → всегда видим). */
+export function isTrustedAlwaysVisible(providerId) {
+  return TRUSTED_ALWAYS_VISIBLE.has(String(providerId || ''));
+}
+
+/**
+ * NATIVE-PROBE — per-card availability для native-провайдера БЕЗ скрытого твина
+ * (cdnvideohub, collaps; docs/balancer-002-postdeploy-report.md §5.2, §7).
+ *
+ * Правила (безопасность на стороне «показать», как в checkBalancer):
+ *  - карточного ключа для этого провайдера нет        → inconclusive → show;
+ *  - поиск нашёл контент                              → show (authoritative);
+ *  - поиск вернул пусто ПРИ НАЛИЧИИ ключа             → «нет» (authoritative);
+ *  - сеть/HTTP-ошибка/таймаут/неоднозначный результат → inconclusive → show.
+ *
+ * НЕ ходим через provider.search(): он глотает ошибки в [] (cdnvideohub.search
+ * try/catch вокруг playlist, collaps.search try/catch вокруг поиска) — пустой []
+ * неотличим от сетевой ошибки, и по нему прятать нельзя. Вместо этого дергаем
+ * глубокие методы (client.playlist / recordByKeys / client.search), которые
+ * БРОСАЮТ на сетевой/HTTP-ошибке (HttpError), и ловим сами → вердикта нет.
+ * Fallback (незнакомый native) — provider.search() с ключом карточки: []+ключ →
+ * «нет»; риск глотания транзиентных ошибок ограничен OLD∩NEW гейтом и
+ * HIDE_TTL self-heal.
+ */
+export const NATIVE_PROBES = {
+  // Ключуется ТОЛЬКО по kinopoisk_id: без kp сервис не отвечает (поиска по названию нет).
+  cdnvideohub: {
+    hasKey: (query) => Boolean(Number(query.kinopoisk_id || query.kp || 0) || 0),
+    async present(provider, query) {
+      const kp = Number(query.kinopoisk_id || query.kp || 0) || 0;
+      const root = await provider.client.playlist(kp); // бросает HttpError на ошибке
+      return Boolean(Array.isArray(root?.items) && root.items.length);
+    }
+  },
+  // Карточные ключи: kp → imdb → orid (recordByKeys) или поиск по названию.
+  collaps: {
+    hasKey: (query) => Boolean(
+      Number(query.kinopoisk_id || query.kp || 0) || 0
+      || String(query.imdb_id || query.imdb || '').trim()
+      || Number(query.orid || query.id || 0) || 0
+      || String(query.title || '').trim()
+    ),
+    async present(provider, query, requestContext) {
+      const cardKey = Number(query.kinopoisk_id || query.kp || 0) || 0
+        || String(query.imdb_id || query.imdb || '').trim()
+        || Number(query.orid || query.id || 0) || 0;
+      if (cardKey) {
+        // recordByKeys: embed-страница → запись или null; бросает HttpError на ошибке.
+        const record = await provider.recordByKeys(query, requestContext);
+        return Boolean(record);
+      }
+      // Только название: поиск по списку. Пустой results = «нет».
+      const root = await provider.client.search(String(query.title || '').trim()); // бросает на ошибке
+      return Boolean(root && Array.isArray(root.results) && root.results.length);
+    }
+  }
+};
+
+function genericCardKey(query = {}) {
+  return Boolean(
+    String(query.id ?? '').trim()
+    || String(query.tmdb_id ?? '').trim()
+    || String(query.imdb_id ?? query.imdb ?? '').trim()
+    || String(query.kinopoisk_id ?? query.kp ?? '').trim()
+    || String(query.title ?? '').trim()
+  );
+}
+
+/**
+ * Вердикт native-пробы по дедлайну карточки. Возвращает
+ * { show, authoritative, inconclusive?, status, reason, error? } — совместимо
+ * с probe() (для единого гейта card()).
+ */
+export async function nativeProbe(provider, query, requestContext, deadline) {
+  const id = String(provider?.id || '?');
+  const probe = NATIVE_PROBES[id];
+  const label = `native:${id}`;
+  const attempt = (promise) => {
+    const remaining = Math.max(0, deadline - Date.now());
+    if (remaining <= 0) return Promise.reject(new Error(`${label} deadline`));
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timeout`)), remaining);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  };
+  try {
+    if (probe) {
+      if (!probe.hasKey(query)) {
+        return { show: true, authoritative: false, inconclusive: true, status: 0, reason: 'no-key' };
+      }
+      const present = await attempt(probe.present(provider, query, requestContext));
+      return { show: Boolean(present), authoritative: true, status: 0, reason: present ? 'found' : 'absent' };
+    }
+    // Fallback для неизвестного native: search() с ключом карточки.
+    if (!genericCardKey(query)) {
+      return { show: true, authoritative: false, inconclusive: true, status: 0, reason: 'no-key' };
+    }
+    const results = await attempt(provider.search(query, requestContext));
+    const present = Array.isArray(results) && results.length > 0;
+    return { show: Boolean(present), authoritative: true, status: 0, reason: present ? 'found' : 'absent' };
+  } catch (error) {
+    // Сеть/HTTP/таймаут/дедлайн — вердикта нет: показываем (не прячем рабочий).
+    return {
+      show: true, authoritative: false, inconclusive: true, status: 0,
+      reason: 'error', error: String((error && error.message) || error).slice(0, 60)
+    };
+  }
 }
 
 /**
@@ -313,7 +462,21 @@ export function createAvailabilityChecker(options = {}) {
     return confirmWithBackoff(balancer, query, deadline, attempt + 1);
   }
 
-  /** Видимые источники: native (всегда show:true) + видимые skaz-балансеры. */
+  /**
+   * Подтверждение «нет» от native-пробы повторной пробой после backoffMs
+   * (аналог confirmWithBackoff для skaz): транзиентный сбой провайдера успевает
+   * отойти; выживший «нет» = два независимых «нет» — настоящий absent.
+   */
+  async function confirmNativeAbsence(provider, query, requestContext, deadline, attempt = 1) {
+    const value = await nativeProbe(provider, query, requestContext, deadline);
+    const hide = value.show === false && value.authoritative && !value.inconclusive;
+    if (!hide || attempt >= 2) return { value, retried: attempt > 1 };
+    if (deadline - Date.now() < backoffMs + 200) return { value, retried: false };
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    return confirmNativeAbsence(provider, query, requestContext, deadline, attempt + 1);
+  }
+
+  /** Видимые источники: native (единый per-card availability) + видимые skaz-балансеры. */
   function resolveSources() {
     const rows = [];
     for (const provider of registeredProviders()) {
@@ -321,7 +484,16 @@ export function createAvailabilityChecker(options = {}) {
       if (String(provider.id).startsWith('skaz-')) {
         rows.push({ id: provider.id, balancer: provider.balancer || '', native: false });
       } else {
-        rows.push({ id: provider.id, balancer: '', native: true });
+        const twin = twinFor(provider.id);
+        rows.push({
+          id: provider.id,
+          native: true,
+          provider,
+          // У native с hidden twin доступность решает twin-балансер (checksearch
+          // того же балансера, что использует E-Online); без твина — native-проба.
+          balancer: twin ? twin.balancer : '',
+          twinBalancer: twin ? twin.balancer : ''
+        });
       }
     }
     return rows;
@@ -359,8 +531,21 @@ export function createAvailabilityChecker(options = {}) {
     const started = Date.now();
     const deadline = started + deadlineMs;
     const settled = await Promise.allSettled(sources.map((source) => {
+      // TRUSTED_ALWAYS_VISIBLE (filmix, native или видимый skaz-filmix): доверенный
+      // источник — playback проверен, его checksearch-сигнал недостоверен
+      // (false-negative, docs/balancer-002-postdeploy-shadow-report.md §6) → всегда
+      // show:true БЕЗ пробы. Остальные native/skaz — per-card ниже.
+      if (isTrustedAlwaysVisible(source.id)) {
+        return Promise.resolve({ show: true, authoritative: true, trusted: true });
+      }
       if (source.native) {
-        return Promise.resolve({ id: source.id, show: true, native: true, authoritative: true });
+        // ЕДИНЫЙ per-card availability для native (BALANCER-002 POST-DEPLOY):
+        // native с hidden twin — проверка через twin-балансер (skaz-checksearch,
+        // тот же сигнал, что E-Online); native без твина — native search-level
+        // probe (nativeProbe). Хардкода «native всегда show:true» больше нет.
+        if (source.twinBalancer) return checkBalancer(source.twinBalancer, query, deadline);
+        if (source.provider) return nativeProbe(source.provider, query, { query, request: { headers: {} } }, deadline);
+        return Promise.resolve({ show: true, authoritative: false, inconclusive: true });
       }
       return checkBalancer(source.balancer, query, deadline);
     }));
@@ -368,7 +553,11 @@ export function createAvailabilityChecker(options = {}) {
     const rows = settled.map((result, index) => {
       const source = sources[index];
       if (result.status === 'rejected') {
-        return { id: source.id, show: true, native: source.native, authoritative: false, inconclusive: true, status: 0, host: '', balancer: source.balancer };
+        return {
+          id: source.id, show: true, native: source.native, authoritative: false,
+          inconclusive: true, status: 0, host: '', balancer: source.balancer,
+          ...(source.twinBalancer ? { twinBalancer: source.twinBalancer } : {})
+        };
       }
       const value = result.value || {};
       return {
@@ -377,30 +566,45 @@ export function createAvailabilityChecker(options = {}) {
         native: source.native,
         authoritative: Boolean(value.authoritative),
         balancer: source.balancer,
+        ...(source.twinBalancer ? { twinBalancer: source.twinBalancer } : {}),
         ...(value.inconclusive ? { inconclusive: true } : {}),
         ...(value.rch !== undefined ? { rch: value.rch } : {}),
         ...(value.quality ? { quality: value.quality } : {}),
         ...(value.status !== undefined ? { status: value.status } : {}),
         ...(value.host ? { host: value.host } : {}),
-        ...(value.accsdb ? { accsdb: true } : {})
+        ...(value.accsdb ? { accsdb: true } : {}),
+        ...(value.trusted ? { trusted: true } : {}),
+        ...(value.reason ? { reason: value.reason } : {}),
+        ...(value.error ? { error: value.error } : {})
       };
     });
 
-    // КРИТИЧЕСКИЙ ГЕЙТ (SHADOW/COMPARE): «нет» от checksearch — только гипотеза.
-    // Подтверждаем прямым lite-page (без поиска) — тем механизмом, что реально тянет
-    // OLD videos(). Прячем источник ТОЛЬКО когда ОБА сигнала ответили «нет»; если
-    // прямой lite-page нашёл карточку (или таймаутнул — вердикта нет), источник видим.
-    // Ряды, прошедшие подтверждение, помечаем confirmed (диагностика в shadow).
+    // КРИТИЧЕСКИЙ ГЕЙТ (SHADOW/COMPARE) — ТЕПЕРЬ И ДЛЯ NATIVE: «нет» от первого
+    // сигнала — только гипотеза, подтверждаем вторым независимым сигналом. skaz и
+    // native-с-твином — прямым lite-page балансера (row.balancer = твин; тот же
+    // механизм, что реально тянет OLD videos()); native без твина — повторной
+    // native-пробой (confirmNativeAbsence). Прячем источник ТОЛЬКО когда ОБА
+    // сигнала ответили «нет»; если второй нашёл карточку (или таймаутнул —
+    // вердикта нет), источник видим. Ряды, прошедшие подтверждение, помечаем
+    // confirmed (диагностика в shadow).
     const eligible = rows
       .map((row, index) => ({ row, index }))
-      .filter(({ row }) => !row.native && row.show === false && row.authoritative && !row.accsdb);
+      // trusted (TRUSTED_ALWAYS_VISIBLE) исключён из гейта «нет» в явном виде:
+      // show:true детерминирован политикой и не может быть перевернут
+      // подтверждающим сигналом (defense-in-depth, инвариант «trusted → видим»).
+      .filter(({ row }) => row.show === false && row.authoritative && !row.accsdb && !row.trusted);
     if (eligible.length) {
-      const confirmations = await Promise.allSettled(eligible.map(({ row, index }) =>
-        confirmWithBackoff(row.balancer, query, deadline)
-          .then(({ value, retried }) => ({ index, value, retried }))
-      ));
+      const confirmations = await Promise.allSettled(eligible.map(({ row, index }) => {
+        const source = sources[index];
+        if (source.native && source.provider && !source.twinBalancer) {
+          return confirmNativeAbsence(source.provider, query, { query, request: { headers: {} } }, deadline)
+            .then(({ value, retried }) => ({ index, value, retried }));
+        }
+        return confirmWithBackoff(row.balancer, query, deadline)
+          .then(({ value, retried }) => ({ index, value, retried }));
+      }));
       for (const settledConfirm of confirmations) {
-        if (settledConfirm.status === 'rejected') continue; // сбой подтверждения — оставляем checksearch-вердикт
+        if (settledConfirm.status === 'rejected') continue; // сбой подтверждения — оставляем первичный вердикт
         const { index, value, retried } = settledConfirm.value;
         const row = rows[index];
         row.show = Boolean(value.show);
@@ -411,6 +615,8 @@ export function createAvailabilityChecker(options = {}) {
         if (value.status !== undefined) row.status = value.status;
         if (value.host) row.host = value.host;
         if (value.accsdb) row.accsdb = true;
+        if (value.reason) row.reason = value.reason;
+        if (value.error) row.error = value.error;
         if (retried) row.retried = true;
         row.confirmed = true;
       }
