@@ -39,6 +39,10 @@ const STATUS_REST = new Set([200, 201, 202, 203, 204, 206]);
  *
  * «Мёртвые» ответы (rch, accsdb, disable, 5xx) возвращаются как null —
  * провайдер не отдаёт их клиенту и не светит источник.
+ *
+ * При accsdb=true (учётная запись не grant) ротация хостов останавливается
+ * мгновенно — это ошибка credentials, а не конкретного хоста. Диагностика
+ * доступна через `this.lastAccsdb`.
  */
 export class SkazClient {
   constructor(options = {}) {
@@ -50,6 +54,8 @@ export class SkazClient {
     this.fetchImpl = options.fetchImpl || fetch;
     this.timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
     this._hostIndex = 0;
+    /** @type {{message: string}|null} последний accsdb-ответ (учётная запись не grant). */
+    this.lastAccsdb = null;
   }
 
   enabled() {
@@ -68,10 +74,16 @@ export class SkazClient {
   async getLite(params = {}) {
     const url = this.buildLiteUrl(params);
     if (!url) return null;
+    this.lastAccsdb = null;
     const response = await this.fetchHosts(url);
     if (!response) return null;
     const text = await response.text().catch(() => null);
     if (text == null) return null;
+    const accsdb = extractAccsdbMessage(text);
+    if (accsdb) {
+      this.lastAccsdb = accsdb;
+      return null;
+    }
     return isUsablePage(text) ? text : null;
   }
 
@@ -82,12 +94,18 @@ export class SkazClient {
    */
   async openLiteUrl(url) {
     if (!url) return null;
+    this.lastAccsdb = null;
     const target = withAuth(url, this.accountEmail, this.uid);
     const { response, finalUrl } = await this.fetchResolvedHosts(target);
     if (!response) return null;
     const finalURL = finalUrl || target;
     const text = await response.text().catch(() => null);
     if (text == null) return null;
+    const accsdb = extractAccsdbMessage(text);
+    if (accsdb) {
+      this.lastAccsdb = accsdb;
+      return null;
+    }
     return isUsablePage(text) ? text : null;
   }
 
@@ -289,6 +307,24 @@ export function isRchPayload(text) {
 /** Детект `{"accsdb":true}` — неверная пара email+uid (в JSON-теле). */
 export function isAccsdbPayload(text) {
   return /"accsdb"\s*:\s*true/i.test(String(text || ''));
+}
+
+/**
+ * Извлечь сообщение из accsdb-ответа `{"accsdb":true,"msg":"..."}`.
+ * Возвращает `{message: string}` или null, если это не accsdb.
+ */
+export function extractAccsdbMessage(text) {
+  const raw = String(text || '').trim();
+  if (!raw.startsWith('{')) return null;
+  if (!isAccsdbPayload(raw)) return null;
+  let msg = '';
+  try {
+    const parsed = JSON.parse(raw);
+    msg = String(parsed.msg || '').trim();
+  } catch {
+    // JSON битый, но accsdb в тексте есть — возвращаем generic.
+  }
+  return { message: msg || 'Учётная запись не подтверждена (accsdb)' };
 }
 
 /**

@@ -109,19 +109,35 @@ export async function getVideosForRequest(context) {
   // с играбельными items и фильтрами сезонов/озвучек.
   if (providers.length === 1 && videoProviders.length === 1) {
     const primaryProvider = videoProviders[0];
-    const twin = selected ? await twinForPayload(selected, context) : null;
 
-    // Сначала skaz-близнец (мультиязычный контур skaz-кластера, качества
-    // 2160/1440/1080/720/480). Native — фоллбэк: если близнец не дал ни одного
-    // ВАЛИДНОГО item'а (0 после normalization / все стримы битые), отдаём native.
-    // Никогда не объединяем — либо twin, либо native (без дублей).
-    const chosen = (twin?.items?.length)
-      ? twin
-      : (await payloadOrNull(primaryProvider, context))
-        || twin
-        || null;
+    // Для сериалов native первым, skaz-близнец — фоллбэк. Близнец в serialVideos
+    // хардкодит quality:{} и теряет реальные названия серий (episode.title живёт
+    // только в native video-links) → «07 N серия» вместо «07 Название реальной
+    // серии» (FILMIX-004). Фильмы оставляем близнец-первым: мультиязычный контур
+    // skaz-кластера, качества 2160/1440/1080/720/480. Никогда не объединяем —
+    // либо twin, либо native (без дублей).
+    const serialRequest = isSerialRequest(context.query);
+    let chosen = null;
+    if (serialRequest) {
+      const native = await payloadOrNull(primaryProvider, context);
+      if (native?.items?.length) chosen = native;
+      else if (selected) chosen = await twinForPayload(selected, context);
+    } else {
+      const twin = selected ? await twinForPayload(selected, context) : null;
+      chosen = (twin?.items?.length)
+        ? twin
+        : (await payloadOrNull(primaryProvider, context))
+          || twin
+          || null;
+    }
     if (chosen?.items?.length) {
-      return { items: chosen.items, seasons: chosen.seasons || [], voices: chosen.voices || [] };
+      const body = { items: chosen.items, seasons: chosen.seasons || [], voices: chosen.voices || [] };
+      if (chosen.provider_error) body.provider_error = chosen.provider_error;
+      return body;
+    }
+    // Элементов нет, но есть provider_error (accsdb) — отдаём диагностику клиенту.
+    if (chosen?.provider_error) {
+      return { items: [], seasons: [], voices: [], provider_error: chosen.provider_error };
     }
   } else if (videoProviders.length > 0) {
     // Несколько провайдеров (или источник без videos()): склеиваем играбельные
@@ -182,4 +198,12 @@ async function twinForPayload(nativeId, context) {
   } catch {
     return null;
   }
+}
+
+/** Запрос сериала (та же сигнатура, что SkazProvider.serialQuery). */
+function isSerialRequest(query = {}) {
+  const serial = String(query.serial ?? '').trim();
+  return serial === '1' || serial === 'true' || serial === 'yes'
+    || String(query.type || '').toLowerCase() === 'serial'
+    || String(query.serial_type || '').toLowerCase() === 'serial';
 }

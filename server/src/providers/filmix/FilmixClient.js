@@ -11,11 +11,17 @@ function randomDeviceId(length = 16) {
 }
 
 export class FilmixClient {
-  constructor({ host = 'https://filmix.my', tvHost = 'https://api.filmix.tv', token = '', userDeviceId = randomDeviceId(), httpClient = null, primaryClient = null, apiFxClient = null } = {}) {
+  constructor({ host = 'https://filmix.my', tvHost = 'https://api.filmix.tv', token = '', userDeviceId = randomDeviceId(), tvUser = '', tvPassword = '', httpClient = null, primaryClient = null, apiFxClient = null, tvAuthClient = null } = {}) {
     this.host = host.replace(/\/$/, '');
     this.tvHost = tvHost.replace(/\/$/, '');
     this.token = token;
     this.userDeviceId = userDeviceId;
+    this.tvUser = tvUser || '';
+    this.tvPassword = tvPassword || '';
+    // Кэш FilmixTV-токена: { hash, accessToken, expiresAt }.
+    // Хэш живёт долго ( persist на диске в Lampac), accessToken — 5 мин.
+    this._tvTokenCache = null;
+
     const headers = buildHeaders({ Accept: 'application/json, text/plain, */*' });
     const rateLimiter = new RateLimiter({ intervalMs: 250, maxConcurrent: 2 });
     this.httpClient = httpClient || new HttpClient({
@@ -46,6 +52,15 @@ export class FilmixClient {
       timeoutMs: 45000,
       retryPolicy: new RetryPolicy({ retries: 2, baseDelayMs: 1200, maxDelayMs: 5000 }),
       rateLimiter
+    });
+    // Отдельный клиент для auth-эндпоинтов (request-token, auth, refresh) —
+    // короткий таймаут, 1 ретрай, без rate-limit (шанс вызова 1 раз в 4+ мин).
+    this.tvAuthClient = tvAuthClient || new HttpClient({
+      provider: 'filmix',
+      headers: buildHeaders({ Accept: 'application/json, text/plain, */*', 'Content-Type': 'application/json' }),
+      timeoutMs: 15000,
+      retryPolicy: new RetryPolicy({ retries: 1, baseDelayMs: 500, maxDelayMs: 2000 }),
+      rateLimiter: null
     });
   }
 
@@ -103,10 +118,106 @@ export class FilmixClient {
     };
   }
 
+  // ── FilmixTV auth (api.filmix.tv Bearer) ──────────────────────────────
+
+  /**
+   * Повторяет auth-флоу Lampac FilmixTV.EnsureAccessToken():
+   *   1. GET  /api-fx/request-token → hash
+   *   2. POST /api-fx/auth  (user_name, user_passw, session:true, hash-заголовок) → accessToken
+   * Кэширует в памяти на 4 мин (Lampac: 5 мин). При провале сбрасывает кэш.
+   * Возвращает { hash, accessToken } или null.
+   */
+  async ensureTvAccessToken() {
+    if (!this.tvUser || !this.tvPassword) return null;
+
+    // Проверяем кэш (4 мин = 240 000 мс, Lampac использует 5 мин).
+    if (this._tvTokenCache && Date.now() < this._tvTokenCache.expiresAt) {
+      return this._tvTokenCache;
+    }
+
+    try {
+      // Шаг 1: получаем hash-токен (нужен как заголовок при /api-fx/auth).
+      const hashResp = await this.tvAuthClient.get(`${this.tvHost}/api-fx/request-token`);
+      const hashData = await hashResp.json();
+      const hash = hashData?.token;
+      if (!hash || typeof hash !== 'string') {
+        logger.warn('filmix_tv_request_token_empty', { tvHost: this.tvHost });
+        return null;
+      }
+
+      // Шаг 2: авторизуемся, получаем accessToken.
+      const authBody = JSON.stringify({
+        user_name: this.tvUser,
+        user_passw: this.tvPassword,
+        session: true
+      });
+      const authResp = await this.tvAuthClient.post(
+        `${this.tvHost}/api-fx/auth`,
+        authBody,
+        { headers: { hash } }
+      );
+      const authData = await authResp.json();
+      const accessToken = authData?.accessToken;
+      if (!accessToken || typeof accessToken !== 'string') {
+        logger.warn('filmix_tv_auth_no_token', {
+          tvHost: this.tvHost,
+          hasMsg: !!authData?.msg,
+          msg: String(authData?.msg || '').slice(0, 120)
+        });
+        return null;
+      }
+
+      this._tvTokenCache = {
+        hash,
+        accessToken,
+        expiresAt: Date.now() + 4 * 60 * 1000
+      };
+
+      logger.info('filmix_tv_auth_ok', {
+        tvHost: this.tvHost,
+        tokenLen: accessToken.length
+      });
+
+      return this._tvTokenCache;
+    } catch (error) {
+      logger.warn('filmix_tv_auth_failed', {
+        tvHost: this.tvHost,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      // Сбрасываем кэш при ошибке, чтобы следующий вызов перепробовал.
+      this._tvTokenCache = null;
+      return null;
+    }
+  }
+
+  /**
+   * Возвращает заголовки для авторизованного api-fx-запроса
+   * (Authorization: Bearer + hash) или null, если учётки нет / auth провален.
+   */
+  async tvAuthHeaders() {
+    const token = await this.ensureTvAccessToken();
+    if (!token) return null;
+    return {
+      Authorization: `Bearer ${token.accessToken}`,
+      hash: token.hash
+    };
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────
+
   async search({ title, originalTitle, clarification = 0, year, similar = false } = {}, context = null) {
+    // PRIMARY: api.filmix.tv/api-fx/list — живой Filmix source (Lampac FilmixTV.Search;
+    // live-аудит FILMIX-001: HTTP 200 ~0.3с). Один стори-запрос, как в Lampac.
     const story = clarification === 1 ? title : (originalTitle || title);
-    const primary = await this.searchApi(story, context);
-    const matches = primary.length ? primary : await this.searchFallback(clarification === 1 ? originalTitle : title, clarification === 1 ? title : originalTitle, context);
+    let matches = await this.searchApiFx(story, context);
+
+    // FALLBACK: filmix.my/api/v2/search (Lampac Filmix.Search/gosearch). Сейчас mirror
+    // даёт 301→501, но оставлен на случай восстановления. Два стори-попа (как Search2).
+    if (!matches.length) {
+      matches = await this.searchApiV2(clarification === 1 ? originalTitle : title, context);
+      if (!matches.length) matches = await this.searchApiV2(clarification === 1 ? title : originalTitle, context);
+    }
+
     return { items: matches, selected: this.pickSearchMatch(matches, { title, originalTitle, year, similar }) };
   }
 
@@ -118,16 +229,40 @@ export class FilmixClient {
     return this.search({ ...params, type: 'serial' }, context);
   }
 
-  async searchByExternalIds({ kp, imdb, year } = {}, context = null) {
-    // Параллельно, а не последовательно: два primary-вызова по 8с (теперь 3с)
-    // складывались в worst-case по каждому id. Promise.all не ускоряет живой
-    // ответ, но срезает сумму таймаутов при long-hang до максимума одного.
-    const queries = [kp, imdb].filter(Boolean).map(String);
-    const found = await Promise.all(queries.map((query) => this.searchApi(query, context).catch(() => [])));
-    return found.flat().filter((item) => !year || Number(item.year) === Number(year));
+  /**
+   * PRIMARY-поиск: api.filmix.tv/api-fx/list (Lampac FilmixTV.Search).
+   * Параметры как у Lampac: search=<story>&limit=48. Bearer+hash добавляются только
+   * если задана FilmixTV-учётка; без неё — анонимно (live: работает и без учётки).
+   */
+  async searchApiFx(story, context = null) {
+    if (!story) return [];
+
+    const authHeaders = await this.tvAuthHeaders();
+    const opts = this.buildRequestOptions(context);
+    if (authHeaders) opts.headers = { ...opts.headers, ...authHeaders };
+
+    try {
+      const response = await this.httpClient.get(
+        buildUrl(`${this.tvHost}/api-fx/list`, { search: story, limit: 48 }),
+        opts
+      );
+      const root = await response.json();
+      return Array.isArray(root?.items) ? root.items : [];
+    } catch (error) {
+      logger.warn('filmix_api_fx_search_failed', {
+        tvHost: this.tvHost,
+        hasAuth: !!authHeaders,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return [];
+    }
   }
 
-  async searchApi(story, context = null) {
+  /**
+   * FALLBACK-поиск: filmix.my/api/v2/search (Lampac Filmix.Search). Быстрый клиент без
+   * ретраев (3с): если mirror мёртв (301→501), fallback включается сразу, без long-hang.
+   */
+  async searchApiV2(story, context = null) {
     if (!story) return [];
 
     try {
@@ -135,20 +270,9 @@ export class FilmixClient {
       const root = await response.json();
       return Array.isArray(root) ? root : [];
     } catch {
-      // Primary API может отдавать 403/Cloudflare; в этом случае провайдер
-      // должен бесшовно уйти на рабочий fallback `api-fx/list`.
+      // Mirror недоступен (geo/Cloudflare/301) — провайдер уже отдал primary api-fx.
       return [];
     }
-  }
-
-  async searchFallback(primary, secondary, context = null) {
-    for (const story of [primary, secondary]) {
-      if (!story) continue;
-      const response = await this.httpClient.get(buildUrl(`${this.tvHost}/api-fx/list`, { search: story, limit: 48 }), this.buildRequestOptions(context));
-      const root = await response.json();
-      if (Array.isArray(root?.items) && root.items.length) return root.items;
-    }
-    return [];
   }
 
   pickSearchMatch(items, { title, originalTitle, year, similar = false } = {}) {
@@ -162,6 +286,8 @@ export class FilmixClient {
     });
     return exact.length === 1 ? exact[0] : null;
   }
+
+  // ── Card ──────────────────────────────────────────────────────────────
 
   async card(postId, context = null) {
     try {
@@ -187,14 +313,22 @@ export class FilmixClient {
    * Возвращает финальные (уже разрешённые) ссылки:
    *   фильм  → [{ voiceover, files: [{ url, quality, proPlus }] }]
    *   сериал → { "Озвучка": { "season-1": { season, episodes: { e1: { episode, files } } } } }
-   * Не требует токена в отличие от /api/v2/post. null при недоступности.
+   *
+   * Если заданы FilmixTV-учётные данные (tvUser+tvPassword) — добавляет
+   * Bearer-авторизацию (как Lampac FilmixTV), что защищает от Cloudflare.
+   * Без учётки запрос идёт анонимно и может быть заблокирован.
    */
   async videoLinks(postId, context = null) {
     if (postId === undefined || postId === null || postId === '') return null;
+
+    const opts = this.buildRequestOptions(context);
+    const authHeaders = await this.tvAuthHeaders();
+    if (authHeaders) opts.headers = { ...opts.headers, ...authHeaders };
+
     try {
       const response = await this.apiFxClient.get(
         `${this.tvHost}/api-fx/post/${encodeURIComponent(String(postId))}/video-links`,
-        this.buildRequestOptions(context)
+        opts
       );
       const root = await response.json();
       return root == null ? null : root;
@@ -202,11 +336,14 @@ export class FilmixClient {
       logger.warn('filmix_video_links_failed', {
         postId,
         tvHost: this.tvHost,
+        hasAuth: !!authHeaders,
         error: error instanceof Error ? error.message : String(error)
       });
       return null;
     }
   }
+
+  // ── Utils ─────────────────────────────────────────────────────────────
 
   normalizeSearchName(value) {
     return String(value || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/g, ' ').trim();

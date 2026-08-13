@@ -138,6 +138,7 @@ async function route(context, response) {
     const body = { items: payload.items };
     if (Array.isArray(payload.seasons) && payload.seasons.length) body.seasons = payload.seasons;
     if (Array.isArray(payload.voices) && payload.voices.length) body.voices = payload.voices;
+    if (payload.provider_error) body.provider_error = payload.provider_error;
     return sendJson(request, response, 200, body);
   }
 

@@ -143,6 +143,255 @@ test('static: сезоны/озвучки — через канонически�
   assert.match(stripped, /voiceIndexes\[subitem\.index\]/, 'озвучка берётся из voiceIndexes по subitem.index');
 });
 
+test('static: setFilters — E-Online-паритет: voice→season→reset, chosen(\'filter\'), maniya_reset', async () => {
+  const source = await readFile(PLUGIN_PATH, 'utf8');
+  const stripped = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+
+  // Подпись текущего выбора на кнопке фильтра (эталон E-Online this.selected
+  // → filter.chosen('filter', select): «Озвучка: …, Сезон: …»).
+  assert.match(stripped, /filter\.chosen\('filter',\s*labels\)/,
+    'подпись выбора уходит в chosen(\'filter\')');
+  // Reset-пункт списка (эталон E-Online select.push reset) — обработчик item.reset уже есть.
+  assert.match(stripped, /title:\s*Lampa\.Lang\.translate\('maniya_reset'\)[\s\S]*?reset:\s*true/,
+    'reset-пункт добавлен');
+  assert.match(stripped, /maniya_reset:\s*\{\s*ru:\s*'Сброс'/,
+    'lang-ключ maniya_reset существует');
+  // Порядок как на эталонном скриншоте: «Перевод» (voice) раньше «Сезон» (season).
+  const voicePos = stripped.indexOf("stype: 'voice'");
+  const seasonPos = stripped.indexOf("stype: 'season'");
+  assert.ok(voicePos > 0 && seasonPos > voicePos,
+    'voice объявляется раньше season в setFilters');
+});
+
+/**
+ * Поведенческий sandbox полного цикла компонента: НАСТОЯЩИЙ плагин + заглушки
+ * Lampa, реальный flow start() → checkSubscription → loadSources → loadVideos →
+ * setFilters → draw() с фикстурой сериального payload (сезоны/озвучки/серии).
+ * Аналогичен filmix-plugin-harness.mjs (прогон с реальным production-ответом),
+ * но здесь — воспроизводимый юнит-тест на фикстуре.
+ */
+async function loadComponentSandbox(payload, opts = {}) {
+  const source = await readFile(PLUGIN_PATH, 'utf8');
+  const filterCalls = { set: [], chosen: [], show: [] };
+  const drawn = [];
+  const network = [];
+  const filterInstances = [];
+  const langMap = {
+    maniya_source: 'Источник', maniya_season: 'Сезон', maniya_voice: 'Озвучка',
+    maniya_reset: 'Сброс', maniya_episode: 'Серия', title_filter: 'Фильтр',
+    maniya_empty_sources: 'Нет источников', maniya_server_error: 'Ошибка сервера',
+    maniya_no_results: 'Ничего не найдено'
+  };
+  let activity = null;
+
+  const fakeJq = {
+    append: () => fakeJq, prepend: () => fakeJq, before: () => fakeJq, after: () => fakeJq,
+    find: () => fakeJq, first: () => fakeJq, prev: () => fakeJq, remove: () => fakeJq,
+    on: () => fakeJq, addClass: () => fakeJq, hasClass: () => false, attr: () => fakeJq,
+    prop: () => '', text: () => fakeJq, html: () => fakeJq, is: () => false, length: 1
+  };
+
+  const lampa = {
+    Storage: { get: (k, d) => d, set: () => {}, field: () => '' },
+    Utils: {
+      uid: () => 'abcdef12', hash: () => 'deadbeef',
+      addUrlComponent: (u, p) => u + (u.includes('?') ? '&' : '?') + p,
+      shortText: (s, n) => String(s || '').slice(0, n),
+      cardImgBackgroundBlur: () => ''
+    },
+    Lang: { add: () => {}, translate: (k) => langMap[k] || k },
+    Arrays: { isArray: Array.isArray, getKeys: Object.keys, decodeJson: (s) => JSON.parse(s) },
+    Template: {
+      add: () => {},
+      get: (name, data) => {
+        if (name === 'maniya_video_item' && data) drawn.push(data);
+        return fakeJq;
+      }
+    },
+    Scroll: function () {
+      this.render = () => fakeJq; this.clear = () => {}; this.reset = () => {};
+      this.minus = () => {}; this.append = () => {}; this.update = () => {};
+      this.body = () => fakeJq; this.destroy = () => {};
+    },
+    Explorer: function () {
+      this.render = () => fakeJq; this.appendFiles = () => {}; this.appendHead = () => {};
+      this.destroy = () => {};
+    },
+    Filter: function () {
+      filterInstances.push(this);
+      this.set = (type, items) => filterCalls.set.push({ type, items });
+      this.chosen = (type, select) => filterCalls.chosen.push({ type, select });
+      this.show = (title, type) => filterCalls.show.push({ title, type });
+      this.render = () => fakeJq;
+      this.onSelect = null;
+    },
+    Reguest: function () {
+      this.timeout = () => {};
+      this.silent = (url, ok) => {
+        network.push(String(url));
+        if (url.includes('/api/lampa/sources')) return ok({ sources: [{ id: 'filmix', name: 'Filmix', icon: '🎬', quality_label: '4K', url: 'https://x/api/lampa/videos?provider=filmix', show: true }] });
+        if (url.includes('/api/lampa/videos')) return ok(payload);
+        return ok({});
+      };
+      this.clear = () => {};
+    },
+    Select: { show: () => {}, close: () => {} },
+    Activity: { active: () => ({ activity }), push: () => {}, backward: () => {} },
+    Controller: { add: () => {}, toggle: () => {}, enable: () => {}, enabled: () => ({ name: '' }), collectionSet: () => {}, collectionFocus: () => {} },
+    Background: { immediately: () => {} },
+    Navigator: { canmove: () => false, move: () => {} },
+    TMDB: { image: () => '' },
+    Player: { play: () => {}, playlist: () => {} },
+    Loading: { start: () => {}, stop: () => {} },
+    Noty: { show: () => {} },
+    Manifest: { plugins: [] },
+    Component: { add: (name, fn) => { lampa._component = fn; } },
+    Listener: { follow: () => {}, remove: () => {} }
+  };
+
+  // TMDB-обогащение (FILMIX-004 follow-up): при opts.tmdbSeasons плагин получает
+  // рабочий Lampa.Api.sources.tmdb — эпизоды сезона {episode_number, name}.
+  // Успех-колбэк вызываем СИНХРОННО (в реальной Lampa он асинхронный — там это
+  // сетевой запрос; здесь это не важно для отрисовки, т.к. draw() ждёт его).
+  if (opts.tmdbSeasons) {
+    lampa.Api = {
+      sources: {
+        tmdb: {
+          get: (method, params, ok) => {
+            const m = String(method).match(/\/season\/(\d+)/);
+            const season = m ? m[1] : '1';
+            ok({ episodes: (opts.tmdbSeasons[season] || []).slice() });
+          }
+        }
+      }
+    };
+  }
+
+  const context = {
+    console, $: () => fakeJq, Lampa: lampa, Navigator: lampa.Navigator,
+    document: { currentScript: null, getElementsByTagName: () => [] },
+    location: { href: 'http://localhost/player.html?token=mo-t', search: '' }
+  };
+  context.window = context;
+
+  vm.runInNewContext(source, context, { filename: 'maniya-online.js' });
+
+  activity = { loader: () => {}, toggle: () => {} };
+  const inst = { activity };
+  lampa._component.call(inst, { movie: { id: 1396, name: 'Дом Дракона', original_name: 'House of the Dragon', first_air_date: '2022-08-21' } });
+  inst.start();
+
+  return { filterCalls, drawn, network, filterInstances };
+}
+
+test('поведение: сериал — фильтр voice→season→reset + chosen(\'filter\'), серии с реальными названиями, сезон уходит в /videos', async () => {
+  const payload = JSON.parse(
+    await readFile(new URL('./fixtures/filmix-videos-payload-serial.json', import.meta.url), 'utf8')
+  );
+  const { filterCalls, drawn, network, filterInstances } = await loadComponentSandbox(payload);
+
+  const set = filterCalls.set.find((c) => c.type === 'filter');
+  assert.ok(set, 'filter.set(\'filter\') вызван');
+  const stypes = Array.from(set.items.map((i) => i.stype || 'reset'));
+  assert.deepEqual(stypes, ['voice', 'season', 'reset'], 'порядок: voice → season → reset (эталон E-Online)');
+
+  const voice = set.items[0];
+  assert.equal(voice.title, 'Озвучка');
+  assert.equal(voice.subtitle, 'Дубляж [Кравец-Рекордз]');
+  assert.equal(voice.items.length, 2, '2 озвучки в под-фильтре');
+
+  const season = set.items[1];
+  assert.equal(season.title, 'Сезон');
+  assert.equal(season.items.length, 3, '3 сезона в под-фильтре');
+  assert.equal(season.items[2].title, '3 сезон');
+  assert.equal(season.items[2].index, 2);
+
+  const chosen = filterCalls.chosen.find((c) => c.type === 'filter');
+  assert.ok(chosen, 'chosen(\'filter\') вызван — подпись на кнопке фильтра');
+  assert.deepEqual(
+    Array.from(chosen.select),
+    ['Озвучка: Дубляж [Кравец-Рекордз]', 'Сезон: 1 сезон']
+  );
+  assert.ok(filterCalls.chosen.some((c) => c.type === 'sort'), 'chosen(\'sort\') вызван');
+
+  // Серии: «номер + реальное название серии» — название Filmix дошло без потери;
+  // пустой title от сервера («1 серия») тоже получил номер.
+  assert.deepEqual(
+    drawn.map((i) => i.title),
+    ['01 Enter The House of the Dragon', '02 House Of The Dragon Premiere Special', '01 1 серия']
+  );
+
+  // Выбор «3 сезон» через канонический onSelect → в /videos уходит season=3
+  // (сервер фильтрует серии по сезону — вернёт только серии 3-го).
+  const before = network.filter((u) => u.includes('/api/lampa/videos')).length;
+  filterInstances[0].onSelect('filter', season, season.items[2]);
+  assert.ok(
+    network.slice(before).some((u) => u.includes('/api/lampa/videos') && u.includes('season=3')),
+    'сезон 3 ушёл в /videos после выбора'
+  );
+});
+
+test('поведение: TMDB даёт русские названия серий → они перекрывают английский episode.title Filmix и фолбэк «N серия», во всех сезонах', async () => {
+  const payload = JSON.parse(
+    await readFile(new URL('./fixtures/filmix-videos-payload-serial.json', import.meta.url), 'utf8')
+  );
+  // Провайдер знает только s1e01/e02 (английские) и s3e01 (фолбэк «1 серия»).
+  // TMDB (язык Lampa пользователя — русский) знает все сезоны → перекрываем.
+  const tmdbSeasons = {
+    '1': [
+      { episode_number: 1, name: 'Наследники дракона' },
+      { episode_number: 2, name: 'Строптивый принц' },
+      { episode_number: 3, name: 'Второй из своего имени' }
+    ],
+    '3': [
+      { episode_number: 1, name: 'После пляски' },
+      { episode_number: 2, name: 'Свиньи и ублюдки' }
+    ]
+  };
+  const { drawn } = await loadComponentSandbox(payload, { tmdbSeasons });
+
+  assert.deepEqual(
+    drawn.map((i) => i.title),
+    ['01 Наследники дракона', '02 Строптивый принц', '01 После пляски'],
+    'TMDB-имена (русские) во всех сезонах; номер серии — отдельно, имя шоу не примешивается'
+  );
+});
+
+test('поведение: TMDB не знает имени серии → оставляем название провайдера/фолбэк как есть', async () => {
+  const payload = JSON.parse(
+    await readFile(new URL('./fixtures/filmix-videos-payload-serial.json', import.meta.url), 'utf8')
+  );
+  // TMDB знает только s1e01. s1e02 (английское Filmix) и s3e01 («1 серия») не тронуты.
+  const tmdbSeasons = {
+    '1': [{ episode_number: 1, name: 'Наследники дракона' }]
+  };
+  const { drawn } = await loadComponentSandbox(payload, { tmdbSeasons });
+
+  assert.deepEqual(
+    drawn.map((i) => i.title),
+    ['01 Наследники дракона', '02 House Of The Dragon Premiere Special', '01 1 серия'],
+    'нет имени в TMDB → английское название Filmix и фолбэк «N серия» остаются как есть'
+  );
+});
+
+test('поведение: фильм без сезонов/озвучек — filter.set(\'filter\') не вызывается (movie flow не тронут)', async () => {
+  const payload = {
+    items: [
+      { method: 'play', title: 'Дубляж [Rus]', url: 'https://cdn.example/movie.m3u8', quality: { '1080p': 'https://cdn.example/movie_1080.m3u8' }, headers: {}, subtitles: [], type: 'movie' }
+    ],
+    seasons: [],
+    voices: []
+  };
+  const { filterCalls, drawn } = await loadComponentSandbox(payload);
+
+  assert.ok(!filterCalls.set.some((c) => c.type === 'filter'),
+    'для фильма нет под-фильтров сезонов/озвучек → кнопка «Фильтр» не рисуется');
+  assert.ok(filterCalls.set.some((c) => c.type === 'sort'), 'источники (sort) остаются');
+  assert.equal(drawn[0].title, 'Дубляж [Rus]', 'заголовок фильма не тронут (без префикса серии)');
+});
+
 test('поведение: Lampa.Select без .open — селектор качества работает через show (регрессия «Script error.»)', async () => {
   const { lib, calls } = await loadSandbox();
 

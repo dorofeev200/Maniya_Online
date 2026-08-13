@@ -1,0 +1,49 @@
+{
+  "items": [
+    {
+      "method": "play",
+      "title": "Enter The House of the Dragon",
+      "url": "https://cdn.example/s01e01.m3u8",
+      "quality": { "1080p": "https://cdn.example/s01e01_1080.m3u8" },
+      "headers": {},
+      "subtitles": [],
+      "season": 1,
+      "episode": 1,
+      "voice_name": "Дубляж [Кравец-Рекордз]",
+      "type": "serial"
+    },
+    {
+      "method": "play",
+      "title": "House Of The Dragon Premiere Special",
+      "url": "https://cdn.example/s01e02.m3u8",
+      "quality": { "1080p": "https://cdn.example/s01e02_1080.m3u8" },
+      "headers": {},
+      "subtitles": [],
+      "season": 1,
+      "episode": 2,
+      "voice_name": "Дубляж [Кравец-Рекордз]",
+      "type": "serial"
+    },
+    {
+      "method": "play",
+      "title": "1 серия",
+      "url": "https://cdn.example/s03e01.m3u8",
+      "quality": { "1080p": "https://cdn.example/s03e01_1080.m3u8" },
+      "headers": {},
+      "subtitles": [],
+      "season": 3,
+      "episode": 1,
+      "voice_name": "Оригинальный [Английский]",
+      "type": "serial"
+    }
+  ],
+  "seasons": [
+    { "number": 1, "title": "1 сезон" },
+    { "number": 2, "title": "2 сезон" },
+    { "number": 3, "title": "3 сезон" }
+  ],
+  "voices": [
+    { "name": "Дубляж [Кравец-Рекордз]", "index": 0 },
+    { "name": "Оригинальный [Английский]", "index": 1 }
+  ]
+}

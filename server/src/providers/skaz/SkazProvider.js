@@ -451,17 +451,28 @@ export class SkazProvider extends Provider {
 
     if (!this.enabled()) return { items: [], seasons: [], voices: [] };
 
+    let result;
     try {
       const streamProxy = (url) => buildProxyUrl(requestContext, url, {
         origin: this.client.origin,
         ref: this.client.origin
       });
-      return this.serialQuery(query)
+      result = this.serialQuery(query)
         ? await this.serialVideos(query, requestContext, streamProxy)
         : await this.movieVideos(query, requestContext, streamProxy);
     } catch {
-      return { items: [], seasons: [], voices: [] };
+      result = { items: [], seasons: [], voices: [] };
     }
+
+    // accsdb — ошибка учётной записи: не маскируем как «нет источников».
+    if (this.client?.lastAccsdb) {
+      result.provider_error = {
+        code: 'accsdb',
+        message: this.client.lastAccsdb.message
+      };
+    }
+
+    return result;
   }
 
   async resolveCardStream(card, requestContext) {
@@ -565,10 +576,20 @@ export class SkazProvider extends Provider {
   }
 }
 
-function cleanedQualityMap(map, proxy) {
+/**
+ * Качества из JSON video → мапа «label → прокси-URL». Каждая запись может
+ * нести reserve-фолбэк `URL1 or URL2` (ровно как `json.url`) — сплитим тем же
+ * `splitOrUrl` и проксируем КАЖДУЮ часть отдельно, склеивая обратно ` or `.
+ * Иначе `URL1 or URL2` ушёл бы одним прокси-URL с or-хвостом внутри url-параметра
+ * (reserve-ссылка для плеера теряется, работает только на толерантности CDN).
+ * Без ` or ` поведение полностью прежнее.
+ */
+export function cleanedQualityMap(map, proxy) {
   const out = {};
   for (const [label, urlEntry] of Object.entries(map || {})) {
-    if (urlEntry && typeof urlEntry === 'string') out[label] = proxy(urlEntry);
+    if (!urlEntry || typeof urlEntry !== 'string') continue;
+    const parts = splitOrUrl(urlEntry);
+    out[label] = parts.length > 1 ? parts.map((u) => proxy(u)).join(' or ') : proxy(urlEntry);
   }
   return out;
 }

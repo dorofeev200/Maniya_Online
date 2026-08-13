@@ -338,6 +338,7 @@
     var activeVoice = null;
     var seasonNumbers = [];
     var voiceIndexes = [];
+    var seasonEpisodesCache = {};
 
     this.create = function () {
       return this.render();
@@ -511,14 +512,36 @@
 
     this.setFilters = function (json) {
       // Канонический Lampa-Filter `filter` с под-фильтрами season/voice — ровно
-      // как рабочий E-Online (Online/plugin.js this.filter). season/voice это НЕ
+      // как эталон E-Online (Online/plugin.js this.filter). season/voice это НЕ
       // отдельные типы `filter.set('season'/'voice')`: Lampa рендерит только
       // sort/filter/search, отдельный тип молча не отобразится → «сезоны/озвучки
       // не видны». Значения храним отдельно (seasonNumbers/voiceIndexes), а в
       // onSelect индекс под-элемента (subitem.index) мапится обратно в значение.
+      // Порядок как в эталоне: «Озвучка» (Перевод) → «Сезон»; первый пункт — reset.
       var select = [];
       seasonNumbers = [];
       voiceIndexes = [];
+      var selectedVoice = '';
+      var selectedSeason = '';
+
+      if (json && json.voices && json.voices.length) {
+        voiceIndexes = json.voices.map(function (voice) { return voice.index; });
+        var voiceIndex = 0;
+        if (activeVoice !== null) {
+          for (var j = 0; j < voiceIndexes.length; j++) {
+            if (String(voiceIndexes[j]) === String(activeVoice)) { voiceIndex = j; break; }
+          }
+        }
+        selectedVoice = json.voices[voiceIndex].name;
+        select.push({
+          title: Lampa.Lang.translate('maniya_voice'),
+          subtitle: selectedVoice,
+          items: json.voices.map(function (voice, index) {
+            return { title: voice.name, selected: index === voiceIndex, index: index };
+          }),
+          stype: 'voice'
+        });
+      }
 
       if (json && json.seasons && json.seasons.length) {
         seasonNumbers = json.seasons.map(function (season) { return season.number; });
@@ -528,9 +551,10 @@
             if (String(seasonNumbers[i]) === String(activeSeason)) { seasonIndex = i; break; }
           }
         }
+        selectedSeason = json.seasons[seasonIndex].title || Lampa.Lang.translate('maniya_season') + ' ' + json.seasons[seasonIndex].number;
         select.push({
           title: Lampa.Lang.translate('maniya_season'),
-          subtitle: json.seasons[seasonIndex].title || Lampa.Lang.translate('maniya_season') + ' ' + json.seasons[seasonIndex].number,
+          subtitle: selectedSeason,
           items: json.seasons.map(function (season, index) {
             return {
               title: season.title || Lampa.Lang.translate('maniya_season') + ' ' + season.number,
@@ -542,25 +566,20 @@
         });
       }
 
-      if (json && json.voices && json.voices.length) {
-        voiceIndexes = json.voices.map(function (voice) { return voice.index; });
-        var voiceIndex = 0;
-        if (activeVoice !== null) {
-          for (var j = 0; j < voiceIndexes.length; j++) {
-            if (String(voiceIndexes[j]) === String(activeVoice)) { voiceIndex = j; break; }
-          }
-        }
+      if (select.length) {
+        // Сброс выбора — канонический reset-пункт (эталон E-Online select.push reset).
         select.push({
-          title: Lampa.Lang.translate('maniya_voice'),
-          subtitle: json.voices[voiceIndex].name,
-          items: json.voices.map(function (voice, index) {
-            return { title: voice.name, selected: index === voiceIndex, index: index };
-          }),
-          stype: 'voice'
+          title: Lampa.Lang.translate('maniya_reset'),
+          reset: true
         });
+        filter.set('filter', select);
+        // Подпись текущего выбора на кнопке фильтра: «Озвучка: …, Сезон: …»
+        // (эталон E-Online this.selected → filter.chosen('filter', select)).
+        var labels = [];
+        if (selectedVoice) labels.push(Lampa.Lang.translate('maniya_voice') + ': ' + selectedVoice);
+        if (selectedSeason) labels.push(Lampa.Lang.translate('maniya_season') + ': ' + selectedSeason);
+        filter.chosen('filter', labels);
       }
-
-      if (select.length) filter.set('filter', select);
     };
 
     this.reset = function () {
@@ -570,58 +589,142 @@
       scroll.body().append(Lampa.Template.get('maniya_content_loading'));
     };
 
+    /** Номер серии item'а (episode, либо series для провайдеров без episode). */
+    function serialEpisodeOf(item) {
+      var n = Number(item.episode);
+      if (!isFinite(n) || n <= 0) n = Number(item.series);
+      return isFinite(n) ? n : 0;
+    }
+
+    /**
+     * Сезонные эпизоды TMDB для сериала (эталон Lampac Online/plugin.js
+     * getEpisodes): `Lampa.Api.sources.tmdb.get('tv/{id}/season/{n}')`. Имена
+     * приходят в языке Lampa пользователя (русский). Свой слой Lampa даёт кэш и
+     * api_key — свой секрет не нужен. Ошибка/нет слоя/не сериал → пустой список
+     * (названия остаются «как есть», где TMDB не смог — пускай как будет).
+     */
+    function getSeasonEpisodes(season, callback) {
+      var movie = object.movie || {};
+      var tmdb_id;
+      if (movie.source && movie.source !== 'tmdb' && movie.source !== 'cub') tmdb_id = movie.tmdb_id;
+      else tmdb_id = movie.id;
+      tmdb_id = Number(tmdb_id);
+      if (!isFinite(tmdb_id) || !movie.name) return callback([]);
+
+      var key = tmdb_id + ':s' + season;
+      if (seasonEpisodesCache[key]) return callback(seasonEpisodesCache[key]);
+      if (!(Lampa.Api && Lampa.Api.sources && Lampa.Api.sources.tmdb && typeof Lampa.Api.sources.tmdb.get === 'function')) {
+        seasonEpisodesCache[key] = [];
+        return callback([]);
+      }
+      try {
+        Lampa.Api.sources.tmdb.get('tv/' + tmdb_id + '/season/' + season, {}, function (data) {
+          var episodes = (data && Array.isArray(data.episodes)) ? data.episodes : [];
+          seasonEpisodesCache[key] = episodes;
+          callback(episodes);
+        }, function () {
+          seasonEpisodesCache[key] = [];
+          callback([]);
+        });
+      } catch (e) {
+        seasonEpisodesCache[key] = [];
+        callback([]);
+      }
+    }
+
     this.draw = function (items) {
       var self = this;
       if (!items.length) return this.empty(Lampa.Lang.translate('maniya_no_results'));
 
-      scroll.clear();
-      items.forEach(function (item, index) {
-        if (!item.title) {
-          if (item.episode || item.series) {
-            item.title = Lampa.Lang.translate('maniya_episode') + ' ' + (item.episode || index + 1);
-          } else {
-            // Фильм, серий нет — не рисуем «Серия N», что при отсутствии title
-            // вводит пользователя в заблуждение. Показываем озвучку/качество/индекс.
-            item.title = item.voice_name || bestQualityLabel(item) || String(index + 1);
+      function render() {
+        scroll.clear();
+        items.forEach(function (item, index) {
+          if (!item.title) {
+            if (item.episode || item.series) {
+              item.title = Lampa.Lang.translate('maniya_episode') + ' ' + (item.episode || index + 1);
+            } else {
+              // Фильм, серий нет — не рисуем «Серия N», что при отсутствии title
+              // вводит пользователя в заблуждение. Показываем озвучку/качество/индекс.
+              item.title = item.voice_name || bestQualityLabel(item) || String(index + 1);
+            }
+          } else if (item.episode && item.episode > 0) {
+            // Сериал: реальное название серии от провайдера (Filmix episode.title) +
+            // номер серии с ведущим нулём: «01 Моря и соль, Пламя» (задача FILMIX-003).
+            item.title = ('0' + item.episode).slice(-2) + ' ' + item.title;
           }
-        }
-        item.info = item.voice_name || bestQualityLabel(item) || sourceLabel(sources[activeSource]);
-        item.time = item.time || '';
-        item.quality_label = item.quality_label || '';
-        item.qualities_html = qualityChips(item);
-        item.poster = item.poster || moviePoster(object.movie);
-        item.poster_block = item.poster
-          ? '<img class="maniya-online-item__poster" src="' + item.poster + '" alt=""/>'
-          : '';
+          item.info = item.voice_name || bestQualityLabel(item) || sourceLabel(sources[activeSource]);
+          item.time = item.time || '';
+          item.quality_label = item.quality_label || '';
+          item.qualities_html = qualityChips(item);
+          item.poster = item.poster || moviePoster(object.movie);
+          item.poster_block = item.poster
+            ? '<img class="maniya-online-item__poster" src="' + item.poster + '" alt=""/>'
+            : '';
 
-        var html = Lampa.Template.get('maniya_video_item', item);
-        if (!item.qualities_html) html.find('.maniya-online-item__qualities').remove();
-        if (item.poster) {
-          // E-Online online-prestige__img (Online/plugin.js 1204-1236): onerror→img_broken,
-          // onload→loaded, element.thumbnail = img.src — постер/миниатюра уходят в плеер.
-          var posterEl = html.find('.maniya-online-item__poster');
-          posterEl.on('error', function () {
-            posterEl.attr('src', './img/img_broken.svg');
+          var html = Lampa.Template.get('maniya_video_item', item);
+          if (!item.qualities_html) html.find('.maniya-online-item__qualities').remove();
+          if (item.poster) {
+            // E-Online online-prestige__img (Online/plugin.js 1204-1236): onerror→img_broken,
+            // onload→loaded, element.thumbnail = img.src — постер/миниатюра уходят в плеер.
+            var posterEl = html.find('.maniya-online-item__poster');
+            posterEl.on('error', function () {
+              posterEl.attr('src', './img/img_broken.svg');
+            });
+            posterEl.on('load', function () {
+              posterEl.addClass('maniya-online-item__poster--loaded');
+            });
+            item.thumbnail = item.poster;
+          } else {
+            html.find('.maniya-online-item__poster-block').remove();
+          }
+          html.on('hover:enter', function () {
+            self.play(item);
+          }).on('hover:focus', function (event) {
+            last = event.target;
+            scroll.update($(event.target), true);
           });
-          posterEl.on('load', function () {
-            posterEl.addClass('maniya-online-item__poster--loaded');
-          });
-          item.thumbnail = item.poster;
-        } else {
-          html.find('.maniya-online-item__poster-block').remove();
-        }
-        html.on('hover:enter', function () {
-          self.play(item);
-        }).on('hover:focus', function (event) {
-          last = event.target;
-          scroll.update($(event.target), true);
+
+          scroll.append(html);
         });
 
-        scroll.append(html);
-      });
+        self.loading(false);
+        Lampa.Controller.enable('content');
+      }
 
-      this.loading(false);
-      Lampa.Controller.enable('content');
+      // TMDB-обогащение названий серий: реальные имена (русский) во всех сезонах,
+      // где TMDB знает — перекрывают и английский episode.title Filmix, и фолбэк
+      // «N серия». Где TMDB не знает имени / слой недоступен / фильм — оставляем
+      // как пришло («где нет — пускай как будет»). Номер серии наносится отдельно
+      // в render() выше, имя шоу не примешивается никогда.
+      var seasonsMap = {};
+      items.forEach(function (item) {
+        if (item && serialEpisodeOf(item) > 0 && item.season) seasonsMap[item.season] = true;
+      });
+      var seasonList = Lampa.Arrays.getKeys(seasonsMap);
+      if (!seasonList.length || !(object.movie && object.movie.name)) return render();
+
+      var pending = seasonList.length;
+      var episodesBySeason = {};
+      seasonList.forEach(function (season) {
+        getSeasonEpisodes(season, function (episodes) {
+          episodesBySeason[season] = episodes || [];
+          pending -= 1;
+          if (pending > 0) return;
+          items.forEach(function (item) {
+            var n = serialEpisodeOf(item);
+            if (!(n > 0)) return;
+            var list = episodesBySeason[item.season];
+            if (!list || !list.length) return;
+            for (var e = 0; e < list.length; e++) {
+              if (Number(list[e].episode_number) === n && list[e].name) {
+                item.title = list[e].name;
+                break;
+              }
+            }
+          });
+          render();
+        });
+      });
     };
 
     this.play = function (item) {
@@ -759,6 +862,7 @@
       maniya_source: { ru: 'Источник', en: 'Source' },
       maniya_season: { ru: 'Сезон', en: 'Season' },
       maniya_voice: { ru: 'Озвучка', en: 'Voice' },
+      maniya_reset: { ru: 'Сброс', en: 'Reset' },
       maniya_quality: { ru: 'Выбор качества', en: 'Select quality' },
       maniya_watch_quality: { ru: 'Смотреть', en: 'Watch' },
       maniya_episode: { ru: 'Серия', en: 'Episode' },
@@ -882,7 +986,7 @@
 
     var manifest = {
       type: 'video',
-      version: '1.0.0',
+      version: '1.0.1',
       name: 'Maniya Online',
       description: 'Плагин Maniya Online для просмотра доступных источников по подписке',
       component: COMPONENT,

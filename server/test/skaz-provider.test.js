@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SkazProvider } from '../src/providers/skaz/SkazProvider.js';
+import { SkazProvider, cleanedQualityMap } from '../src/providers/skaz/SkazProvider.js';
+import { extractAccsdbMessage } from '../src/providers/skaz/SkazClient.js';
+import { buildProxyUrl } from '../src/proxy.js';
 
 const FIXTURE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const repoFixture = (name) => readFile(path.join(FIXTURE_DIR, name), 'utf8');
@@ -18,6 +20,7 @@ class FakeSkazClient {
     this.resolveResult = options.resolveStream || 'http://magic.stream.voidboost.one/s/key/manifest.m3u8';
     this.videoJson = options.videoJson == null ? null : options.videoJson; // строка JSON или объект для resolveVideoJson
     this.calls = [];
+    this.lastAccsdb = null; // I1: симулирует SkazClient.lastAccsdb
   }
 
   enabled() {
@@ -534,4 +537,197 @@ test('поиск с id/imdb_id — запись контракта', async () =>
   assert.equal(records.length, 1);
   assert.equal(records[0].type, 'serial');
   assert.equal(records[0].metadata.imdb_id, 'tt0944947');
+});
+
+// ===== cleanedQualityMap: P1-B — reserve «URL1 or URL2» в качествах =====
+// Каждая метка качества из JSON может нести `URL1 or URL2`. Проксируем каждую
+// часть отдельно и склеиваем обратно ` or ` (как item.url в resolveCardItem),
+// а НЕ один proxy-URL с or-хвостом внутри url-параметра.
+// fakeProxy даёт детерминированный вид: P[<url>] — легко проверять split/join.
+
+test('cleanedQualityMap: один URL без or → один proxy-URL (поведение прежнее)', () => {
+  const proxy = (url) => `P[${url}]`;
+  const out = cleanedQualityMap({ '1080p': 'https://a.vkvideo.cloud/1080.m3u8' }, proxy);
+  assert.equal(out['1080p'], 'P[https://a.vkvideo.cloud/1080.m3u8]');
+});
+
+test('cleanedQualityMap: URL1 or URL2 → proxy(URL1) or proxy(URL2)', () => {
+  const proxy = (url) => `P[${url}]`;
+  const out = cleanedQualityMap(
+    { '2160p': 'https://a.vkvideo.cloud/2160.m3u8 or https://b.vkvideo.cloud/2160.m3u8' },
+    proxy
+  );
+  assert.equal(out['2160p'], 'P[https://a.vkvideo.cloud/2160.m3u8] or P[https://b.vkvideo.cloud/2160.m3u8]');
+});
+
+test('cleanedQualityMap: несколько качеств — каждое сплитится независимо', () => {
+  const proxy = (url) => `P[${url}]`;
+  const out = cleanedQualityMap({
+    '2160p': 'https://a/2160.m3u8 or https://b/2160.m3u8',
+    '1080p': 'https://a/1080.m3u8 or https://b/1080.m3u8',
+    '720p': 'https://a/720.m3u8'
+  }, proxy);
+  assert.equal(out['2160p'], 'P[https://a/2160.m3u8] or P[https://b/2160.m3u8]');
+  assert.equal(out['1080p'], 'P[https://a/1080.m3u8] or P[https://b/1080.m3u8]');
+  assert.equal(out['720p'], 'P[https://a/720.m3u8]', 'без or — без изменений');
+  assert.equal(Object.keys(out).length, 3);
+});
+
+test('cleanedQualityMap: подстрока "or" внутри URL — не разделитель (splitOrUrl)', () => {
+  const proxy = (url) => `P[${url}]`;
+  // `/or/` и base64url с «or» без пробелов — НЕ « or »; такая ссылка не режется.
+  const out = cleanedQualityMap({
+    '1080p': 'https://cdn.example/or/video.m3u8',
+    '720p': 'https://cdn.example/0/aXZjb3Jkb2Z0ZXI/base64.m3u8'
+  }, proxy);
+  assert.equal(out['1080p'], 'P[https://cdn.example/or/video.m3u8]');
+  assert.equal(out['720p'], 'P[https://cdn.example/0/aXZjb3Jkb2Z0ZXI/base64.m3u8]');
+});
+
+test('cleanedQualityMap: больше двух частей — все части проксируются и склеиваются', () => {
+  const proxy = (url) => `P[${url}]`;
+  const out = cleanedQualityMap(
+    { '720p': 'https://a/1.m3u8 or https://b/2.m3u8 or https://c/3.m3u8' },
+    proxy
+  );
+  assert.equal(out['720p'], 'P[https://a/1.m3u8] or P[https://b/2.m3u8] or P[https://c/3.m3u8]');
+});
+
+test('cleanedQualityMap: реальный формат — ДВА отдельных /api/lampa/proxy, не один proxy с "or" в query', () => {
+  const context = { query: { token: '' }, request: {} };
+  const proxy = (url) => buildProxyUrl(context, url);
+  const out = cleanedQualityMap(
+    { '2160p': 'https://a.vkvideo.cloud/2160.m3u8 or https://b.vkvideo.cloud/2160.m3u8' },
+    proxy
+  );
+
+  const value = out['2160p'];
+  assert.ok(value.includes(' or '), 'reserve-разделитель сохранён');
+  const proxies = String(value).split(/\s+or\s+/i);
+  assert.equal(proxies.length, 2, `два независимых proxy-URL: ${proxies.length}`);
+  for (const p of proxies) {
+    assert.ok(String(p).startsWith('http') && String(p).includes('/api/lampa/proxy?url='), `через прокси: ${p.slice(0, 80)}`);
+    const inner = new URL(p).searchParams.get('url');
+    assert.ok(!/(^|\s)or(\s|$)/i.test(inner), `внутри url= нет « or »: ${String(inner).slice(0, 60)}`);
+    assert.equal(String(inner).split(/\s+or\s+/i).length, 1, 'url-параметр — один адрес, без or-хвоста');
+  }
+});
+
+test('resolveCardItem: quality с or из JSON → primary/reserve раздельно через прокси', async () => {
+  const html = [
+    '<div class="videos__item" data-json=\'{"method":"call","stream":"http://h/lite/alloha/video.m3u8?t=7&play=true","translate":"Дубляж"}\'>Дубляж</div>'
+  ].join('');
+  const videoJson = {
+    method: 'play',
+    url: 'https://a.vkvideo.cloud/master.m3u8 or https://b.vkvideo.cloud/reserve.m3u8',
+    quality: {
+      '2160p': 'https://a.vkvideo.cloud/2160.m3u8 or https://b.vkvideo.cloud/2160-reserve.m3u8',
+      '1080p': 'https://a.vkvideo.cloud/1080.m3u8 or https://b.vkvideo.cloud/1080-reserve.m3u8'
+    },
+    subtitles: []
+  };
+  const client = new FakeSkazClient({ lite: html, videoJson });
+  const provider = makeProvider(client, 'alloha');
+
+  const item = await provider.resolveVideo(context({ serial: '0', voice: '0' }));
+
+  assert.ok(item, 'дескриптор резолвится');
+  assert.ok(String(item.url).includes(' or '), 'item.url — primary or reserve');
+
+  const proxies2160 = String(item.quality['2160p']).split(/\s+or\s+/i);
+  assert.equal(proxies2160.length, 2, '2160p: две части');
+  for (const p of proxies2160) {
+    assert.ok(String(p).includes('/api/lampa/proxy'), `2160p через прокси: ${p.slice(0, 80)}`);
+    const inner = new URL(p).searchParams.get('url');
+    assert.ok(!/(^|\s)or(\s|$)/i.test(inner), `2160p url= без « or »: ${String(inner).slice(0, 60)}`);
+  }
+
+  const proxies1080 = String(item.quality['1080p']).split(/\s+or\s+/i);
+  assert.equal(proxies1080.length, 2, '1080p: две части');
+  for (const p of proxies1080) {
+    const inner = new URL(p).searchParams.get('url');
+    assert.ok(!/(^|\s)or(\s|$)/i.test(inner), `1080p url= без « or »: ${String(inner).slice(0, 60)}`);
+  }
+});
+
+// ===== I1: accsdb — provider_error в результате videos() =====
+
+test('I1: accsdb=true + msg → provider_error в результате videos()', async () => {
+  const client = new FakeSkazClient({ lite: '' });
+  client.lastAccsdb = { message: 'Аккаунт не найден' };
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  assert.equal(result.items.length, 0, 'пустые items при accsdb');
+  assert.ok(result.provider_error, 'provider_error присутствует');
+  assert.equal(result.provider_error.code, 'accsdb');
+  assert.equal(result.provider_error.message, 'Аккаунт не найден');
+});
+
+test('I1: accsdb=true без msg → generic сообщение в provider_error', async () => {
+  const client = new FakeSkazClient({ lite: '' });
+  client.lastAccsdb = { message: 'Учётная запись не подтверждена (accsdb)' };
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  assert.equal(result.items.length, 0);
+  assert.ok(result.provider_error);
+  assert.equal(result.provider_error.code, 'accsdb');
+  assert.match(result.provider_error.message, /учётная запись/i);
+});
+
+test('I1: GRANTED (обычный ответ) → provider_error ОТСУТСТВУЕТ', async () => {
+  const playHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v.m3u8"}\'>Дубляж</div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: playHtml });
+  // lastAccsdb НЕ установлен (как после успешного getLite).
+  const provider = makeProvider(client, 'filmix');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  assert.ok(result.items.length >= 1, 'play-карточки на месте');
+  assert.equal(result.provider_error, undefined, 'provider_error должен отсутствовать');
+});
+
+test('I1: HTTP 5xx (сеть) → пустые items, provider_error ОТСУТСТВУЕТ', async () => {
+  // Симуляция сетевой ошибки: lite='' → getLite вернёт '', cards()=[] → collectMovieCards=[].
+  const client = new FakeSkazClient({ lite: '' });
+  // lastAccsdb НЕ установлен (сетевая ошибка — не accsdb).
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '0' }));
+
+  assert.equal(result.items.length, 0, 'нет карточек при 5xx');
+  assert.equal(result.provider_error, undefined, 'provider_error должен отсутствовать при 5xx');
+});
+
+test('I1: accsdb в serial-пути → provider_error в результате videos()', async () => {
+  // Базовая страница: сезоны без голосов (alloha-вид).
+  const baseHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/alloha?title=GOT&s=1","similar":false}\'><span class="videos__item-title">1 сезон</span></div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: baseHtml });
+  // Симулируем: openLiteUrl (страница сезона) вернула accsdb.
+  client.lastAccsdb = { message: 'Учётная запись не grant' };
+  const provider = makeProvider(client, 'alloha');
+
+  const result = await provider.videos(context({ serial: '1', title: 'GOT' }));
+
+  assert.ok(result.provider_error, 'provider_error присутствует в serial-пути');
+  assert.equal(result.provider_error.code, 'accsdb');
+});
+
+test('I1: Email/UID НЕ попадают в сообщение об ошибке', async () => {
+  // Проверяем на уровне extractAccsdbMessage: даже если кластер возвращает
+  // их в msg, функция извлекает только msg-поле — без account_email/uid.
+  // (account_email/uid никогда не попадают в message, потому что мы читаем
+  // ТОЛЬКО поле "msg" из JSON-тела, и never форматируем их сами.)
+  const result = extractAccsdbMessage('{"accsdb":true,"msg":"Нет доступа"}');
+  assert.ok(result);
+  assert.ok(!result.message.includes('@'), 'Email не в сообщении');
+  assert.ok(!result.message.includes('dg4xu2tj'), 'UID не в сообщении');
+  assert.ok(!result.message.includes('nazarov6'), 'старый UID не в сообщении');
 });

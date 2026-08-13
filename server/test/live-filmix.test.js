@@ -1,76 +1,78 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { FilmixClient } from '../src/providers/filmix/FilmixClient.js';
 
-// Живая проверка фактической доступности Filmix-эндпоинтов.
-// По умолчанию пропущена — включается явно: FILMIX_LIVE=1 FILMIX_TOKEN=... node --test test/live-filmix.test.js
+// Живая проверка реального роутинга Filmix (FILMIX-002):
+//   PRIMARY  — api.filmix.tv/api-fx (search + video-links)
+//   FALLBACK — filmix.my/api/v2 (search + post)
+// По умолчанию пропущена — включается явно:
+//   FILMIX_LIVE=1 node --test test/live-filmix.test.js
 const live = process.env.FILMIX_LIVE === '1';
 const host = (process.env.FILMIX_HOST || 'https://filmix.my').replace(/\/+$/, '');
 const tvHost = (process.env.FILMIX_TV_HOST || 'https://api.filmix.tv').replace(/\/+$/, '');
-const token = process.env.FILMIX_TOKEN || '';
+const tvUser = process.env.FILMIX_TV_USER || '';
+const tvPassword = process.env.FILMIX_TV_PASSWORD || '';
 
-const args = new URLSearchParams({
-  app_lang: 'ru_RU',
-  user_dev_apk: '2.2.13',
-  user_dev_id: 'lampacheck12345678',
-  user_dev_name: 'Xiaomi 24069PC21G',
-  user_dev_os: '12',
-  user_dev_token: token,
-  user_dev_vendor: 'Xiaomi'
-}).toString();
+const client = new FilmixClient({ host, tvHost, tvUser, tvPassword });
 
-async function probe(label, url) {
-  const start = Date.now();
-  try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(20000), redirect: 'manual' });
-    const status = response.status;
-    const body = await response.text();
-    return { label, status, ok: status >= 200 && status < 400, ms: Date.now() - start, body };
-  } catch (error) {
-    return { label, status: 'ERR', ok: false, ms: Date.now() - start, body: error.name };
-  }
-}
+const skip = !live && 'только с FILMIX_LIVE=1';
 
-test('Filmix: живая проверка ссылок', { skip: !live && 'только с FILMIX_LIVE=1' }, async () => {
-  const title = encodeURIComponent('Властелин колец');
+test('Filmix search: api-fx primary живьём, "Форрест Гамп" → id 1567', { skip }, async () => {
+  const result = await client.search({ title: 'Форрест Гамп', originalTitle: 'Forrest Gump', year: 1994 });
+  assert.ok(result.items.length > 0, 'api-fx/list должен вернуть записи');
+  const ids = result.items.slice(0, 5).map((item) => `${item.id}:${item.title}`);
+  assert.ok(
+    result.items.some((item) => Number(item.id) === 1567),
+    `среди записей должен быть id 1567 (первые: ${ids.join(', ')})`
+  );
+  console.log(`  [ok] api-fx search: ${result.items.length} записей, есть id 1567`);
+});
 
-  // Рабочий анонимный поиск — единственный контур, который должен дать 200 и записи.
-  const fallback = await probe('search api-fx/list', `${tvHost}/api-fx/list?search=${title}&limit=48`);
-  assert.equal(fallback.ok, true, 'aнонимный fallback-поиск обязан быть доступен: ' + JSON.stringify(fallback.status));
+test('Filmix search: фолбэк на v2 (api-fx пуст) не падает и не висит', { skip }, async () => {
+  // api-fx принудительно пустой — реальный клиент уходит на filmix.my/api/v2/search.
+  const httpClient = { get: async () => ({ json: async () => ({ items: [] }) }) };
+  const c = new FilmixClient({ host, tvHost, tvUser, tvPassword, httpClient });
+  const started = Date.now();
+  const result = await c.search({ title: 'Властелин колец', originalTitle: 'The Lord of the Rings', year: 2001 });
+  const elapsed = Date.now() - started;
+  // v2 mirror сейчас мёртв (301→501) — результат может быть пустым, но поиск обязан
+  // завершиться быстро (primary-клиент 3с без ретраев) и вернуть массив.
+  assert.ok(Array.isArray(result.items));
+  assert.ok(elapsed < 15000, `v2-фолбэк обязан укладываться в ~3с, заняло ${elapsed}ms`);
+  console.log(`  [info] v2 fallback: ${result.items.length} записей за ${elapsed}ms`);
+});
 
-  let items = [];
-  try { items = JSON.parse(fallback.body).items || []; } catch { items = []; }
-  assert.ok(items.length > 0, 'fallback-поиск должен вернуть записи');
-  const id = items[0].id;
-  const itemTitle = items[0].title;
-  console.log(`  [ok] askapi_fx_list: ${fallback.ms}ms, записей=${items.length}, id=${id} "${itemTitle}"`);
+test('Filmix video-links: primary по реальному id отдаёт файлы потоков', { skip }, async () => {
+  const result = await client.search({ title: 'Форрест Гамп', originalTitle: 'Forrest Gump', year: 1994 });
+  const id = result.items.find((item) => Number(item.id) === 1567)?.id;
+  assert.ok(id, 'нужен id 1567 для проверки video-links');
 
-  // Primary API /api/v2/search — часто закрыт Cloudflare для анонима.
-  const primary = await probe('primary search /api/v2/search', `${host}/api/v2/search?story=${title}&${args}`);
-  console.log(`  [${primary.ok ? 'ok' : 'info'}] primary search: HTTP ${primary.status} (${primary.ms}ms)`);
-  if (!primary.ok) {
-    console.log('       → ожидаемая 403/Cloudflare без валидного FILMIX_TOKEN/рабочего FILMIX_HOST');
-  }
+  const links = await client.videoLinks(id, {});
+  assert.ok(links, 'video-links должен вернуть данные');
+  const isMovie = Array.isArray(links);
+  const size = isMovie ? links.length : Object.keys(links).length;
+  assert.ok(size > 0, `video-links должен содержать данные (найдено ${size})`);
+  console.log(`  [ok] video-links id=${id}: ${isMovie ? 'фильм' : 'сериал'}, записей/озвучек=${size}`);
+});
 
-  // Карточка /api/v2/post требует токен (459/Cloudflare анонимно).
-  const card = await probe('card /api/v2/post/{id}', `${host}/api/v2/post/${id}?${args}`);
-  const hasPlayerLinks = /"player_links"/.test(card.body || '');
-  if (token && card.ok && hasPlayerLinks) {
-    const parsed = JSON.parse(card.body);
-    const movie = parsed.player_links?.movie;
-    const playlist = parsed.player_links?.playlist;
-    const type = movie && movie.length ? 'movie' : (playlist ? 'serial' : 'none');
-    console.log(`  ✔ card: HTTP ${card.status}, тип=${type}, потоков/серий найдено для id=${id}`);
-  } else if (card.ok) {
-    console.log(`  [warn] card: HTTP ${card.status}, но нет player_links — возможно требует токен`);
-  } else {
-    console.log(`  [info] card: HTTP ${card.status}${card.body ? ' (' + String(card.body).slice(0, 60) + ')' : ''}`);
-  }
+test('Filmix video-links: битый id → null без падения', { skip }, async () => {
+  const links = await client.videoLinks('not-a-real-id', {});
+  assert.equal(links, null);
+  console.log('  [ok] video-links c битым id: null');
+});
 
-  // Анонимный фолбэк browser-API api-fx — основной источник карточки,
-  // когда /api/v2/post закрыт Cloudflare. Должен дать 200 и файлы потоков.
-  const links = await probe('video-links api-fx/post/{id}/video-links', `${tvHost}/api-fx/post/${id}/video-links`);
-  const hasFiles = /"files":\s*\[/.test(links.body || '');
-  assert.equal(links.ok, true, 'анонимный video-links обязан быть доступен: ' + JSON.stringify(links.status));
-  assert.ok(hasFiles, `video-links должен вернуть файлы потоков (HTTP ${links.status})`);
-  console.log(`  ✔ video-links: HTTP ${links.status}, файлы потоков есть (${links.ms}ms)`);
+test('Filmix searchApiFx: story={kp/imdb} не даёт целевой id (диагностика T5, поиск по внешним id удалён)', { skip }, async () => {
+  // Контроль: тайтл-поиск находит 1567.
+  const byTitle = await client.search({ title: 'Форрест Гамп', originalTitle: 'Forrest Gump', year: 1994 });
+  assert.ok(byTitle.items.some((item) => Number(item.id) === 1567), 'контроль: тайтл-поиск находит 1567');
+
+  // Прямой стори-поиск по IMDb- и KP-id — тот самый путь searchByExternalIds,
+  // который отдаёт несвязанные тайтлы и поэтому удалён из роутинга.
+  const imdb = await client.searchApiFx('tt0109830', {});
+  const kp = await client.searchApiFx('301', {});
+  const notTarget = (items) => items.every((item) => Number(item.id) !== 1567);
+  assert.ok(notTarget(imdb), `tt0109830 не должен давать 1567 (${imdb.map((i) => `${i.id}:${i.title}`).join(', ') || 'пусто'})`);
+  assert.ok(notTarget(kp), `301 не должен давать 1567 (${kp.map((i) => `${i.id}:${i.title}`).join(', ') || 'пусто'})`);
+  console.log(`  [ok] tt0109830 → ${imdb.length ? imdb.map((i) => `${i.id}:${i.title}`).join(', ') : 'пусто'} (не 1567)`);
+  console.log(`  [ok] 301 → ${kp.length ? kp.map((i) => `${i.id}:${i.title}`).join(', ') : 'пусто'} (не 1567)`);
 });

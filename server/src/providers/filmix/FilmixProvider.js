@@ -50,17 +50,18 @@ export class FilmixProvider extends Provider {
 
     const title = String(query.title || '');
     const originalTitle = String(query.original_title || query.originalTitle || '');
-    const kp = String(query.kp || query.kinopoisk_id || '');
-    const imdb = String(query.imdb || query.imdb_id || '');
     const year = String(query.year || '');
     const clarification = query.clarification ? 1 : 0;
 
+    // PRIMARY: api.filmix.tv/api-fx/list (FilmixTV.Search) — единственный живой поиск.
+    // searchByExternalIds (story={kp/imdb}) удалён по итогам FILMIX-001: story-поиск по
+    // внешним id отдаёт несвязанные тайтлы (tt0109830 → «Демонолог»), полезных
+    // результатов нет, а два пустых параллельных запроса только добавляют latency.
     const byTitle = await this.client.search({ title, originalTitle, clarification, year }, requestContext);
-    const byIds = await this.client.searchByExternalIds({ kp, imdb, year }, requestContext);
 
     const seen = new Set();
     const records = [];
-    for (const item of [...byTitle.items, ...byIds]) {
+    for (const item of byTitle.items) {
       const record = this.normalizer.normalizeSearchItem(item);
       if (!record.id || seen.has(String(record.id))) continue;
       seen.add(String(record.id));
@@ -95,16 +96,20 @@ export class FilmixProvider extends Provider {
     if (!id) return [];
 
     const title = String(item?.title || query.title || this.title);
-    const card = await this.client.card(id, requestContext);
-    if (card) return this.cardStreamItems(id, query, title, card, requestContext);
 
-    // /api/v2/post закрыт Cloudflare — отдаёмся на browser-API video-links,
-    // который возвращает уже готовые ссылки без токена.
+    // PRIMARY: browser-API api-fx video-links (Lampac FilmixTV.VideoLinks). Возвращает
+    // готовые ссылки, работает на api.filmix.tv живьём (FILMIX-001: HTTP 200), без учётки
+    // — анонимно, с учёткой — Bearer. Карточный путь filmix.my/api/v2/post сейчас мёртв
+    // (301→501), поэтому это единственный источник стримов.
     const links = typeof this.client.videoLinks === 'function'
       ? await this.client.videoLinks(id, requestContext)
       : null;
-    if (!links) return [];
-    return this.streamsFromLinks(id, title, links, (url) => buildProxyUrl(requestContext, url), query);
+    if (links) return this.streamsFromLinks(id, title, links, (url) => buildProxyUrl(requestContext, url), query);
+
+    // FALLBACK: filmix.my/api/v2/post (Lampac Filmix) — на случай восстановления mirror.
+    const card = await this.client.card(id, requestContext);
+    if (card) return this.cardStreamItems(id, query, title, card, requestContext);
+    return [];
   }
 
   cardStreamItems(id, query, title, card, requestContext) {
@@ -148,15 +153,18 @@ export class FilmixProvider extends Provider {
     if (!record?.id) return { items: [], seasons: [], voices: [] };
 
     const streamProxy = (url) => buildProxyUrl(requestContext, url);
-    const card = await this.client.card(record.id, requestContext);
-    if (card) return this.videosFromCard(card, record, query, streamProxy);
 
-    // Карточка недоступна (Cloudflare) — переходим на browser-API video-links.
+    // PRIMARY: browser-API api-fx video-links (Lampac FilmixTV.VideoLinks) — живой источник
+    // стримов. Карточный путь ниже остаётся только как fallback.
     const links = typeof this.client.videoLinks === 'function'
       ? await this.client.videoLinks(record.id, requestContext)
       : null;
-    if (!links) return { items: [], seasons: [], voices: [] };
-    return this.videosFromLinks(links, query, streamProxy);
+    if (links) return this.videosFromLinks(links, query, streamProxy);
+
+    // FALLBACK: filmix.my/api/v2/post (Lampac Filmix) — на случай восстановления mirror.
+    const card = await this.client.card(record.id, requestContext);
+    if (card) return this.videosFromCard(card, record, query, streamProxy);
+    return { items: [], seasons: [], voices: [] };
   }
 
   videosFromCard(card, record, query, streamProxy) {
@@ -244,9 +252,12 @@ export class FilmixProvider extends Provider {
       const files = this.allowedFiles(episode.files);
       const sorted = [...files].sort((left, right) => qualityRank(right.quality) - qualityRank(left.quality));
       const first = sorted[0];
+      // Filmix api-fx отдаёт реальное название серии в episode.title. Пробрасываем
+      // его в UI без потери (FILMIX-003); пустой title → фолбэк «N серия».
+      const realTitle = String(episode.title || '').trim();
       return {
         method: 'play',
-        title: `${Number(episode.episode) || 0} серия`,
+        title: realTitle || `${Number(episode.episode) || 0} серия`,
         url: first?.url ? streamProxy(first.url) : '',
         quality: qualityMapFromFiles(sorted, streamProxy),
         headers: { ...FILMIX_STREAM_HEADERS },

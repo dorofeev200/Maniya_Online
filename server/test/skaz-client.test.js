@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SkazClient, isUsablePage, isRchPayload, isAccsdbPayload } from '../src/providers/skaz/SkazClient.js';
+import { SkazClient, isUsablePage, isRchPayload, isAccsdbPayload, extractAccsdbMessage } from '../src/providers/skaz/SkazClient.js';
 import { HttpError } from '../src/errors.js';
 
 const FIXTURE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -349,4 +349,127 @@ test('isUsablePage / isRchPayload / isAccsdbPayload', () => {
   assert.equal(isRchPayload('<div>x</div>'), false);
   assert.equal(isAccsdbPayload('{"accsdb":true,"msg":"x"}'), true);
   assert.equal(isAccsdbPayload('<div>x</div>'), false);
+});
+
+// ===== I1: accsdb — ошибка учётной записи (extractAccsdbMessage + lastAccsdb) =====
+
+test('extractAccsdbMessage: accsdb=true + msg → извлекает сообщение', () => {
+  const result = extractAccsdbMessage('{"accsdb":true,"msg":"Аккаунт не найден"}');
+  assert.ok(result);
+  assert.equal(result.message, 'Аккаунт не найден');
+});
+
+test('extractAccsdbMessage: accsdb=true без msg → generic message', () => {
+  const result = extractAccsdbMessage('{"accsdb":true}');
+  assert.ok(result);
+  assert.equal(result.message, 'Учётная запись не подтверждена (accsdb)');
+});
+
+test('extractAccsdbMessage: не-accsdb JSON → null', () => {
+  assert.equal(extractAccsdbMessage('{"rch":true}'), null);
+  assert.equal(extractAccsdbMessage('[{"name":"x"}]'), null);
+  assert.equal(extractAccsdbMessage('<div>x</div>'), null);
+  assert.equal(extractAccsdbMessage(''), null);
+});
+
+test('extractAccsdbMessage: битый JSON с accsdb → generic message', () => {
+  const result = extractAccsdbMessage('{"accsdb":true,"msg":"Аккаунт не найден",}');
+  assert.ok(result);
+  assert.equal(result.message, 'Учётная запись не подтверждена (accsdb)');
+});
+
+test('getLite: accsdb → null + lastAccsdb установлен', async () => {
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: () => Promise.resolve(response(200, '{"accsdb":true,"msg":"Аккаунт не найден"}'))
+  });
+  assert.equal(client.lastAccsdb, null, 'до запроса — null');
+  assert.equal(await client.getLite({}), null);
+  assert.ok(client.lastAccsdb, 'lastAccsdb должен быть установлен');
+  assert.equal(client.lastAccsdb.message, 'Аккаунт не найден');
+});
+
+test('getLite: accsdb без msg → lastAccsdb с generic message', async () => {
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: () => Promise.resolve(response(200, '{"accsdb":true}'))
+  });
+  assert.equal(await client.getLite({}), null);
+  assert.ok(client.lastAccsdb);
+  assert.match(client.lastAccsdb.message, /учётная запись/i);
+});
+
+test('getLite: GRANTED (обычный HTML) → lastAccsdb остаётся null', async () => {
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: () => Promise.resolve(response(200, '<div class="videos__item">ok</div>'))
+  });
+  const html = await client.getLite({});
+  assert.ok(html, 'HTML возвращается');
+  assert.equal(client.lastAccsdb, null, 'lastAccsdb НЕ тронут');
+});
+
+test('getLite: HTTP 5xx → null, lastAccsdb НЕ тронут', async () => {
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: () => Promise.resolve(response(503, 'disable'))
+  });
+  assert.equal(await client.getLite({}), null);
+  assert.equal(client.lastAccsdb, null);
+});
+
+test('openLiteUrl: accsdb → null + lastAccsdb установлен', async () => {
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: () => Promise.resolve({
+      status: 200,
+      ok: true,
+      url: 'http://final.example/x',
+      headers: {},
+      body: { cancel: () => {} },
+      text: async () => '{"accsdb":true,"msg":"Доступ запрещён"}'
+    })
+  });
+  assert.equal(await client.openLiteUrl('http://h/lite/x/page'), null);
+  assert.ok(client.lastAccsdb);
+  assert.equal(client.lastAccsdb.message, 'Доступ запрещён');
+});
+
+test('getLite: accsdb НЕ перебирает хосты (200-ответ, не 5xx)', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      return Promise.resolve(response(200, '{"accsdb":true,"msg":"Нет доступа"}'));
+    }
+  });
+  assert.equal(await client.getLite({}), null);
+  assert.equal(seen.length, 1, 'accsdb — 200-ответ, хост-ротация не запускается');
+  assert.ok(client.lastAccsdb);
+});
+
+test('lastAccsdb сбрасывается перед каждым getLite', async () => {
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      if (url.includes('fail=1')) return Promise.resolve(response(200, '{"accsdb":true}'));
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+  // Первый запрос — accsdb.
+  assert.equal(await client.getLite({ fail: 1 }), null);
+  assert.ok(client.lastAccsdb);
+  // Второй запрос — GRANTED.
+  const html = await client.getLite({});
+  assert.ok(html);
+  assert.equal(client.lastAccsdb, null, 'lastAccsdb сброшен перед новым запросом');
 });
