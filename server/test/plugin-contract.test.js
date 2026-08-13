@@ -175,9 +175,18 @@ test('static: setFilters — E-Online-паритет: voice→season→reset, ch
 async function loadComponentSandbox(payload, opts = {}) {
   const source = await readFile(PLUGIN_PATH, 'utf8');
   const filterCalls = { set: [], chosen: [], show: [] };
+  const selectCalls = { show: [], close: 0 };
   const drawn = [];
   const network = [];
   const filterInstances = [];
+  // Мини-подписка по образцу Lampa.Subscribe (BALANCER-UI-001): плагин подписывается
+  // на Lampa.Select.listener, чтобы знать, открыто ли его sort-меню.
+  const selectListeners = {};
+  const selectListener = {
+    add: (t, fn) => { (selectListeners[t] = selectListeners[t] || []).push(fn); },
+    remove: (t, fn) => { selectListeners[t] = (selectListeners[t] || []).filter((f) => f !== fn); },
+    send: (t, e) => { (selectListeners[t] || []).slice().forEach((fn) => fn(e)); }
+  };
   const langMap = {
     maniya_source: 'Источник', maniya_season: 'Сезон', maniya_voice: 'Озвучка',
     maniya_reset: 'Сброс', maniya_episode: 'Серия', title_filter: 'Фильтр',
@@ -221,9 +230,16 @@ async function loadComponentSandbox(payload, opts = {}) {
     },
     Filter: function () {
       filterInstances.push(this);
-      this.set = (type, items) => filterCalls.set.push({ type, items });
+      this._data = {};
+      this.set = (type, items) => { this._data[type] = items; filterCalls.set.push({ type, items }); };
       this.chosen = (type, select) => filterCalls.chosen.push({ type, select });
-      this.show = (title, type) => filterCalls.show.push({ title, type });
+      // Канонический Lampa filter.show (filter.js:221-224): читает data[type] и
+      // открывает Select. Делегирование нужно, чтобы тест BALANCER-UI-001 видел
+      // переоткрытие меню с новым массивом через Select.show.
+      this.show = (title, type) => {
+        filterCalls.show.push({ title, type });
+        lampa.Select.show({ title, items: this._data[type] || [], onBack: null, onSelect: this.onSelect });
+      };
       this.render = () => fakeJq;
       this.onSelect = null;
     },
@@ -231,13 +247,20 @@ async function loadComponentSandbox(payload, opts = {}) {
       this.timeout = () => {};
       this.silent = (url, ok) => {
         network.push(String(url));
+        // BALANCER-UI-001: opts.network — кастомный обработчик для тестов гонки
+        // (нужно различать /sources и /sources/card, отложить card-ответ).
+        if (opts.network) return opts.network(String(url), ok);
         if (url.includes('/api/lampa/sources')) return ok({ sources: [{ id: 'filmix', name: 'Filmix', icon: '🎬', quality_label: '4K', url: 'https://x/api/lampa/videos?provider=filmix', show: true }] });
         if (url.includes('/api/lampa/videos')) return ok(payload);
         return ok({});
       };
       this.clear = () => {};
     },
-    Select: { show: () => {}, close: () => {} },
+    Select: {
+      listener: selectListener,
+      show: (opts) => { selectCalls.show.push(opts); selectListener.send('fullshow', { active: opts }); },
+      close: () => { selectCalls.close += 1; selectListener.send('close', { active: null }); }
+    },
     Activity: { active: () => ({ activity }), push: () => {}, backward: () => {} },
     Controller: { add: () => {}, toggle: () => {}, enable: () => {}, enabled: () => ({ name: '' }), collectionSet: () => {}, collectionFocus: () => {} },
     Background: { immediately: () => {} },
@@ -285,7 +308,7 @@ async function loadComponentSandbox(payload, opts = {}) {
   lampa._component.call(inst, { movie: { id: 94997, source: 'tmdb', name: 'Дом Дракона', original_name: 'House of the Dragon', first_air_date: '2022-08-21' } });
   inst.start();
 
-  return { filterCalls, drawn, network, filterInstances };
+  return { filterCalls, selectCalls, drawn, network, filterInstances };
 }
 
 test('поведение: сериал — фильтр voice→season→reset + chosen(\'filter\'), серии с реальными названиями, сезон уходит в /videos', async () => {
@@ -603,4 +626,114 @@ test('static: info/title не присваивают item.quality (объект)
   assert.ok(!/item\.title\s*=\s*item\.voice_name\s*\|\|\s*item\.quality/.test(stripped),
     'item.title больше не падает в item.quality (объект)');
   assert.match(stripped, /bestQualityLabel\(item\)/, 'fallback — строковая метка лучшего качества');
+});
+
+// ── BALANCER-UI-001: race между /sources/card и открытым меню «Сортировать» ──
+// ROOT CAUSE (диагностика #19): Lampa.Select рендерит снапшот data['sort'] один
+// раз при открытии меню и НЕ перерисовывает его при filter.set('sort', ...).
+// Фикс: если sort-меню открыто в момент прихода /sources/card — закрыть Select,
+// filter.set('sort', новые), заново открыть меню (close → set → reopen).
+// В sandbox: /sources отдаёт реестр (16), /sources/card отложен (захватываем ok),
+// /videos пустой. Select.show записывает переоткрытие и шлёт 'fullshow' →
+// плагин выставляет sortMenuOpen (у sort-элементов есть поле `source`).
+
+// Реестр: те же 16 источников, что в production (meta.js), все show:true.
+function fixtureRegistry16() {
+  const ids = ['filmix', 'kodik', 'rezka', 'rutubemovie', 'cdnvideohub', 'collaps', 'hdvb',
+    'skaz-alloha', 'skaz-videoseed', 'skaz-kinopub', 'skaz-kinoflix', 'skaz-veoveo',
+    'skaz-pidtor', 'skaz-solntse', 'skaz-geosaitebi', 'skaz-rhsprem'];
+  return ids.map((id) => ({ id, name: id, icon: '🎬', quality_label: '', url: 'https://x/api/lampa/videos?provider=' + id, show: true }));
+}
+
+// Карта для «Одиссеи»: 7 источников не нашли фильм → show:false, остальные 9 — true.
+function fixtureCardOdyssey() {
+  const falseIds = ['kodik', 'rezka', 'skaz-kinopub', 'skaz-kinoflix', 'skaz-pidtor', 'skaz-solntse', 'skaz-rhsprem'];
+  const ids = fixtureRegistry16().map((s) => s.id);
+  return ids.map((id) => ({ id, show: !falseIds.includes(id) }));
+}
+
+// Открывает меню «Сортировать» так, как это делает Lampa: filter.show → Select.show
+// с items из data['sort']; Select.show шлёт 'fullshow' {active} → плагин ставит sortMenuOpen.
+function openSortMenu(filterInstance) {
+  filterInstance.show('Фильтр', 'sort');
+}
+
+test('BALANCER-UI-001: card приходит при открытом «Сортировать» — меню переоткрывается с 9', async () => {
+  let cardOk = null;
+  const { filterCalls, selectCalls, filterInstances } = await loadComponentSandbox(
+    { items: [], seasons: [], voices: [] },
+    {
+      network: (url, ok) => {
+        if (url.includes('/api/lampa/sources/card')) return void (cardOk = ok);
+        if (url.includes('/api/lampa/sources')) return ok({ sources: fixtureRegistry16() });
+        return ok({});
+      }
+    }
+  );
+
+  const sortSets = () => filterCalls.set.filter((c) => c.type === 'sort');
+  assert.equal(sortSets().at(-1).items.length, 16, 'до карты: sort = 16 (реестр)');
+
+  // Юзер открывает меню до прихода карты → Select.show(16) → sortMenuOpen=true
+  openSortMenu(filterInstances[0]);
+  assert.equal(selectCalls.show.length, 1, 'меню открыто один раз');
+  assert.equal(selectCalls.show[0].items.length, 16, 'открыто с реестром (16)');
+
+  // /sources/card приходит: 7 из 16 show:false → filterSources пересобирается в 9
+  cardOk({ sources: fixtureCardOdyssey() });
+  assert.equal(sortSets().at(-1).items.length, 9, 'filter.set(sort) → 9 после карты');
+
+  assert.ok(selectCalls.close >= 1, 'открытый Select закрыт перед переоткрытием');
+  assert.equal(selectCalls.show.length, 2, 'меню переоткрыто');
+  assert.equal(selectCalls.show[1].items.length, 9, 'переоткрыто с 9 — старые 7 ушли');
+  assert.deepEqual(selectCalls.show[1].items.map((i) => i.source),
+    ['filmix', 'rutubemovie', 'cdnvideohub', 'collaps', 'hdvb', 'skaz-alloha', 'skaz-videoseed', 'skaz-veoveo', 'skaz-geosaitebi'],
+    'в переоткрытом меню — только актуальные источники (нет kodik/rezka/kinopub/kinoflix/pidtor/solntse/rhsprem)');
+});
+
+test('BALANCER-UI-001: card пришла ДО открытия меню — открывается сразу с 9, без переоткрытий', async () => {
+  let cardOk = null;
+  const { filterCalls, selectCalls, filterInstances } = await loadComponentSandbox(
+    { items: [], seasons: [], voices: [] },
+    {
+      network: (url, ok) => {
+        if (url.includes('/api/lampa/sources/card')) return void (cardOk = ok);
+        if (url.includes('/api/lampa/sources')) return ok({ sources: fixtureRegistry16() });
+        return ok({});
+      }
+    }
+  );
+
+  // Карта приходит ДО того, как юзер открыл меню
+  cardOk({ sources: fixtureCardOdyssey() });
+  assert.equal(filterCalls.set.filter((c) => c.type === 'sort').at(-1).items.length, 9,
+    'data.sort уже 9 к моменту открытия');
+  assert.equal(selectCalls.show.length, 0, 'меню не открывалось и не переоткрывалось');
+
+  // Теперь юзер открывает меню → сразу отфильтрованный список
+  openSortMenu(filterInstances[0]);
+  assert.equal(selectCalls.show.length, 1, 'открыто один раз');
+  assert.equal(selectCalls.show[0].items.length, 9, 'сразу 9 актуальных источников');
+});
+
+test('BALANCER-UI-001: меню открыто, карта НЕ меняет флаги (cached, все как в реестре) — без переоткрытия', async () => {
+  let cardOk = null;
+  const { selectCalls, filterInstances } = await loadComponentSandbox(
+    { items: [], seasons: [], voices: [] },
+    {
+      network: (url, ok) => {
+        if (url.includes('/api/lampa/sources/card')) return void (cardOk = ok);
+        if (url.includes('/api/lampa/sources')) return ok({ sources: fixtureRegistry16() });
+        return ok({});
+      }
+    }
+  );
+
+  openSortMenu(filterInstances[0]);
+  assert.equal(selectCalls.show.length, 1, 'меню открыто');
+
+  // Карта повторяет реестр (все show:true) → changed=false, activeChanged=false
+  cardOk({ sources: fixtureRegistry16().map((s) => ({ id: s.id, show: true })) });
+  assert.equal(selectCalls.close, 0, 'Select не закрывался — флаги не менялись, переоткрытие не нужно');
+  assert.equal(selectCalls.show.length, 1, 'меню не переоткрывалось (нет race, меню уже актуально)');
 });

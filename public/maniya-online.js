@@ -5,6 +5,22 @@
   var COMPONENT = 'maniya_online';
   var PLUGIN_FLAG = 'maniya_online_plugin_started';
 
+  // BALANCER-UI-001: флаг «открыто именно наше sort-меню (список источников)».
+  // Lampa.Select.listener — единственный не-DOM способ узнать, какой селект открыт:
+  // у sort-элементов есть поле `source`, у quality-селектора и season/voice — нет.
+  var sortMenuOpen = false;
+  var selectWatchBound = false;
+  function bindSelectWatch() {
+    if (selectWatchBound || !Lampa.Select.listener) return;
+    selectWatchBound = true;
+    Lampa.Select.listener.add('fullshow', function (e) {
+      var items = e && e.active && e.active.items;
+      sortMenuOpen = !!(items && Lampa.Arrays.isArray(items) && items.length && items[0] && items[0].source);
+    });
+    Lampa.Select.listener.add('hide', function () { sortMenuOpen = false; });
+    Lampa.Select.listener.add('close', function () { sortMenuOpen = false; });
+  }
+
   if (window[PLUGIN_FLAG]) return;
   window[PLUGIN_FLAG] = true;
 
@@ -328,6 +344,7 @@
     var scroll = new Lampa.Scroll({ mask: true, over: true });
     var files = new Lampa.Explorer(object);
     var filter = new Lampa.Filter(object);
+    bindSelectWatch();
     var sources = {};
     var filterSources = [];
     var activeSource = '';
@@ -518,7 +535,13 @@
         Lampa.Storage.set('maniya_online_source', activeSource);
       }
       if (changed || activeChanged) {
+        // BALANCER-UI-001: если sort-меню уже открыто, Lampa.Select не перерисует
+        // его при filter.set('sort') (bind рисует снапшот один раз) — закрываем и
+        // заново открываем с обновлённым списком (close → set → reopen).
+        var wasSortOpen = sortMenuOpen;
+        if (wasSortOpen) Lampa.Select.close();
         self.updateFilter();
+        if (wasSortOpen) filter.show(Lampa.Lang.translate('title_filter'), 'sort');
         if (activeChanged) self.loadVideos();
       }
     };
