@@ -13,6 +13,10 @@ process.env.FILMIX_ENABLED = '0';
 const { server } = await import('../src/index.js');
 
 const base = 'http://127.0.0.1:3199';
+// PLUGIN-INSTALL-002: статика/плагин отдаются как JS только с Lampa-UA
+// (браузер получает stub-текст). Тесты на JS-тело шлют Lampa-UA.
+const LAMPA_UA = 'Mozilla/5.0 (AppleTV; CPU OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Lampa/0.20.4';
+const lampaFetch = (url) => fetch(url, { headers: { 'User-Agent': LAMPA_UA } });
 
 before(async () => {
   await new Promise((resolve) => server.listen(3199, '127.0.0.1', resolve));
@@ -39,10 +43,17 @@ describe('Maniya Online API', () => {
 
 
   it('serves plugin file without token', async () => {
-    const response = await fetch(`${base}/maniya-online.js`);
+    const response = await lampaFetch(`${base}/maniya-online.js`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /javascript/);
     assert.match(await response.text(), /MANIYA_API_BASE/);
+  });
+
+  it('serves plugin file as stub to browser (PLUGIN-INSTALL-002)', async () => {
+    const response = await fetch(`${base}/maniya-online.js`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^text\/plain/);
+    assert.equal(await response.text(), 'Добавьте в плагины Lampa');
   });
 
   it('never rejects OPTIONS preflight with 403', async () => {

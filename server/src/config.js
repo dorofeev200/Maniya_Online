@@ -62,6 +62,11 @@ export const config = {
   rateLimitWindowMs: integer('RATE_LIMIT_WINDOW_MS', 60_000),
   rateLimitMax: integer('RATE_LIMIT_MAX', 120),
   tokenMinLength: integer('TOKEN_MIN_LENGTH', 8),
+  // Секрет для скрытого ключа плагина (PLUGIN-INSTALL-002): реальный JS отдаётся
+  // только по пути `/x/<install>_<key>.js`, где key = HMAC-SHA256(PLUGIN_CODE_SECRET,
+  // 'plugin-code:'+install). Без секрета /p/ недоступен (fail-closed, 503) —
+  // полный JS по /p/ НЕ отдаётся.
+  pluginCodeSecret: (process.env.PLUGIN_CODE_SECRET || '').trim(),
   usersFile: resolvePath(process.env.USERS_FILE || ''),
   videosFile: resolvePath(process.env.VIDEOS_FILE || ''),
   publicDir: resolvePath(process.env.PUBLIC_DIR || path.join(rootDir, 'public')),

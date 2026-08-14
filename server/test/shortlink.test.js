@@ -20,6 +20,10 @@ process.env.HDVB_ENABLED = '0';
 const { server } = await import('../src/index.js');
 const base = 'http://127.0.0.1:3201';
 
+// PLUGIN-INSTALL-002: шортлинк отдаёт JS только Lampa; браузер — stub-текст.
+const LAMPA_UA = 'Mozilla/5.0 (AppleTV; CPU OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Lampa/0.20.4';
+const lampaFetch = (url) => fetch(url, { headers: { 'User-Agent': LAMPA_UA } });
+
 // Пользователи в fixtures/shortlink-users.json.
 const ACTIVE_OK = { short: '444444444444', token: 'mo-44444444444444444444444444444444' };
 const INACTIVE = { short: '999999999999' };
@@ -34,7 +38,7 @@ after(async () => {
 
 describe('Короткая ссылка плагина /<prefix>_<short>.js', () => {
   it('активный пользователь: 200, плагин с вшитым токеном', async () => {
-    const response = await fetch(`${base}/dorofeev200_${ACTIVE_OK.short}.js`);
+    const response = await lampaFetch(`${base}/dorofeev200_${ACTIVE_OK.short}.js`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /javascript/);
     assert.match(response.headers.get('cache-control'), /no-store/);
@@ -44,9 +48,16 @@ describe('Короткая ссылка плагина /<prefix>_<short>.js', ()
   });
 
   it('префикс произвольный, главное правильно суффикс токена', async () => {
-    const response = await fetch(`${base}/whatever_${ACTIVE_OK.short}.js`);
+    const response = await lampaFetch(`${base}/whatever_${ACTIVE_OK.short}.js`);
     assert.equal(response.status, 200);
     assert.match(await response.text(), /MANIYA_ONLINE_TOKEN=./);
+  });
+
+  it('шортлинк в браузере — stub-текст, не JS (PLUGIN-INSTALL-002)', async () => {
+    const response = await fetch(`${base}/dorofeev200_${ACTIVE_OK.short}.js`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^text\/plain/);
+    assert.equal(await response.text(), 'Добавьте в плагины Lampa');
   });
 
   it('неактивный пользователь: 403 (подписка истекла)', async () => {

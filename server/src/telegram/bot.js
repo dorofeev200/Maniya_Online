@@ -8,10 +8,11 @@ export function makeToken(prefix = 'mo') {
 }
 
 /**
- * PLUGIN-INSTALL-001: случайный opaque install-токен (24 байта = 192 бита).
+ * PLUGIN-INSTALL-001/002: случайный opaque install-токен (24 байта = 192 бита).
  * НЕ выводим из subscription-токена, не содержит user id/email/slug/послед. ID.
- * По нему сервер мапит пользователя на страницу `/i/<opaque>` и плагин
- * `/p/<opaque>.js`; реальный токен подписки в ссылку не попадает.
+ * По нему сервер мапит пользователя на единую ссылку `/p/<install>.js`
+ * (Lampa → лоадер → `/x/<install>_<key>.js`; браузер → stub). Реальный токен
+ * подписки в ссылку не попадает.
  */
 export function makeInstallToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -126,16 +127,17 @@ export function shortId(token) {
 }
 
 /**
- * Ссылка плагина для конкретного пользователя. PLUGIN-INSTALL-001: если у
- * пользователя есть install_token — отдаём opaque-ссылку `/i/<install>`
- * (страница установки, в URL нет subscription-токена). Без install_token —
- * legacy `/i-…/` вид `/{slug}_<short>.js` (обратная совместимость).
+ * Ссылка плагина для конкретного пользователя. PLUGIN-INSTALL-001/002: если у
+ * пользователя есть install_token — отдаём opaque-ссылку `/p/<install>.js`
+ * (единая ссылка: Lampa получает лоадер, браузер — stub; в URL нет
+ * subscription-токена). Без install_token — legacy `/{slug}_<short>.js`
+ * (обратная совместимость).
  */
 export function pluginUrl(config, token, user) {
   const base = config?.publicBaseUrl || '';
   const installToken = user && user.install_token;
   if (installToken) {
-    return `${base}/i/${String(installToken).toLowerCase()}`;
+    return `${base}/p/${String(installToken).toLowerCase()}.js`;
   }
 
   const prefix = config?.telegram?.linkPrefix || 'dorofeev200';

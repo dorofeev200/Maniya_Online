@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { config } from './config.js';
 import { HttpError, toHttpError } from './errors.js';
-import { sendInstallPage, sendJson, sendPluginForToken, sendStatic } from './http.js';
+import { isLampaRequest, sendJson, sendPluginForToken, sendPluginLoader, sendPluginStub, sendStatic } from './http.js';
 import { logger } from './logger.js';
 import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
 import { findUserByInstallToken, findUserByRequest, findUserByShortToken, getVideoForRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
@@ -46,6 +46,30 @@ function isApiPath(pathname) {
   return pathname.startsWith('/api/');
 }
 
+/**
+ * PLUGIN-INSTALL-002: скрытый путь реального кода плагина `/x/<install>_<key>.js`.
+ * key = HMAC-SHA256(PLUGIN_CODE_SECRET, 'plugin-code:'+install) → 24 hex.
+ * Не выводится из публичного URL: лоадер отдаётся только Lampa и содержит ключ,
+ * браузер скрытый путь не получает. Без секрета возвращает '' (на /p/ это 503,
+ * fail-closed — см. маршрут).
+ */
+function hiddenPathFor(install) {
+  const secret = config.pluginCodeSecret;
+  if (!secret) return '';
+  const key = crypto.createHmac('sha256', secret).update('plugin-code:' + install).digest('hex').slice(0, 24);
+  return `${install}_${key}`;
+}
+
+/** Константное по времени сравнение ключа из URL с ожидаемым HMAC. */
+function hiddenKeyMatches(install, providedKey) {
+  const secret = config.pluginCodeSecret;
+  if (!secret || !providedKey) return false;
+  const expected = crypto.createHmac('sha256', secret).update('plugin-code:' + install).digest('hex').slice(0, 24);
+  const a = Buffer.from(String(providedKey), 'hex');
+  const b = Buffer.from(expected, 'hex');
+  return a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b);
+}
+
 async function route(context, response) {
   const { request, url } = context;
   const pathname = url.pathname;
@@ -66,32 +90,54 @@ async function route(context, response) {
   }
 
   // Короткая ссылка плагина /<prefix>_<short>.js → ищем пользователя по суффиксу токена.
+  // PLUGIN-INSTALL-002: реальный код — только Lampa; браузеру — stub-текст.
   const shortLink = pathname.match(/^\/[^/]+_([0-9a-fA-F]{8,})\.js$/);
   if (shortLink) {
     const short = shortLink[1].toLowerCase();
     const user = await findUserByShortToken(short);
     if (!user) throw new HttpError(404, 'not_found', 'User not found');
     if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
+    if (!isLampaRequest(request)) return sendPluginStub(request, response);
     return sendPluginForToken(request, response, user.token);
   }
 
-  // PLUGIN-INSTALL-001: opaque install-ссылки. `/i/<opaque>` — HTML-страница
-  // установки (НИКОГДА не JS); `/p/<opaque>.js` — сам плагин. Opaque-токен →
-  // пользователь → активная подписка; реальный subscription-токен в URL не попадает.
+  // PLUGIN-INSTALL-001/002: opaque install-ссылки. `/i/<opaque>` — устаревший
+  // путь (HTML-страница удалена, единая ссылка — `/p/<opaque>.js`): теперь отдаёт
+  // stub-текст, никогда JS. `/p/<opaque>.js` — лоадер для Lampa / stub для браузера;
+  // реальный код — по скрытому `/x/<install>_<key>.js`. Opaque-токен → пользователь
+  // → активная подписка; реальный subscription-токен в URL не попадает.
   // Невалидный/короткий opaque → 404 (информации о пользователе не раскрываем).
-  const installPage = pathname.match(/^\/i\/([0-9a-fA-F]{32,})$/);
-  if (installPage) {
-    const user = await findUserByInstallToken(installPage[1]);
-    if (!user) throw new HttpError(404, 'install_link_not_found', 'Install link not found');
-    if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
-    return sendInstallPage(request, response, user.install_token);
+  if (/^\/i\/([0-9a-fA-F]{32,})$/.test(pathname)) {
+    return sendPluginStub(request, response);
   }
 
   const installPlugin = pathname.match(/^\/p\/([0-9a-fA-F]{32,})\.js$/);
   if (installPlugin) {
-    const user = await findUserByInstallToken(installPlugin[1]);
+    const install = installPlugin[1].toLowerCase();
+    // PLUGIN-INSTALL-002 fail-closed: без PLUGIN_CODE_SECRET скрытый путь /x/ не
+    // построить, а полный JS по /p/ НЕ отдаём (иначе мис-конфигурация снова
+    // раскрывает код) — endpoint недоступен, 503 для любого клиента.
+    if (!config.pluginCodeSecret) {
+      throw new HttpError(503, 'plugin_code_not_configured', 'Плагин не сконфигурирован: PLUGIN_CODE_SECRET не задан');
+    }
+    const user = await findUserByInstallToken(install);
     if (!user) throw new HttpError(404, 'install_link_not_found', 'Install link not found');
     if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
+    if (!isLampaRequest(request)) return sendPluginStub(request, response);
+    return sendPluginLoader(request, response, `${config.publicBaseUrl}/x/${hiddenPathFor(install)}.js`);
+  }
+
+  // PLUGIN-INSTALL-002: скрытый путь реального кода `/x/<install>_<key>.js`.
+  // key = HMAC(PLUGIN_CODE_SECRET, install) — неизвестен по публичному URL;
+  // неверный/несуществующий ключ → 404. Реальный код (с токеном) — только Lampa.
+  const hiddenCode = pathname.match(/^\/x\/([0-9a-fA-F]{32,})_([0-9a-fA-F]{16,})\.js$/);
+  if (hiddenCode) {
+    const install = hiddenCode[1].toLowerCase();
+    const key = hiddenCode[2].toLowerCase();
+    const user = await findUserByInstallToken(install);
+    if (!user || !hiddenKeyMatches(install, key)) throw new HttpError(404, 'install_link_not_found', 'Install link not found');
+    if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
+    if (!isLampaRequest(request)) return sendPluginStub(request, response);
     return sendPluginForToken(request, response, user.token);
   }
 

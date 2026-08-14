@@ -1,5 +1,6 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 
 process.env.NODE_ENV = 'test';
 process.env.PORT = '3202';
@@ -7,6 +8,8 @@ process.env.CORS_ORIGINS = '*';
 process.env.RATE_LIMIT_MAX = '1000';
 process.env.PUBLIC_BASE_URL = 'http://127.0.0.1:3202';
 process.env.USERS_FILE = new URL('./fixtures/plugin-install-users.json', import.meta.url).pathname;
+// PLUGIN-INSTALL-002: секрет скрытого ключа /x/<install>_<key>.js (тестовый).
+process.env.PLUGIN_CODE_SECRET = 'test-secret-001';
 // Не дёргать реальную сеть.
 process.env.FILMIX_ENABLED = '0';
 process.env.KODIK_ENABLED = '0';
@@ -21,7 +24,7 @@ process.env.SKAZ_ENABLED = '0';
 const { server } = await import('../src/index.js');
 const base = 'http://127.0.0.1:3202';
 
-// Пользователи в fixtures/plugin-install-users.json (PLUGIN-INSTALL-001).
+// Пользователи в fixtures/plugin-install-users.json (PLUGIN-INSTALL-002).
 const USER_A = {
   token: 'mo-aaaabbbbccccddddeeeeffff00001111',
   install: 'abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234'
@@ -31,8 +34,45 @@ const USER_B = {
   install: 'efef5678efef5678efef5678efef5678efef5678efef5678'
 };
 const USER_C = {
+  token: 'mo-99998888777766665555444433332222',
   install: '9999abcd9999abcd9999abcd9999abcd9999abcd9999abcd'
 };
+
+const STUB_TEXT = 'Добавьте в плагины Lampa';
+// Lampa дописывает версию в UA; обычный браузер этого не делает.
+const LAMPA_UA = 'Mozilla/5.0 (AppleTV; CPU OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Lampa/0.20.4';
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+function fetchAs(ua, url, init = {}) {
+  return fetch(url, { ...init, headers: { 'User-Agent': ua, ...(init.headers || {}) } });
+}
+const lampaFetch = (url, init) => fetchAs(LAMPA_UA, url, init);
+const browserFetch = (url, init) => fetchAs(BROWSER_UA, url, init);
+
+// Тот же HMAC, что на сервере (config.pluginCodeSecret, 'plugin-code:'+install).
+function hiddenKey(install) {
+  return crypto.createHmac('sha256', 'test-secret-001').update('plugin-code:' + install).digest('hex').slice(0, 24);
+}
+const hiddenUrl = (install) => `${base}/x/${install}_${hiddenKey(install)}.js`;
+
+// Из лоадера достать скрытый путь /x/<install>_<key>.js.
+function extractHiddenPath(loaderBody) {
+  const m = loaderBody.match(/\/x\/[0-9a-f]{32,}_[0-9a-f]{16,}\.js/);
+  assert.ok(m, `в лоадере есть скрытый путь /x/: ${loaderBody}`);
+  return m[0];
+}
+
+async function assertStub(response, label) {
+  assert.equal(response.status, 200, `${label}: статус 200`);
+  assert.match(response.headers.get('content-type'), /^text\/plain/, `${label}: content-type text/plain`);
+  assert.match(response.headers.get('cache-control'), /no-store/, `${label}: no-store`);
+  assert.match(response.headers.get('x-content-type-options'), /nosniff/, `${label}: nosniff`);
+  const body = await response.text();
+  assert.equal(body, STUB_TEXT, `${label}: тело — stub-текст`);
+  assert.ok(!body.includes('MANIYA_ONLINE_TOKEN'), `${label}: без подписи токена`);
+  assert.ok(!body.includes('MANIYA_API_BASE'), `${label}: без кода плагина`);
+  return body;
+}
 
 before(async () => {
   await new Promise((resolve) => server.listen(3202, '127.0.0.1', resolve));
@@ -42,154 +82,171 @@ after(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
-describe('PLUGIN-INSTALL-001: opaque install-ссылки /i/ + /p/', () => {
-  it('1. валидный /i/<opaque>: HTML-страница установки (200, text/html, содержит ссылку на плагин)', async () => {
-    const response = await fetch(`${base}/i/${USER_A.install}`);
+describe('PLUGIN-INSTALL-002: UA-гейт — браузер видит stub, Lampa получает код', () => {
+  it('1. /p/<install>.js в браузере: stub-текст (text/plain, no-store, nosniff), НЕ JS, без токена', async () => {
+    const response = await browserFetch(`${base}/p/${USER_A.install}.js`);
+    await assertStub(response, '/p/ browser');
+  });
+
+  it('2. /p/<install>.js для Lampa: лоадер (JS) со скрытым /x/, БЕЗ кода и токена', async () => {
+    const response = await lampaFetch(`${base}/p/${USER_A.install}.js`);
     assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-type'), /text\/html/);
+    assert.match(response.headers.get('content-type'), /^application\/javascript/, 'лоадер — JS');
+    assert.match(response.headers.get('cache-control'), /no-store/, 'лоадер no-store');
+    assert.match(response.headers.get('x-content-type-options'), /nosniff/, 'лоадер nosniff');
     const body = await response.text();
-    assert.match(body, /MANIYA ONLINE/);
-    assert.match(body, /Расширения Lampa/i);
-    assert.match(body, new RegExp(`/p/${USER_A.install}\\.js`));
-    assert.ok(body.includes('Скопировать'), 'есть кнопка копирования');
+    assert.match(body, /\(function \(\)/, 'IIFE-лоадер');
+    assert.ok(body.includes(`/x/${USER_A.install}_`), 'лоадер инжектит скрытый путь');
+    assert.ok(!body.includes('MANIYA_ONLINE_TOKEN'), 'в лоадере нет токена');
+    assert.ok(!body.includes(USER_A.token), 'в лоадере нет subscription-токена');
+    assert.ok(!body.includes('MANIYA_API_BASE'), 'в лоадере нет полного кода плагина');
   });
 
-  it('2. /i/ НИКОГДА не отдаёт JS и не содержит subscription-токен', async () => {
-    const response = await fetch(`${base}/i/${USER_A.install}`);
-    const ctype = response.headers.get('content-type');
-    assert.ok(!/javascript/.test(ctype), `content-type ${ctype} не JS`);
-    const body = await response.text();
-    assert.ok(!body.startsWith('window.MANIYA_ONLINE_TOKEN'), 'не начинается с подписи JS');
-    assert.ok(!body.includes(USER_A.token), 'реальный токен не в HTML');
+  it('3. лоадер → скрытый /x/: Lampa получает полный JS с токеном, браузер — stub', async () => {
+    const loader = await (await lampaFetch(`${base}/p/${USER_A.install}.js`)).text();
+    const hiddenPath = extractHiddenPath(loader);
+
+    const lampaResp = await lampaFetch(`${base}${hiddenPath}`);
+    assert.equal(lampaResp.status, 200);
+    assert.match(lampaResp.headers.get('content-type'), /^application\/javascript/);
+    const full = await lampaResp.text();
+    assert.match(full, /window\.MANIYA_ONLINE_TOKEN="[^"]+"/);
+    assert.ok(full.includes(`window.MANIYA_ONLINE_TOKEN=${JSON.stringify(USER_A.token)}`), 'вшит токен A');
+    assert.match(full, /MANIYA_API_BASE/);
+
+    const browserResp = await browserFetch(`${base}${hiddenPath}`);
+    await assertStub(browserResp, '/x/ browser');
   });
 
-  it('3. валидный /p/<opaque>.js: 200, JS с вшитым subscription-токеном пользователя', async () => {
-    const response = await fetch(`${base}/p/${USER_A.install}.js`);
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-type'), /javascript/);
-    const body = await response.text();
-    assert.match(body, /window\.MANIYA_ONLINE_TOKEN="[^"]+"/);
-    assert.ok(body.includes(`window.MANIYA_ONLINE_TOKEN=${JSON.stringify(USER_A.token)}`));
-    assert.match(body, /MANIYA_API_BASE/);
+  it('4. скрытый путь детерминирован: два /p/ дают один и тот же /x/, у A и B разные', async () => {
+    const loaderA1 = await (await lampaFetch(`${base}/p/${USER_A.install}.js`)).text();
+    const loaderA2 = await (await lampaFetch(`${base}/p/${USER_A.install}.js`)).text();
+    const loaderB = await (await lampaFetch(`${base}/p/${USER_B.install}.js`)).text();
+    assert.equal(extractHiddenPath(loaderA1), extractHiddenPath(loaderA2), 'тот же пользователь — тот же ключ');
+    assert.equal(extractHiddenPath(loaderA1), hiddenUrl(USER_A.install).slice(base.length), 'путь совпадает с HMAC');
+    assert.notEqual(extractHiddenPath(loaderA1), extractHiddenPath(loaderB), 'разные пользователи — разные ключи');
+    assert.notEqual(hiddenKey(USER_A.install), hiddenKey(USER_B.install), 'HMAC-ключи разные');
   });
 
-  it('4. несуществующий /i/<opaque>: 404 (без раскрытия данных)', async () => {
-    const response = await fetch(`${base}/i/${'f'.repeat(48)}`);
+  it('5. /x/ с неверным ключом: 404 (нет раскрытия данных)', async () => {
+    const wrongKey = 'f'.repeat(24);
+    const response = await lampaFetch(`${base}/x/${USER_A.install}_${wrongKey}.js`);
     assert.equal(response.status, 404);
+  });
+
+  it('6. /x/ несуществующего install: 404', async () => {
+    const ghost = 'ab'.repeat(24);
+    const response = await lampaFetch(`${base}/x/${ghost}_${hiddenKey(ghost)}.js`);
+    assert.equal(response.status, 404);
+  });
+
+  it('7. /x/ неактивного пользователя (верный ключ): 403 (подписка)', async () => {
+    const response = await lampaFetch(hiddenUrl(USER_C.install));
+    assert.equal(response.status, 403);
     const body = await response.json();
-    assert.ok(!JSON.stringify(body).includes('mo-'), 'в ошибке нет следов токена');
+    assert.ok(!JSON.stringify(body).includes('mo-'), 'в ошибке нет токена');
   });
 
-  it('5. несуществующий /p/<opaque>.js: 404', async () => {
-    const response = await fetch(`${base}/p/${'f'.repeat(48)}.js`);
+  it('8. /x/ неактивного пользователя (неверный ключ): 404 (ключ не угадан)', async () => {
+    const response = await lampaFetch(`${base}/x/${USER_C.install}_${'f'.repeat(24)}.js`);
     assert.equal(response.status, 404);
   });
+});
 
-  it('6. opaque-токен: случайный hex, НЕ равен и НЕ содержит subscription-токен (не выводим)', () => {
-    for (const u of [USER_A, USER_B]) {
-      assert.match(u.install, /^[0-9a-f]{32,}$/, 'install_token — длинный hex');
-      assert.ok(!u.install.startsWith('mo-'), 'не префиксный формат subscription-токена');
-      assert.notEqual(u.install, u.token, 'не равен subscription-токену');
-      assert.ok(!u.install.includes(u.token), 'subscription-токен не подстрока install');
-      assert.ok(!u.install.includes(u.token.split('-').pop()), 'hex-часть токена не подстрока install');
-    }
-    assert.notEqual(USER_A.install, USER_B.install, 'install-токены пользователей уникальны');
+describe('PLUGIN-INSTALL-002: /i/ устаревший путь — всегда stub, никогда JS', () => {
+  it('9. /i/<opaque> и для браузера, и для Lampa: stub-текст', async () => {
+    await assertStub(await browserFetch(`${base}/i/${USER_A.install}`), '/i/ browser');
+    await assertStub(await lampaFetch(`${base}/i/${USER_A.install}`), '/i/ lampa');
   });
 
-  it('7. A/B изоляция: /i/ и /p/ не смешивают данные пользователей', async () => {
-    const htmlA = await (await fetch(`${base}/i/${USER_A.install}`)).text();
-    const htmlB = await (await fetch(`${base}/i/${USER_B.install}`)).text();
-    const jsA = await (await fetch(`${base}/p/${USER_A.install}.js`)).text();
-    const jsB = await (await fetch(`${base}/p/${USER_B.install}.js`)).text();
-
-    assert.ok(htmlA.includes(`/p/${USER_A.install}.js`));
-    assert.ok(!htmlA.includes(USER_B.install), 'A-страница не содержит install B');
-    assert.ok(!htmlA.includes(USER_B.token), 'A-страница не содержит токен B');
-    assert.ok(htmlB.includes(`/p/${USER_B.install}.js`));
-    assert.ok(!htmlB.includes(USER_A.install), 'B-страница не содержит install A');
-    assert.ok(!htmlB.includes(USER_A.token), 'B-страница не содержит токен A');
-
-    assert.ok(jsA.includes(USER_A.token), 'A-JS вшивает токен A');
-    assert.ok(!jsA.includes(USER_B.token), 'A-JS не содержит токен B');
-    assert.ok(jsB.includes(USER_B.token), 'B-JS вшивает токен B');
-    assert.ok(!jsB.includes(USER_A.token), 'B-JS не содержит токен A');
+  it('10. короткий /i/<opaque> (< 32 hex) не валиден (анти-гадалка)', async () => {
+    const response = await fetch(`${base}/i/abcd1234`);
+    assert.equal(response.status, 404);
   });
+});
 
-  it('8. HTML содержит инструкцию установки (Добавьте плагин в расширения Lampa)', async () => {
-    const body = await (await fetch(`${base}/i/${USER_A.install}`)).text();
-    assert.match(body, /Добавьте плагин в расширения Lampa/);
-    assert.match(body, /Настройки → Расширения/);
-  });
-
-  it('9. JS Content-Type — application/javascript', async () => {
-    const response = await fetch(`${base}/p/${USER_A.install}.js`);
-    assert.match(response.headers.get('content-type'), /^application\/javascript/);
-  });
-
-  it('10. существующий Lampa-флоу не сломан: короткая ссылка /{slug}_{short}.js и статика /maniya-online.js', async () => {
+describe('PLUGIN-INSTALL-002: существующие флоу не сломаны', () => {
+  it('11. короткая ссылка /{slug}_{short}.js: браузер — stub, Lampa — JS с токеном', async () => {
     // A: mo-aaaabbbbccccddddeeeeffff00001111 → последние 12 hex: ffff00001111
-    const short = await fetch(`${base}/user-a_ffff00001111.js`);
-    assert.equal(short.status, 200);
-    assert.match(short.headers.get('content-type'), /javascript/);
-    assert.ok((await short.text()).includes(`window.MANIYA_ONLINE_TOKEN=${JSON.stringify(USER_A.token)}`));
+    const browserResp = await browserFetch(`${base}/user-a_ffff00001111.js`);
+    await assertStub(browserResp, 'shortlink browser');
 
-    const staticJs = await fetch(`${base}/maniya-online.js`);
-    assert.equal(staticJs.status, 200);
-    assert.match(staticJs.headers.get('content-type'), /javascript/);
-    assert.match(staticJs.headers.get('cache-control'), /max-age=300/);
+    const lampaResp = await lampaFetch(`${base}/user-a_ffff00001111.js`);
+    assert.equal(lampaResp.status, 200);
+    assert.match(lampaResp.headers.get('content-type'), /^application\/javascript/);
+    assert.ok((await lampaResp.text()).includes(`window.MANIYA_ONLINE_TOKEN=${JSON.stringify(USER_A.token)}`));
   });
 
-  it('11. существующие API-вызовы работают (subscription/check по реальному токену)', async () => {
+  it('12. статика /maniya-online.js: браузер — stub, Lampa — JS (cached)', async () => {
+    const browserResp = await browserFetch(`${base}/maniya-online.js`);
+    await assertStub(browserResp, 'static browser');
+
+    const lampaResp = await lampaFetch(`${base}/maniya-online.js`);
+    assert.equal(lampaResp.status, 200);
+    assert.match(lampaResp.headers.get('content-type'), /^application\/javascript/);
+    assert.match(lampaResp.headers.get('cache-control'), /max-age=300/);
+    assert.match(await lampaResp.text(), /MANIYA_API_BASE/);
+  });
+
+  it('13. API-вызовы работают (subscription/check по реальному токену)', async () => {
     const response = await fetch(`${base}/api/lampa/subscription/check?token=${USER_A.token}`);
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.authorized, true);
     assert.equal(body.active, true);
   });
+});
 
-  it('12. в HTML нет credentials (ни токена A, ни токена B)', async () => {
-    const htmlA = await (await fetch(`${base}/i/${USER_A.install}`)).text();
-    const htmlB = await (await fetch(`${base}/i/${USER_B.install}`)).text();
-    assert.ok(!htmlA.includes(USER_A.token));
-    assert.ok(!htmlA.includes(USER_B.token));
-    assert.ok(!htmlB.includes(USER_A.token));
-    assert.ok(!htmlB.includes(USER_B.token));
+describe('PLUGIN-INSTALL-002: изоляция и отсутствие секретов', () => {
+  it('14. A/B изоляция: лоадер и полный код не смешивают пользователей', async () => {
+    const loaderA = await (await lampaFetch(`${base}/p/${USER_A.install}.js`)).text();
+    const loaderB = await (await lampaFetch(`${base}/p/${USER_B.install}.js`)).text();
+    assert.ok(!loaderA.includes(USER_B.install), 'лоадер A не содержит install B');
+    assert.ok(!loaderB.includes(USER_A.install), 'лоадер B не содержит install A');
+
+    const fullA = await (await lampaFetch(hiddenUrl(USER_A.install))).text();
+    const fullB = await (await lampaFetch(hiddenUrl(USER_B.install))).text();
+    assert.ok(fullA.includes(USER_A.token), 'A-JS вшивает токен A');
+    assert.ok(!fullA.includes(USER_B.token), 'A-JS не содержит токен B');
+    assert.ok(fullB.includes(USER_B.token), 'B-JS вшивает токен B');
+    assert.ok(!fullB.includes(USER_A.token), 'B-JS не содержит токен A');
   });
 
-  it('13. в URL нет subscription-токена — только opaque install', async () => {
-    const installUrl = `${base}/i/${USER_A.install}`;
-    const pluginUrl = `${base}/p/${USER_A.install}.js`;
-    assert.ok(!installUrl.includes(USER_A.token), 'install-URL без реального токена');
-    assert.ok(!pluginUrl.includes(USER_A.token), 'plugin-URL без реального токена');
-    assert.match(installUrl, /\/i\/[0-9a-f]{32,}$/);
-    assert.match(pluginUrl, /\/p\/[0-9a-f]{32,}\.js$/);
+  it('15. в URL нет subscription-токена — только opaque install и HMAC-ключ', async () => {
+    const pUrl = `${base}/p/${USER_A.install}.js`;
+    const xUrl = hiddenUrl(USER_A.install);
+    assert.ok(!pUrl.includes(USER_A.token), '/p/ без реального токена');
+    assert.ok(!xUrl.includes(USER_A.token), '/x/ без реального токена');
+    assert.match(pUrl, /\/p\/[0-9a-f]{32,}\.js$/);
+    assert.match(xUrl, /\/x\/[0-9a-f]{32,}_[0-9a-f]{16,}\.js$/);
+    assert.ok(!hiddenKey(USER_A.install).includes(USER_A.token.split('-').pop()), 'ключ не из hex токена');
   });
 
-  it('14. кэш-заголовки: HTML и JS no-store; повторные ответы юзера одинаковы, чужой — другой', async () => {
-    const htmlA1 = await fetch(`${base}/i/${USER_A.install}`);
-    const htmlA2 = await fetch(`${base}/i/${USER_A.install}`);
-    const htmlB = await fetch(`${base}/i/${USER_B.install}`);
-    const jsA = await fetch(`${base}/p/${USER_A.install}.js`);
-    assert.match(htmlA1.headers.get('cache-control'), /no-store/);
-    assert.match(htmlB.headers.get('cache-control'), /no-store/);
-    assert.match(jsA.headers.get('cache-control'), /no-store/);
+  it('16. кэш: stub, лоадер и полный код — no-store; повторные ответы идентичны', async () => {
+    const s1 = await browserFetch(`${base}/p/${USER_A.install}.js`);
+    const s2 = await browserFetch(`${base}/p/${USER_A.install}.js`);
+    assert.match(s1.headers.get('cache-control'), /no-store/);
+    assert.equal(await s1.text(), await s2.text(), 'тот же юзер — тот же stub');
 
-    const bodyA1 = await htmlA1.text();
-    const bodyA2 = await htmlA2.text();
-    const bodyB = await htmlB.text();
-    assert.equal(bodyA1, bodyA2, 'тот же пользователь — идентичный HTML');
-    assert.notEqual(bodyA1, bodyB, 'другой пользователь — другой HTML (нет переклейки)');
+    const f1 = await lampaFetch(hiddenUrl(USER_A.install));
+    const f2 = await lampaFetch(hiddenUrl(USER_A.install));
+    assert.match(f1.headers.get('cache-control'), /no-store/);
+    assert.equal(await f1.text(), await f2.text(), 'тот же юзер — тот же полный код');
   });
 
-  it('доп: неактивный пользователь — /i/ и /p/ → 403 (подписка)', async () => {
-    const h = await fetch(`${base}/i/${USER_C.install}`);
-    assert.equal(h.status, 403);
-    const p = await fetch(`${base}/p/${USER_C.install}.js`);
-    assert.equal(p.status, 403);
-  });
-
-  it('доп: короткий /i/<opaque> (< 32 hex) не валиден (анти-гадалка)', async () => {
-    const response = await fetch(`${base}/i/abcd1234`);
+  it('17. несуществующий /p/<opaque>.js: 404 (без раскрытия)', async () => {
+    const response = await fetch(`${base}/p/${'f'.repeat(48)}.js`);
     assert.equal(response.status, 404);
+  });
+
+  it('18. секрет не попадает в ответы (stub/лоадер/код без PLUGIN_CODE_SECRET)', async () => {
+    for (const [label, resp] of [
+      ['stub', await browserFetch(`${base}/p/${USER_A.install}.js`)],
+      ['loader', await lampaFetch(`${base}/p/${USER_A.install}.js`)],
+      ['full', await lampaFetch(hiddenUrl(USER_A.install))]
+    ]) {
+      const body = await resp.text();
+      assert.ok(!body.includes('test-secret-001'), `${label}: секрет не в теле`);
+    }
   });
 });
