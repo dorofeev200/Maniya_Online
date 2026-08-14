@@ -271,7 +271,7 @@ test('card: checksearch «нет» + прямой lite-page «нет» → show:
   assert.equal(row.confirmed, true, 'прошёл подтверждение');
 });
 
-test('card: подтверждение инконклюзивно (таймаут прямого lite-page) → первичное «нет» сохраняется (RULE-4), карточка не кэшируется', async () => {
+test('card: подтверждение инконклюзивно (таймаут прямого lite-page) → первичное «нет» сохраняется (RULE-4), карточка кэшируется с hasInconclusive', async () => {
   let fetches = 0;
   const checker = makeChecker((url, options = {}) => {
     fetches += 1;
@@ -293,11 +293,18 @@ test('card: подтверждение инконклюзивно (таймау�
   assert.equal(byId(first, 'skaz-kinopub').show, false, 'definitive «нет» от checksearch не переворачивается инконклюзивным подтверждением');
   assert.equal(byId(first, 'skaz-kinopub').inconclusive, true, 'подтверждение не дало ответа → ряд inconclusive');
   assert.equal(byId(first, 'skaz-kinopub').confirmInconclusive, true, 'диагностический флаг инконклюзивного подтверждения');
+  assert.equal(first.hasInconclusive, true, 'entry помечена hasInconclusive (НЕ definitive)');
+  const fetchesBefore = fetches;
   const second = await checker.card(QUERY, 'uid-1');
-  assert.equal(second.cached, false, 'стрессовая карточка не фиксируется на 5 минут');
+  assert.equal(second.cached, true, 'INCONCLUSIVE не блокирует кэш (BALANCER-STABILITY-002)');
+  assert.equal(fetches, fetchesBefore, 'hit — без повторного checksearch');
+  assert.equal(byId(second, 'skaz-kinopub').show, false, 'вердикт пережил кэш');
+  assert.equal(byId(second, 'skaz-kinopub').inconclusive, true, 'hit сохраняет INCONCLUSIVE — не сворачивает в definitive');
+  assert.equal(byId(second, 'skaz-kinopub').confirmInconclusive, true, 'RULE-4 состояние пережило кэш');
+  assert.equal(second.hasInconclusive, true, 'hit отдаёт hasInconclusive');
 });
 
-test('card: все accsdb-отказы — вердикта нет → show:true, карточка НЕ кэшируется (self-heal)', async () => {
+test('card: accsdb-отказ — вердикта нет → show:true, INCONCLUSIVE-ряд кэшируется (BALANCER-STABILITY-002)', async () => {
   let fetches = 0;
   const checker = makeChecker((url) => {
     fetches += 1;
@@ -310,8 +317,11 @@ test('card: все accsdb-отказы — вердикта нет → show:true
   assert.equal(byId(first, 'skaz-kinopub').show, true, 'accsdb = вердикта нет → показываем оптимистично');
   assert.equal(byId(first, 'skaz-kinopub').inconclusive, true);
   assert.equal(byId(first, 'skaz-kinopub').accsdb, true);
+  assert.equal(first.hasInconclusive, true);
   const second = await checker.card(QUERY, 'uid-1');
-  assert.equal(second.cached, false, 'accsdb-флак не фиксируется на 5 минут — следующий запрос перепроверит');
+  assert.equal(second.cached, true, 'INCONCLUSIVE-ряд не блокирует кэш');
+  assert.equal(byId(second, 'skaz-kinopub').inconclusive, true, 'hit сохраняет INCONCLUSIVE');
+  assert.equal(byId(second, 'skaz-kinopub').accsdb, true, 'accsdb-пометка пережила кэш');
 });
 
 test('card: подтверждённый «нет» кэшируется (двойная проверка + retry) — 2-й вызов без fetch', async () => {
@@ -378,7 +388,7 @@ test('checkBalancer: смешанный вердикт (хост 503 + хост 
   assert.equal(row.inconclusive, true);
 });
 
-test('card: inconclusive-ряд (таймаут) НЕ кэшируется — 2-й вызов перепроверяет', async () => {
+test('card: inconclusive-ряд (таймаут) кэшируется — 2-й вызов hit без повторного checksearch', async () => {
   let fetches = 0;
   const checker = makeChecker((url, options = {}) => {
     fetches += 1;
@@ -396,9 +406,11 @@ test('card: inconclusive-ряд (таймаут) НЕ кэшируется — 2
   const first = await checker.card(QUERY, 'uid-1');
   const second = await checker.card(QUERY, 'uid-1');
   assert.equal(first.cached, false);
-  assert.equal(second.cached, false, 'стрессовая карточка не фиксируется на 5 минут');
+  assert.equal(second.cached, true, 'INCONCLUSIVE не блокирует кэш (BALANCER-STABILITY-002)');
   assert.equal(byId(second, 'skaz-rezka').show, true);
-  assert.equal(fetches, 8, 'повторный полный прогон (2×1 контент-стоп + 2 таймаут = 4, ×2 карточки; filmix trusted не пробируется)');
+  assert.equal(byId(second, 'skaz-rezka').inconclusive, true, 'hit сохраняет INCONCLUSIVE — фактический вердикт');
+  assert.equal(second.hasInconclusive, true);
+  assert.equal(fetches, 4, 'второй вызов — hit без re-checksearch (первый: 2×1 контент-стоп + 2 таймаут = 4; filmix trusted не пробируется)');
 });
 
 test('card: параллельно — все НЕ-trusted балансеры запрошены одновременно', async () => {
@@ -455,6 +467,140 @@ test('card: кэш разделён по userUid', async () => {
   await checker.card(QUERY, 'uid-1');
   await checker.card(QUERY, 'uid-2');
   assert.equal(fetches, 6, 'разные пользователи → разные кэши (3+3; filmix trusted без пробы)');
+});
+
+// ===== BALANCER-STABILITY-002: INCONCLUSIVE не блокирует кэш, tri-state сохраняется =====
+
+test('card: MIXED (available + inconclusive + unavailable) → кэшируется целиком; hit возвращает тот же набор и вердикты', async () => {
+  const checker = makeChecker((url, options = {}) => {
+    const b = balancerOf(url);
+    if (b === 'alloha') return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>')); // AVAILABLE
+    if (b === 'kinopub') return Promise.resolve(response(503, 'disable')); // UNAVAILABLE (подтверждение тоже «нет»)
+    if (b === 'rezka') { // INCONCLUSIVE
+      return new Promise((resolve, reject) => {
+        const signal = options.signal;
+        if (signal?.aborted) return reject(new Error('aborted'));
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>')); // filmix trusted
+  }, { timeoutMs: 120, ttlMs: 60_000 });
+
+  const first = await checker.card(QUERY, 'uid-1');
+  assert.equal(first.cached, false);
+  assert.equal(byId(first, 'skaz-alloha').show, true, 'AVAILABLE');
+  assert.equal(byId(first, 'skaz-rezka').show, true, 'INCONCLUSIVE → показ');
+  assert.equal(byId(first, 'skaz-rezka').inconclusive, true, 'INCONCLUSIVE остаётся distinct-состоянием');
+  assert.equal(byId(first, 'skaz-kinopub').show, false, 'UNAVAILABLE');
+  assert.equal(byId(first, 'skaz-kinopub').confirmed, true, 'подтверждённый «нет»');
+  assert.equal(first.hasInconclusive, true, 'entry с inconclusive помечена hasInconclusive');
+  assert.deepEqual(first.sources.map((s) => [s.id, s.show]),
+    [['skaz-alloha', true], ['skaz-filmix', true], ['skaz-rezka', true], ['skaz-kinopub', false]], '3 состояния в наборе');
+
+  const second = await checker.card(QUERY, 'uid-1');
+  assert.equal(second.cached, true, 'MIXED-карточка кэшируется целиком');
+  assert.equal(second.elapsedMs, 0, 'hit — мгновенный');
+  assert.deepEqual(second.sources.map((s) => [s.id, s.show]),
+    first.sources.map((s) => [s.id, s.show]), 'hit возвращает тот же source-set');
+  assert.equal(byId(second, 'skaz-rezka').inconclusive, true, 'INCONCLUSIVE пережил кэш (не свёрнут в show:true/false)');
+  assert.equal(byId(second, 'skaz-kinopub').confirmed, true, 'confirmed hide пережил кэш');
+  assert.equal(second.hasInconclusive, true);
+});
+
+test('card: 10 последовательных запросов — 1 MISS + 9 HIT, набор одинаковый 10/10', async () => {
+  const checker = makeChecker((url, options = {}) => {
+    const b = balancerOf(url);
+    if (b === 'rezka') { // INCONCLUSIVE — кэш-кейс из real-карточки
+      return new Promise((resolve, reject) => {
+        const signal = options.signal;
+        if (signal?.aborted) return reject(new Error('aborted'));
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
+  }, { timeoutMs: 120, ttlMs: 60_000 });
+
+  const results = [];
+  for (let i = 0; i < 10; i++) results.push(await checker.card(QUERY, 'uid-1'));
+  assert.equal(results[0].cached, false, 'первый — MISS (полный check)');
+  for (let i = 1; i < 10; i++) assert.equal(results[i].cached, true, `запрос #${i} — HIT`);
+  const sets = new Set(results.map((r) => r.sources.map((s) => `${s.id}:${s.show}`).join('|')));
+  assert.equal(sets.size, 1, 'один и тот же набор source visibility 10/10');
+  assert.ok(results.every((r) => r.hasInconclusive), 'INCONCLUSIVE-карточка кэшируется и отдаёт hasInconclusive');
+});
+
+test('card: serial/source в ключе — отдельные кэши (по существующему fnv1a key)', async () => {
+  let fetches = 0;
+  const checker = makeChecker(() => {
+    fetches += 1;
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
+  }, { ttlMs: 60_000 });
+  await checker.card(QUERY, 'uid-1');
+  await checker.card({ ...QUERY, serial: 1 }, 'uid-1');       // serial в ключе
+  await checker.card({ ...QUERY, source: 'kinopoisk' }, 'uid-1'); // source в ключе
+  assert.equal(fetches, 9, 'id/serial/source — отдельные ключи (3×3; filmix trusted без пробы)');
+  // season в ключ НЕ входит (как Lampac memkey Fnv1a(id:serial:source:count:uid)) —
+  // изменение season не создаёт новый ключ, это задокументированное поведение.
+});
+
+test('card: TTL — после истечения кэш перепроверяет (механизм 5-мин TTL)', async () => {
+  let fetches = 0;
+  const checker = makeChecker(() => {
+    fetches += 1;
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
+  }, { ttlMs: 50 });
+  const first = await checker.card(QUERY, 'uid-1');
+  const second = await checker.card(QUERY, 'uid-1');
+  assert.equal(second.cached, true, 'в пределах TTL — hit');
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  const third = await checker.card(QUERY, 'uid-1');
+  assert.equal(third.cached, false, 'после TTL — свежий check');
+  assert.equal(fetches, 6, '2 полных прогона (первый + после TTL); вторая — hit без fetch');
+});
+
+test('card: self-heal — INCONCLUSIVE-кэш НЕ definitive; force возвращает свежий вердикт и заменяет entry', async () => {
+  let mutated = false;
+  const checker = makeChecker((url, options = {}) => {
+    const b = balancerOf(url);
+    if (b === 'rezka' && !mutated) {
+      return new Promise((resolve, reject) => {
+        const signal = options.signal;
+        if (signal?.aborted) return reject(new Error('aborted'));
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
+  }, { timeoutMs: 120, ttlMs: 60_000 });
+
+  const first = await checker.card(QUERY, 'uid-1');
+  assert.equal(byId(first, 'skaz-rezka').inconclusive, true, 'сначала INCONCLUSIVE (таймаут)');
+  assert.equal(first.hasInconclusive, true);
+
+  mutated = true; // контент появился
+  const forced = await checker.card(QUERY, 'uid-1', true);
+  assert.equal(forced.cached, false, 'force — принудительный refresh');
+  assert.equal(byId(forced, 'skaz-rezka').show, true, 'свежий вердикт: контент доступен');
+  assert.equal(byId(forced, 'skaz-rezka').inconclusive, undefined, 'INCONCLUSIVE ушёл');
+  assert.equal(forced.hasInconclusive, false, 'новая entry — чистая');
+
+  const after = await checker.card(QUERY, 'uid-1');
+  assert.equal(after.cached, true, 'форс-результат заменяет entry → следующий — hit');
+  assert.equal(byId(after, 'skaz-rezka').inconclusive, undefined, 'hit отдаёт новый вердикт, не старый INCONCLUSIVE');
+});
+
+test('card: OLD∩NEW гейт сохранён — подтверждённый hide переживает кэш-hit (confirmed/authoritative)', async () => {
+  const checker = makeChecker((url) => {
+    if (balancerOf(url) === 'kinopub') return Promise.resolve(response(503, 'disable'));
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
+  }, { ttlMs: 60_000 });
+  const first = await checker.card(QUERY, 'uid-1');
+  const second = await checker.card(QUERY, 'uid-1');
+  for (const r of [first, second]) {
+    const row = byId(r, 'skaz-kinopub');
+    assert.equal(row.show, false, 'оба сигнала «нет» → скрыт');
+    assert.equal(row.confirmed, true, 'гейт прошёл подтверждение — пережил кэш');
+    assert.equal(row.authoritative, true);
+  }
 });
 
 // ===== checkBalancer: host-политика =====

@@ -39,8 +39,11 @@ import { registeredProviders, twinFor } from './providers/registry.js';
  * - каждый балансер изолирован (Promise.allSettled): сбой одного не ломает других.
  *
  * Кэш: Fnv1a(id:serial:source:count:uid) — как memkey Lampac, TTL 5 мин, lazy sweep
- * ≤512 (конвенция SkazProvider._navCache). Кэшируем только чистые вердикты: ни одного
- * inconclusive-ряда (таймаут/сеть) — стрессовый момент не фиксируем на 5 минут.
+ * ≤512 (конвенция SkazProvider._navCache). BALANCER-STABILITY-002: INCONCLUSIVE-ряды
+ * (таймаут/сеть) НЕ блокируют кэширование — карточка кэшируется всегда, с сохранением
+ * фактического вердикта каждой строки (AVAILABLE/UNAVAILABLE/INCONCLUSIVE — три разных
+ * состояния, `inconclusive`-флаг остаётся в ряду); на hit возвращается тот же набор.
+ * Entry с inconclusive помечается hasInconclusive → НЕ definitive (self-heal по TTL/force).
  * Подтверждённый «нет» кэшируется КОРОЧЕ (HIDE_TTL_MS = 60с): даже три согласных
  * «нет» под окном насыщения не должны висеть на рабочем источнике 5 минут — self-heal.
  *
@@ -753,14 +756,20 @@ export function createAvailabilityChecker(options = {}) {
    * Availability по карточке. Возвращает
    * { sources: [{id, show, native?, rch?, quality?, status, host?}], count, cached, elapsedMs }.
    */
-  async function card(query = {}, userUid = '') {
+  async function card(query = {}, userUid = '', force = false) {
     const sources = resolveSources();
     const count = sources.length;
     const key = cacheKey(query, userUid, count);
 
-    const hit = cache.get(key);
+    const hit = force ? undefined : cache.get(key);
     if (hit && Date.now() - hit.ts < (hit.ttl || ttlMs)) {
-      return { sources: hit.sources, count, cached: true, elapsedMs: 0 };
+      return {
+        sources: hit.sources,
+        count,
+        cached: true,
+        elapsedMs: 0,
+        hasInconclusive: Boolean(hit.hasInconclusive)
+      };
     }
 
     const started = Date.now();
@@ -846,10 +855,11 @@ export function createAvailabilityChecker(options = {}) {
         // не переворачивает первичное authoritative «нет» в показ: fallback show:true по
         // timeout — только когда definitive ответа не было вовсе. Здесь первичный вердикт
         // definitive («нет» от ЧИСТОГО ответа кластера) → оставляем его; ряд помечаем
-        // inconclusive → карточка не кэшируется (self-heal: следующий запрос перепроверит,
-        // и появившийся контент вернёт источник). Мотивация — docs/native-availability-
-        // 001-report.md §2.4: kinoflix/pidtor/solntse «Одиссеи» подтверждённо отсутствуют,
-        // но исчерпание card-дедлайна (12 004мс > 10 000мс) превращало их в show:true.
+        // inconclusive (НЕ definitive, BALANCER-STABILITY-002) → entry кэшируется на
+        // HIDE_TTL_MS с hasInconclusive; по TTL/force появившийся контент вернёт
+        // источник. Мотивация — docs/native-availability-001-report.md §2.4:
+        // kinoflix/pidtor/solntse «Одиссеи» подтверждённо отсутствуют, но исчерпание
+        // card-дедлайна (12 004мс > 10 000мс) превращало их в show:true.
         if (value.inconclusive) {
           row.inconclusive = true;
           row.confirmInconclusive = true;
@@ -871,23 +881,26 @@ export function createAvailabilityChecker(options = {}) {
 
     const elapsedMs = Date.now() - started;
 
-    // Кэшируем только чистые вердикты: ни одного inconclusive-ряда (таймаут/сеть).
-    // Стрессовый момент кластера не фиксируем на 5 минут — следующий запрос
-    // перепроверит и получит свежий вердикт. Подтверждённый «нет» (двойная проверка
-    // + retry) кэшируется, но КОРОТКО (HIDE_TTL_MS): даже три согласных «нет» под
-    // окном насыщения online8-туннеля не должны висеть на рабочем источнике 5 минут —
+    // BALANCER-STABILITY-002: INCONCLUSIVE-ряды НЕ блокируют кэш. Сохраняем фактический
+    // вердикт каждой строки (AVAILABLE/UNAVAILABLE/INCONCLUSIVE — три различных
+    // состояния, `inconclusive`-флаг остаётся в ряду; на hit возвращается тот же набор,
+    // ничего не сворачивается в show:true/false). Entry с inconclusive помечается
+    // hasInconclusive → НЕ definitive: по TTL/force следующий запрос перепроверит и
+    // сможет получить новый вердикт (self-heal). Подтверждённый «нет» (двойная проверка
+    // + retry) кэшируется КОРОТКО (HIDE_TTL_MS): даже три согласных «нет» под окном
+    // насыщения online8-туннеля не должны висеть на рабочем источнике 5 минут —
     // self-heal за минуту (кейс 2026-08-13: OLD items>0, NEW скрыл на 5 мин).
-    if (!rows.some((row) => row.inconclusive)) {
-      const hasConfirmedHide = rows.some((row) => row.show === false);
-      cache.set(key, {
-        ts: Date.now(),
-        sources: rows,
-        ttl: hasConfirmedHide ? HIDE_TTL_MS : ttlMs
-      });
-      sweep();
-    }
+    const hasInconclusive = rows.some((row) => row.inconclusive);
+    const hasConfirmedHide = rows.some((row) => row.show === false);
+    cache.set(key, {
+      ts: Date.now(),
+      sources: rows,
+      ttl: hasConfirmedHide ? HIDE_TTL_MS : ttlMs,
+      hasInconclusive
+    });
+    sweep();
 
-    return { sources: rows, count, cached: false, elapsedMs };
+    return { sources: rows, count, cached: false, elapsedMs, hasInconclusive };
   }
 
   return { card, checkBalancer, confirmAbsence, checkSearchPredicate };
