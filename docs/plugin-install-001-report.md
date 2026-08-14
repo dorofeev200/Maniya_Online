@@ -1,6 +1,6 @@
 # PLUGIN-INSTALL-001 — opaque-ссылка установки (скрытие JS из URL)
 
-**Дата:** 2026-08-14 · **Статус:** реализация + тесты + live shadow выполнены. **Commit/deploy НЕ выполнялись** (ждут отдельного подтверждения).
+**Дата:** 2026-08-14 · **Статус:** реализация + тесты + live shadow + **commit + deploy + PROD verification — ВЫПОЛНЕНЫ** (коммит `bf9fea0`, ветка `feature/alloha-provider` → remote `backup`).
 **Scope:** только install-flow. НЕ менялись: `server/src/availability.js`, провайдеры, cache, playback, `sources/card`, BALANCER-002/ONLINE8-002, SHADOW/COMPARE, Filmix TRUSTED_ALWAYS_VISIBLE, RCH/WebSocket.
 **Правило отчёта:** реальные значения нигде не приводятся — только masked fingerprint (первые 6 + `…` + последние 2).
 
@@ -87,17 +87,28 @@ Read-only к проду: `users.json` с VPS скопирован в `%TEMP%`, �
 
 ---
 
-## 5. Что проверить при деплое (не делалось)
+## 5. PROD verification — ВЫПОЛНЕНА (после деплоя, публичный https через nginx+TLS)
 
-1. **nginx** пропускает `Cache-Control: no-store` от апстрима для `/i/` и `/p/` (не переопределяет на кэширующий). После деплоя: `curl -sI https://plugin.maniya-kvn.online/i/<install>` → `cache-control: no-store`.
-2. nginx проксирует `/i/…` (без расширения, как `/health`) и `/p/….js` (как legacy-shortlink) — ожидаемо, но подтвердить живым запросом.
-3. Существующим пользователям: до первого `/start`/выдачи у них нет `install_token` → бот продолжает слать legacy-ссылку (обратная совместимость), лениво заполняется при следующем взаимодействии.
-4. Проверить отсутствие cross-user cache-poisoning на CDN/прокси после деплоя: `/i/<A>` ≠ `/i/<B>`.
+**20/20 PASS.** Реальный пользователь `dorofeev200` (токен `mo-6d7…e4`): в `users.json` на VPS добавлен `install_token` (`80eae4…4f`, backup `users.json.bak-install-001`); сервер перечитывает файл без рестарта.
+
+1. ✅ **nginx пропускает `Cache-Control: no-store`** для `/i/` и `/p/` — подтверждено живым ответом (не переопределяется).
+2. ✅ nginx проксирует `/i/…` (без расширения) и `/p/….js` — оба 200.
+3. ✅ `/i/<opaque>` → **200 text/html** (не JS), DOCTYPE + «Добавьте плагин в расширения Lampa», кнопка «Скопировать», ссылка на `/p/<install>.js`, реальный subscription-токен **отсутствует** в теле, `X-Content-Type-Options: nosniff`.
+4. ✅ `/p/<opaque>.js` → **200 application/javascript**, вшит реальный токен подписки, полный плагин (49 551 B), no-store.
+5. ✅ Legacy-флоу сохранён: `/dorofeev200_<short>.js` → 200 JS с токеном; статика `/maniya-online.js` → 200.
+6. ✅ API `subscription/check` по реальному токену → `authorized=true`.
+7. ✅ Невалидные `/i/<unknown>` и `/p/<unknown>.js` → **404** (информация не раскрывается).
+8. ✅ `/i/` идемпотентен (повторный запрос — тот же HTML, нет переклейки).
+9. ✅ `/health` → 200.
+10. ✅ **«Браузерный» аспект подтверждён эквивалентом рендера:** Content-Type `text/html` + тело — HTML-страница установки (начинается с `<!DOCTYPE html>`, НЕ с `window.MANIYA_ONLINE_TOKEN`), т.е. при открытии URL в браузере показывается страница «Добавьте плагин в расширения Lampa», а не JS.
+
+Другие пользователи VPS не тронуты (`vip-kanal-tvv`, admin-запись — без `install_token`; лениво заполняется ботом при `/start`/выдаче — обратная совместимость с legacy-ссылкой).
 
 ---
 
-## 6. Commit / deploy — НЕ выполнены
+## 6. Commit / deploy — ВЫПОЛНЕНЫ
 
-- Рабочее дерево: 6 файлов изменены для PLUGIN-INSTALL-001 (+ 2 новых) плюс pre-existing изменения прошлых сессий (SECURITY-001/002 и др.).
-- Реальных credentials в diff нет (проверено: только masked).
-- Жду отдельного подтверждения на commit и deploy.
+- **Commit** `bf9fea0` (ветка `feature/alloha-provider`): ровно 8 файлов PLUGIN-INSTALL-001 (4 src + telegram.test.js + plugin-install.test.js + фикстура + отчёт). Staged diff показан пользователю до коммита; проверка staged-контента на credentials: **чисто** (только синтетические фикстуры `mo-aaaabbbb…`, `abcd1234…`; реальных токенов, старых токенов, VPS-пароля, email нет).
+- **Push**: `backup` (`f3d387e..bf9fea0`).
+- **Deploy**: `scripts/deploy.sh` (tar-over-ssh, `server/data` и `server/.env` исключены — прод-users.json и токены сохранены), systemd restart, nginx+certbot OK.
+- **Post-deploy**: на VPS добавлен `install_token` реальному `dorofeev200` (backup `users.json.bak-install-001`) → prod verification 20/20 (см. §5).
