@@ -38,7 +38,7 @@ const USER_C = {
   install: '9999abcd9999abcd9999abcd9999abcd9999abcd9999abcd'
 };
 
-const STUB_TEXT = 'Добавьте плагин в Расширения Lampa';
+const STUB_TEXT = 'Добавьте плагин в Расширения Lampa.';
 // Lampa дописывает версию в UA; обычный браузер этого не делает.
 const LAMPA_UA = 'Mozilla/5.0 (AppleTV; CPU OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Lampa/0.20.4';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -291,5 +291,50 @@ describe('PLUGIN-INSTALL-003: Media Station X (Lampa web UI) — origin-query г
     const response = await msxFetch(`${base}/user-a_ffff00001111.js?origin=bylampa.online`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /^application\/javascript/);
+  });
+});
+
+describe('PLUGIN-VERIFY-004: буквальная репродукция Lampa Extension.check (/Lampa\\./)', () => {
+  // MSX = Lampa web UI в WKWebView (как в 003); msxFetch локально — блок 003 его не экспортирует.
+  const MSX_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+  const msxFetch = (url, init) => fetchAs(MSX_UA, url, init);
+
+  // Точная логика Lampa Extension.check (app.min.js): голый native-fetch тела →
+  // if (/Lampa\./.test(str)) display('success',200,'extensions_worked')
+  // else display('error',500,'extensions_no_plugin').
+  function lampaCheckDisplay(body) {
+    return /Lampa\./.test(body)
+      ? { type: 'success', num: 200, text: 'extensions_worked' }
+      : { type: 'error', num: 500, text: 'extensions_no_plugin' };
+  }
+
+  it('24. каждый bare-запрос (legacy//p///x/static) даёт MSX-чеку 200 «Рабочий», а не 500 «Плагин не подтверждён»', async () => {
+    const cases = [
+      ['legacy bare, MSX-UA', msxFetch(`${base}/user-a_ffff00001111.js`)],
+      ['legacy bare, браузер', browserFetch(`${base}/user-a_ffff00001111.js`)],
+      ['/p/ bare, MSX-UA', msxFetch(`${base}/p/${USER_A.install}.js`)],
+      ['/p/ bare, браузер', browserFetch(`${base}/p/${USER_A.install}.js`)],
+      ['/x/ bare, браузер', browserFetch(hiddenUrl(USER_A.install))],
+      ['статик bare, браузер', browserFetch(`${base}/maniya-online.js`)]
+    ];
+    for (const [label, promise] of cases) {
+      const response = await promise;
+      assert.equal(response.status, 200, `${label}: HTTP 200`);
+      const body = await response.text();
+      assert.ok(!body.includes('MANIYA_ONLINE_TOKEN'), `${label}: в stub нет токена`);
+      assert.ok(!body.includes('MANIYA_API_BASE'), `${label}: в stub нет кода плагина`);
+      const verdict = lampaCheckDisplay(body);
+      assert.equal(verdict.num, 200, `${label}: /Lampa\\./ пройден → чек 200 «Рабочий», а не 500 «Плагин не подтверждён»`);
+      assert.equal(verdict.text, 'extensions_worked', `${label}: тип успеха`);
+    }
+  });
+
+  it('25. полный JS (Lampa UA) тоже проходит чек — успешный путь Android не сломан', async () => {
+    const response = await lampaFetch(`${base}/user-a_ffff00001111.js`);
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    const verdict = lampaCheckDisplay(body);
+    assert.equal(verdict.num, 200, 'полный JS содержит "Lampa." → чек 200');
+    assert.match(body, /window\.MANIYA_ONLINE_TOKEN=/, 'полный JS несёт токен');
   });
 });

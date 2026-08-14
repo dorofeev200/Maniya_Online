@@ -28,7 +28,7 @@ const USER_A = {
   token: 'mo-aaaabbbbccccddddeeeeffff00001111',
   install: 'abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234'
 };
-const STUB_TEXT = 'Добавьте плагин в Расширения Lampa';
+const STUB_TEXT = 'Добавьте плагин в Расширения Lampa.';
 const LAMPA_UA = 'Mozilla/5.0 (AppleTV; CPU OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Lampa/0.20.4';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const fetchAs = (ua, url) => fetch(url, { headers: { 'User-Agent': ua } });

@@ -101,7 +101,10 @@ export function isLampaRequest(request) {
           && q.searchParams.has('reset'));
 }
 
-export const PLUGIN_STUB_TEXT = 'Добавьте плагин в Расширения Lampa';
+// Завершающая точка обязательна: Lampa Extension.check (PLUGIN-VERIFY-004) тестирует
+// тело голого native-fetch по /Lampa\./ — без точки чек на MSX рисовал хардкод «500 Плагин
+// не подтверждён », хотя сервер отвечал 200. Stub по-прежнему текст, а не JS.
+export const PLUGIN_STUB_TEXT = 'Добавьте плагин в Расширения Lampa.';
 
 /**
  * Заглушка для браузера (PLUGIN-INSTALL-002): открыл плагин-URL в браузере —

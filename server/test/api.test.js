@@ -53,7 +53,7 @@ describe('Maniya Online API', () => {
     const response = await fetch(`${base}/maniya-online.js`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /^text\/plain/);
-    assert.equal(await response.text(), 'Добавьте плагин в Расширения Lampa');
+    assert.equal(await response.text(), 'Добавьте плагин в Расширения Lampa.');
   });
 
   it('never rejects OPTIONS preflight with 403', async () => {
