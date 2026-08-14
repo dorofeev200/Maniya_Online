@@ -493,6 +493,16 @@ export function createAvailabilityChecker(options = {}) {
   const reservePolicy = options.reservePolicy || 'legacy';
   const cache = new Map();
 
+  // BALANCER-STABILITY-003: single-flight. Параллельные запросы ОДНОГО cache-key
+  // (uid:serial:source:count) с ОДНИМ force-флагом выполняют ОДИН upstream calc
+  // (Promise.allSettled probe-цикл + OLD∩NEW гейт), остальные join-запросы получают
+  // ТОТ ЖЕ результат. Разные ключи (userUid/serial/source) — разные entries, не
+  // блокируют друг друга. force изолирован от non-force (отдельный flightKey): по
+  // семантике force = «свежий calc», его результат не должен быть «унаследован»
+  // идущим non-force calc'ом и наоборот. Entry удаляется в finally — rejected/timeout
+  // calc не отравляет flight (следующий запрос пересчитает).
+  const inflight = new Map(); // flightKey → Promise<card result>
+
   /**
    * GET URL с таймаутом (бюджет ≤ остатка до дедлайна). Возвращает Response для
    * ЛЮБОГО HTTP-статуса (503/404 — кластер ОТВЕТИЛ), null — только когда ответа
@@ -813,11 +823,22 @@ export function createAvailabilityChecker(options = {}) {
   /**
    * Availability по карточке. Возвращает
    * { sources: [{id, show, native?, rch?, quality?, status, host?}], count, cached, elapsedMs }.
+   *
+   * BALANCER-STABILITY-003: single-flight. Параллельные запросы одного ключа
+   * (cacheKey → userUid:serial:source:count) с одним force-флагом разделяют ОДИН
+   * upstream calc; join-запросы получают тот же результат (тот же Promise). Разные
+   * userUid/serial/source → разные ключи → не блокируют друг друга (каждый свой calc).
+   * force — отдельный flight (по семантике force = «свежий calc», не делится с
+   * non-force). Итог: под нагрузкой (несколько устройств/ретраев одного юзера на
+   * одну карточку) upstream-вычисление выполняется один раз, а не N раз с
+   * расходящимися вердиктами (кэш-стампед из live-матрицы READINESS-002: 5 паралл. →
+   * 4 разных набора).
    */
   async function card(query = {}, userUid = '', force = false) {
     const sources = resolveSources();
     const count = sources.length;
     const key = cacheKey(query, userUid, count);
+    const flightKey = `${key}:${force ? 'f' : 'n'}`;
 
     const hit = force ? undefined : cache.get(key);
     if (hit && Date.now() - hit.ts < (hit.ttl || ttlMs)) {
@@ -830,6 +851,24 @@ export function createAvailabilityChecker(options = {}) {
       };
     }
 
+    // Single-flight: идущий calc для этого ключа — присоединяемся (тот же результат).
+    const pending = inflight.get(flightKey);
+    if (pending) return pending;
+
+    const promise = computeCard(query, userUid, sources, count, key);
+    inflight.set(flightKey, promise);
+    try {
+      return await promise;
+    } finally {
+      // Удаляем только если это НАШ entry (join-запрос уже вернул pending выше и не
+      // дошёл сюда). Rejected/timeout calc не отравляет flight: finally снимает entry,
+      // следующий запрос делает свежий calc.
+      if (inflight.get(flightKey) === promise) inflight.delete(flightKey);
+    }
+  }
+
+  /** Вычисление вердиктов по карточке (probe-цикл + OLD∩NEW гейт + кэш). Один calс. */
+  async function computeCard(query, userUid, sources, count, key) {
     const started = Date.now();
     const deadline = started + deadlineMs;
     const settled = await Promise.allSettled(sources.map((source) => {

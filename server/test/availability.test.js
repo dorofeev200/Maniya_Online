@@ -588,6 +588,128 @@ test('card: self-heal — INCONCLUSIVE-кэш НЕ definitive; force возвр�
   assert.equal(byId(after, 'skaz-rezka').inconclusive, undefined, 'hit отдаёт новый вердикт, не старый INCONCLUSIVE');
 });
 
+// ===== BALANCER-STABILITY-003: single-flight для /sources/card =====
+// Параллельные запросы ОДНОГО cache-key+force-флага → ОДИН upstream calc (probe-цикл),
+// join-запросы получают тот же Promise → тот же объект результата (sources ===). Разные
+// userUid/serial/source → разные flightKey → не дедуплицируются и не блокируют друг друга.
+// force изолирован от non-force. Entry удаляется в finally → flight не «застревает».
+// Счётчик fetch на calc при контент-хэндлере = 3 (alloha, rezka, kinopub; filmix trusted).
+
+// Счётчик — объект: замыкание мутирует поле, а не переприсваивает примитив-параметр.
+function contentHandler(counter) {
+  return () => {
+    counter.n += 1;
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
+  };
+}
+
+function newContentChecker(options = {}) {
+  const counter = { n: 0 };
+  return { checker: makeChecker(contentHandler(counter), { ttlMs: 60_000, ...options }), counter };
+}
+
+function concurrentCards(checker, n, query = QUERY, uid = 'uid-1', force = false) {
+  return Promise.all(Array.from({ length: n }, () => checker.card(query, uid, force)));
+}
+
+test('card: single-flight — 5 параллельных одинаковых запросов = 1 upstream calc, все получают ТОТ ЖЕ результат', async () => {
+  const { checker, counter } = newContentChecker();
+  const results = await concurrentCards(checker, 5);
+  assert.equal(counter.n, 3, 'один calc на 5 параллельных (alloha+rezka+kinopub; filmix trusted без пробы)');
+  assert.ok(results.every((r) => r.cached === false), 'все — в полёте (кэш ещё не записан)');
+  assert.ok(results.every((r) => r.sources === results[0].sources), 'тот же объект результата: join-запросы разделили ОДИН promise');
+  const sets = new Set(results.map((r) => r.sources.map((s) => `${s.id}:${s.show}`).join('|')));
+  assert.equal(sets.size, 1, 'идентичный набор source visibility 5/5');
+  const after = await checker.card(QUERY, 'uid-1');
+  assert.equal(after.cached, true, 'результат полёта закэширован');
+  assert.equal(counter.n, 3, 'hit не делает upstream');
+});
+
+test('card: single-flight — 10 и 20 параллельных одинаковых запросов: один calc каждый раз', async () => {
+  for (const n of [10, 20]) {
+    const { checker, counter } = newContentChecker();
+    const results = await concurrentCards(checker, n);
+    assert.equal(counter.n, 3, `${n} параллельных → 1 calc`);
+    assert.ok(results.every((r) => r.sources === results[0].sources), `${n} запросов — один объект результата`);
+  }
+});
+
+test('card: single-flight — разные userUid НЕ дедуплицируются и не блокируют друг друга', async () => {
+  const { checker, counter } = newContentChecker();
+  const [a, b, c] = await Promise.all([
+    checker.card(QUERY, 'uid-1'),
+    checker.card(QUERY, 'uid-2'),
+    checker.card(QUERY, 'uid-3')
+  ]);
+  assert.equal(counter.n, 9, '3 разных uid × 3 источника = 3 отдельных calc');
+  assert.ok(a.sources !== b.sources && b.sources !== c.sources && a.sources !== c.sources, 'разные uid → разные полёты (не общий объект)');
+  assert.ok(a.cached === false && b.cached === false && c.cached === false, 'все три — полноценные calc');
+});
+
+test('card: single-flight — serial/source в ключе: параллельные разные ключи не блокируют друг друга', async () => {
+  const { checker, counter } = newContentChecker();
+  const results = await Promise.all([
+    checker.card(QUERY, 'uid-1'),
+    checker.card({ ...QUERY, serial: 1 }, 'uid-1'),
+    checker.card({ ...QUERY, source: 'kinopoisk' }, 'uid-1')
+  ]);
+  assert.equal(counter.n, 9, '3 разных cache-key → 3 calc');
+  assert.ok(results.every((r) => r.cached === false), 'каждый ключ — свой полёт');
+  assert.ok(new Set(results.map((r) => r.sources)).size === 3, 'разные объекты результатов');
+});
+
+test('card: single-flight — force изолирован от non-force; force+force — один calc', async () => {
+  // (а) force ∥ force → один flight
+  const { checker: checkerA, counter: counterA } = newContentChecker();
+  const forces = await concurrentCards(checkerA, 3, QUERY, 'uid-1', true);
+  assert.equal(counterA.n, 3, '3 force параллельно → 1 calc');
+  assert.ok(forces.every((r) => r.sources === forces[0].sources), 'force-полёт общий (flightKey :f)');
+  assert.ok(forces.every((r) => r.cached === false), 'force — всегда полёт, кэш не читается');
+
+  // (б) non-force ∥ force (оба cache-miss) → ДВА calc: force не «наследует» non-force
+  const { checker: checkerB, counter: counterB } = newContentChecker();
+  const [normal, forced] = await Promise.all([
+    checkerB.card(QUERY, 'uid-1', false),
+    checkerB.card(QUERY, 'uid-1', true)
+  ]);
+  assert.equal(counterB.n, 6, 'non-force (:n) и force (:f) — разные flightKey → 2 calc');
+  assert.ok(normal.sources !== forced.sources, 'force не делит результат с идущим non-force полётом');
+});
+
+test('card: single-flight — slow-flight (rezka таймаутит) разделяется всеми; после разрешения flight чист', async () => {
+  const fetches = [];
+  const checker = makeChecker((url, options = {}) => {
+    const b = balancerOf(url);
+    fetches.push(b);
+    if (b === 'rezka') {
+      // «завис»: ответа нет, fetchHost оборвёт по таймауту → INCONCLUSIVE (вердикта нет → показ)
+      return new Promise((resolve, reject) => {
+        const signal = options.signal;
+        if (signal?.aborted) return reject(new Error('aborted'));
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    return Promise.resolve(response(200, '<html>data-json={"method":"call","url":"http://x/m.m3u8"}</html>'));
+  }, { timeoutMs: 60, ttlMs: 60_000 });
+
+  const t0 = Date.now();
+  const results = await concurrentCards(checker, 5);
+  const batchMs = Date.now() - t0;
+
+  assert.equal(fetches.filter((b) => b === 'rezka').length, 2, 'rezka пробована один раз (h1+h2), НЕ 5 раз');
+  assert.ok(results.every((r) => r.sources === results[0].sources), 'все 5 разделяют один полёт');
+  assert.equal(byId(results[0], 'skaz-rezka').inconclusive, true, 'таймаут → INCONCLUSIVE, не «нет»');
+  assert.equal(results[0].hasInconclusive, true);
+  assert.ok(batchMs < 500, `все 5 уложились в ~один calc (${batchMs}ms), а не 5× (~600ms)`);
+
+  // recovery: после разрешения полёта кэш HIT; flight-словарь пуст → force делает свежий calc
+  const after = await checker.card(QUERY, 'uid-1');
+  assert.equal(after.cached, true, 'после разрешения полёта — кэш');
+  const beforeForce = fetches.length;
+  await checker.card(QUERY, 'uid-1', true);
+  assert.ok(fetches.length > beforeForce, 'force после полёта — свежий calc (flight не «застрял» на старом promise)');
+});
+
 test('card: OLD∩NEW гейт сохранён — подтверждённый hide переживает кэш-hit (confirmed/authoritative)', async () => {
   const checker = makeChecker((url) => {
     if (balancerOf(url) === 'kinopub') return Promise.resolve(response(503, 'disable'));
