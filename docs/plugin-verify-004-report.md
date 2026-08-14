@@ -1,6 +1,6 @@
 # PLUGIN-VERIFY-004 — «500 Плагин не подтверждён» в Media Station X: root cause + минимальный фикс stub-текста
 
-**Дата:** 2026-08-14 · **Статус:** диагностика завершена, фикс применён (stub-текст + тест), commit → deploy → PROD verification (заполняется после деплоя).
+**Дата:** 2026-08-14 · **Статус:** диагностика + фикс + тесты + **commit (`443e146`) + push (`backup`) + deploy + PROD verification — ВЫПОЛНЕНЫ**. Отчёт обновлён результатами (`443e146`…, второй commit).
 **Scope:** ТОЛЬКО `PLUGIN_STUB_TEXT` (1 строка в `server/src/http.js`) + тестовая репродукция `Extension.check()` + отчёт. НЕ менялись: `isLampaRequest()`, `availability.js`, провайдеры, playback, cache, балансеры, install-flow (`pluginUrl`), `index.js`-маршруты.
 **Правило отчёта:** реальные секреты не приводятся — только masked. Публичные части ссылок (short-суффикс, slug) приводятся как в ТЗ.
 
@@ -81,16 +81,26 @@ key: "check", value: function check() {
 3. **Push** — только `backup`.
 4. **Deploy** — `scripts/deploy.sh` (сохраняет `server/.env` и `server/data`). Сервис `active`, `health` → 200.
 
-## 5. PROD verification
+## 5. PROD verification (ВЫПОЛНЕНО, реальный HTTPS на VPS + внешний PowerShell)
 
-(заполняется после деплоя — чек-лист)
-
-| # | Проверка | Ожидание |
+| # | Проверка | Результат |
 |---|---|---|
-| A | bare iPhone-UA legacy | 200 text/plain «Добавьте плагин в Расширения Lampa.», `/Lampa\./` **true** → MSX-чек **200 «Рабочий»**, НЕ 500 |
-| B | с `?logged&reset&origin=…` | 200 application/javascript, полный JS с токеном (не изменилось) |
-| C | браузер (Chrome UA) голый | 200 stub-текст, **без** токена/кода |
-| D | Android Lampa UA legacy | 200 JS с токеном (не изменилось) |
-| E | `/p/` Lampa UA | 200 лоадер со скрытым `/x/` (не изменилось) |
-| F | `/x/` неверный ключ | 404 (не изменилось) |
-| G | `subscription/check` реальным токеном | 200 `authorized:true` |
+| A | bare iPhone-UA legacy | 200 text/plain «Добавьте плагин в Расширения Lampa.» (60 B), `/Lampa\./` **true** → MSX-чек **200 «Рабочий»**, НЕ 500 ✓ |
+| B | iPhone + `?logged&reset&origin=…` | 200 application/javascript, 54779 B, токен вшит ✓ |
+| C | Chrome UA голый | 200 text/plain stub, **без** токена/кода ✓ |
+| D | Android Lampa UA legacy | 200 application/javascript, 54779 B, токен вшит ✓ |
+| E | `/p/<install>.js` Lampa UA | 200 лоадер (507 B, IIFE, скрытый `/x/`, без токена) ✓ |
+| H | `/x/<install>_<key>.js` верный ключ | 200, 54779 B, токен вшит ✓ |
+| F | `/x/` неверный ключ | 404 ✓ |
+| G | `subscription/check` реальным токеном | 200 `{"authorized":true,"active":true,"plan":"full",…}` ✓ |
+
+Тесты: **545: 537 pass / 2 fail (pre-existing date-dependent api.test.js) / 6 skip**; новые 24–25 pass.
+
+### Дополнительно: «ошибка 404 сейчас» в MSX и браузере — это НЕ этот фикс
+
+Параллельно с верификацией пользователь сообщил о 404. По access.log: устройство (31.40.208.19) запрашивает **`dorofeev200_3cfdc9c00227.js` → 404** — это **старый short-линк от прежнего токена** (до SECURITY-002 ротации). Текущий токен `dorofeev200` = `…d6de1c0fdce4` (новый, работает). Сервер **корректно** отдаёт 404 на ссылку отозванного токена (fail-closed). Проверено по снапшотам: before-rotation `3cfdc9c00227` (`mo-5…27`), current `d6de1c0fdce4` (`mo-6…e4`).
+
+**Что нужно пользователю:** в MSX/Lampa удалить старую запись `dorofeev200_3cfdc9c00227.js` и добавить актуальную ссылку от Telegram-бота (`dorofeev200_d6de1c0fdce4.js`) — она грузится (полный JS) и её чек теперь зелёный «200 Рабочий». Открытие в голом браузере новой ссылки покажет текст «Добавьте плагин в Расширения Lampa.» — это by design (003: браузер видит текст, а не JS).
+
+### Локальная аномалия (не сервер): curl.exe в Git Bash виснет на :443 к VPS
+Внешний HTTPS с этой Windows-машины **работает** (PowerShell `Invoke-WebRequest` → 200), а именно curl.exe/openssl.exe из Git Bash — таймаут TCP/TLS к `95.85.241.121:443` (bash `/dev/tcp` и PowerShell открывают сокет). К другим хостам (github/example) curl работает. Это локальная особенность процесса/бинарника curl на этой машине (вероятно, фильтр Windows/AV), **не сервер и не деплой**. Для проверок использую PowerShell/VPS-сторону.
