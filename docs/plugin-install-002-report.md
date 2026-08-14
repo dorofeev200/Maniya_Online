@@ -1,6 +1,6 @@
 # PLUGIN-INSTALL-002 — UA-гейт + скрытый ключевой путь (реальный код только для Lampa)
 
-**Дата:** 2026-08-14 · **Статус:** реализация + тесты + live shadow — **ВЫПОЛНЕНЫ**; commit + deploy — **НЕ выполнены (ждут подтверждения пользователя)**.
+**Дата:** 2026-08-14 · **Статус:** реализация + тесты + live shadow + **commit (`fb3499f`) + deploy + PROD-VERIFY — ВЫПОЛНЕНЫ (22/22)**.
 **Scope:** только install-flow (маршруты `/p/`, `/x/`, `/i/`, UA-детекция). НЕ менялись: `server/src/availability.js`, провайдеры, cache, playback, `sources/card`, BALANCER-002/ONLINE8-002, SHADOW/COMPARE, Filmix TRUSTED_ALWAYS_VISIBLE, RCH/WebSocket.
 **Правило отчёта:** реальные значения нигде не приводятся — только masked fingerprint (первые 6 + `…` + последние 2).
 
@@ -100,10 +100,17 @@ Read-only к проду: `users.json` с VPS скопирован в `%TEMP%` (�
 
 ---
 
-## 5. Deploy TODO (после подтверждения пользователя)
+## 5. Deploy (ВЫПОЛНЕН 2026-08-14)
 
-1. **Commit** — только файлы PLUGIN-INSTALL-002, staged diff показать, проверить отсутствие credentials.
-2. **Push** — только remote `backup`.
-3. **Deploy** — `scripts/deploy.sh` (сохраняет `server/.env` и `server/data`).
-4. **Добавить `PLUGIN_CODE_SECRET` на VPS** в `/opt/maniya-online/server/.env` (случайная hex-строка, сгенерировать на VPS). **Без неё `/p/` недоступен (503, fail-closed)** — не деплоить, пока секрет не задан.
-5. **PROD verification** с реальным пользователем: `/p/<install>.js` в браузере → stub; с Lampa-UA → лоадер → `/x/` → полный код с токеном; `/x/` неверный ключ → 404; `/i/` → stub; статика и legacy — браузер stub / Lampa JS.
+1. **Commit** `fb3499f` — только 12 файлов PLUGIN-INSTALL-002, staged diff проверен на отсутствие credentials.
+2. **Push** — remote `backup` (`68352b2..fb3499f`), только он.
+3. **Deploy** — `scripts/deploy.sh` (сохраняет `server/.env` и `server/data`). Сервис перезапущен, TLS перевыпущен.
+4. **`PLUGIN_CODE_SECRET` на VPS** — сгенерирован (`openssl rand -hex 24`, 48 hex) и добавлен в `/opt/maniya-online/server/.env` ДО деплоя; значение ни в лог, ни в отчёт не выводилось. Без него `/p/` недоступен (503, fail-closed).
+5. **PROD verification (22/22)** через публичный HTTPS с реальным `dorofeev200`:
+   - `/p/<install>.js`: браузер → 200 stub text/plain (no-store, nosniff, без кода/токена); Lampa → 200 JS-лоадер со скрытым `/x/<install>_<key>.js`, без токена/кода.
+   - `/x/<install>_<key>.js`: Lampa → 200 полный JS со вшитым реальным токеном; браузер → 200 stub; wrong-HMAC-ключ → 404; несуществующий install → 404.
+   - `/i/<install>`: stub и для Lampa, и для браузера.
+   - legacy `dorofeev200_<short>.js`: Lampa → JS с токеном, браузер → stub.
+   - статика `/maniya-online.js`: браузер → stub, Lampa → JS.
+   - API `subscription/check`: реальный токен → 200 `authorized:true`; чужой токен → 200 `authorized:false` (эндпоинт-проверка; 403 даёт только `requireSubscription`, напр. `/videos`); `/p/` неизвестный install → 404; health → 200.
+   - Проверка «без секрета → 503» на проде невозможна (секрет задан) — покрыта `plugin-install-nosecret.test.js` 4/4 + shadow Phase 2 7/7.
