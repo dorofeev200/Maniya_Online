@@ -82,17 +82,26 @@ export async function sendPluginForToken(request, response, token) {
 }
 
 /**
- * Детекция Lampa по User-Agent (PLUGIN-INSTALL-002). Lampa дописывает свою версию
- * в UA (напр. «… Lampa/0.20.4»). Обычные браузеры этого не делают → получают
- * stub-текст вместо исходника. Преднамеренно обходится подменой UA — это защита
- * «от случайного открытия в браузере», а не крипто-скрытие кода.
+ * Детекция реального Lampa-клиента (PLUGIN-INSTALL-002/003).
+ * 1) UA содержит «Lampa» (нативное приложение/AppleTV дописывают версию).
+ * 2) Origin-запрос: Lampa web UI (в т.ч. Media Station X = тот же UI в WKWebView)
+ *    при загрузке плагина дописывает `?logged=…&reset=…&origin=bylampa.online`
+ *    (дискриминатор подтверждён в прод-логах). Обычный браузер, открывший голую
+ *    ссылку, эти параметры не шлёт → stub-текст.
+ * Обходится подменой UA/добавлением query — это защита «от случайного открытия
+ * в браузере», а не крипто-скрытие кода.
  */
 export function isLampaRequest(request) {
   const ua = String(request?.headers?.['user-agent'] || '');
-  return /lampa/i.test(ua);
+  if (/lampa/i.test(ua)) return true;
+  const q = new URL(request.url, 'http://x');
+  const origin = q.searchParams.get('origin') || '';
+  return origin === 'bylampa.online'
+      || (q.searchParams.has('logged')
+          && q.searchParams.has('reset'));
 }
 
-export const PLUGIN_STUB_TEXT = 'Добавьте в плагины Lampa';
+export const PLUGIN_STUB_TEXT = 'Добавьте плагин в Расширения Lampa';
 
 /**
  * Заглушка для браузера (PLUGIN-INSTALL-002): открыл плагин-URL в браузере —

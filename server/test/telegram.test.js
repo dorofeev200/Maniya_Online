@@ -81,12 +81,14 @@ test('/start: разные аккаунты получают разные ссы
   assert.equal(store.users[1].slug, 'anya');
   assert.notEqual(store.users[0].token, store.users[1].token);
   assert.notEqual(a.text, b.text);
-  // PLUGIN-INSTALL-002: единая opaque-ссылка /p/<install>.js — уникальная, без реального токена.
-  assert.ok(store.users[0].install_token, 'install_token создан');
+  // PLUGIN-INSTALL-003: legacy-формат /{slug}_{short}.js — уникальный, без /p/ и без реального токена.
+  assert.ok(store.users[0].install_token, 'install_token создан (для /x/ и обратной совместимости)');
   assert.ok(store.users[1].install_token, 'install_token создан');
   assert.notEqual(store.users[0].install_token, store.users[1].install_token, 'install-токены уникальны');
-  assert.match(a.text, /\/p\/[0-9a-f]{32,}\.js/);
-  assert.match(b.text, /\/p\/[0-9a-f]{32,}\.js/);
+  assert.match(a.text, new RegExp(`/vasya_${shortId(store.users[0].token)}\\.js`));
+  assert.match(b.text, new RegExp(`/anya_${shortId(store.users[1].token)}\\.js`));
+  assert.ok(!a.text.includes('/p/'), '/p/ не выдаётся');
+  assert.ok(!b.text.includes('/p/'), '/p/ не выдаётся');
   assert.ok(!a.text.includes(store.users[0].token), 'реальный токен не в ответе');
   assert.ok(!b.text.includes(store.users[1].token), 'реальный токен не в ответе');
 });
@@ -96,8 +98,9 @@ test('/start выдает триал новому чату и создаёт п�
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
   assert.match(reply.text, /Осталось/);
-  // PLUGIN-INSTALL-002: единая opaque-ссылка /p/<install>.js вместо legacy /dorofeev200_<short>.js
-  assert.match(reply.text, /\/p\/[0-9a-f]{32,}\.js/);
+  // PLUGIN-INSTALL-003: legacy-формат /dorofeev200_<short>.js вместо /p/<install>.js
+  assert.match(reply.text, new RegExp(`/dorofeev200_${shortId(store.users[0].token)}\\.js`));
+  assert.ok(!reply.text.includes('/p/'), '/p/ не выдаётся');
   assert.ok(store.users[0].install_token, 'install_token в записи пользователя');
   assert.ok(!/🔑 Токен:/.test(reply.text));
   assert.equal(store.users.length, 1);
@@ -271,9 +274,9 @@ test('handleCallback get_link: возвращает opaque install-ссылку 
   const reply = await handleCallback({ data: 'get_link', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
   assert.ok(installToken, 'install_token задан');
-  // PLUGIN-INSTALL-002: единая opaque-ссылка /p/<install>.js, legacy-ссылка не используется.
-  assert.ok(reply.text.includes(`/p/${installToken}.js`), 'ссылка — /p/<install>.js');
-  assert.ok(!reply.text.includes('dorofeev200_'), 'legacy-ссылка не используется');
+  // PLUGIN-INSTALL-003: legacy-формат /dorofeev200_<short>.js, /p/ не выдаётся.
+  assert.ok(reply.text.includes(`/dorofeev200_${shortId(token)}.js`), 'ссылка — legacy /dorofeev200_<short>.js');
+  assert.ok(!reply.text.includes('/p/'), '/p/ не выдаётся');
   assert.ok(!reply.text.includes(token), 'реальный токен не в ответе');
   assert.equal(store.users.length, 1);
 });

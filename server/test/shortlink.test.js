@@ -57,7 +57,7 @@ describe('Короткая ссылка плагина /<prefix>_<short>.js', ()
     const response = await fetch(`${base}/dorofeev200_${ACTIVE_OK.short}.js`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /^text\/plain/);
-    assert.equal(await response.text(), 'Добавьте в плагины Lampa');
+    assert.equal(await response.text(), 'Добавьте плагин в Расширения Lampa');
   });
 
   it('неактивный пользователь: 403 (подписка истекла)', async () => {

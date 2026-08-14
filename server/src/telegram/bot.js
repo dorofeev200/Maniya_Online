@@ -10,9 +10,11 @@ export function makeToken(prefix = 'mo') {
 /**
  * PLUGIN-INSTALL-001/002: случайный opaque install-токен (24 байта = 192 бита).
  * НЕ выводим из subscription-токена, не содержит user id/email/slug/послед. ID.
- * По нему сервер мапит пользователя на единую ссылку `/p/<install>.js`
- * (Lampa → лоадер → `/x/<install>_<key>.js`; браузер → stub). Реальный токен
- * подписки в ссылку не попадает.
+ * С PLUGIN-INSTALL-003 он больше НЕ попадает в выдаваемую ссылку (пользователь
+ * получает legacy `/{slug}_{short}.js`), но остаётся в записи: по нему сервер
+ * строит скрытый путь `/x/<install>_<key>.js` и поддерживает обратную
+ * совместимость уже выданных `/p/<install>.js`. Реальный токен подписки
+ * в ссылку не попадает.
  */
 export function makeInstallToken() {
   return crypto.randomBytes(24).toString('hex');
@@ -127,18 +129,15 @@ export function shortId(token) {
 }
 
 /**
- * Ссылка плагина для конкретного пользователя. PLUGIN-INSTALL-001/002: если у
- * пользователя есть install_token — отдаём opaque-ссылку `/p/<install>.js`
- * (единая ссылка: Lampa получает лоадер, браузер — stub; в URL нет
- * subscription-токена). Без install_token — legacy `/{slug}_<short>.js`
- * (обратная совместимость).
+ * Ссылка плагина для конкретного пользователя (PLUGIN-INSTALL-003).
+ * ВСЕГДА legacy-формат `/{slug}_{short}.js` (или `/{prefix}_{short}.js` без
+ * ника) — `/p/<install>.js` больше НЕ выдаётся: Media Station X (Lampa web UI)
+ * не проходит по UA-гейту, а клиент входа в него ожидает legacy-формат.
+ * install_token остаётся в записи (для `/x/` и обратной совместимости).
+ * В URL нет subscription-токена — только последние 12 hex от него.
  */
 export function pluginUrl(config, token, user) {
   const base = config?.publicBaseUrl || '';
-  const installToken = user && user.install_token;
-  if (installToken) {
-    return `${base}/p/${String(installToken).toLowerCase()}.js`;
-  }
 
   const prefix = config?.telegram?.linkPrefix || 'dorofeev200';
   const short = shortId(token);

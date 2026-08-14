@@ -38,7 +38,7 @@ const USER_C = {
   install: '9999abcd9999abcd9999abcd9999abcd9999abcd9999abcd'
 };
 
-const STUB_TEXT = 'Добавьте в плагины Lampa';
+const STUB_TEXT = 'Добавьте плагин в Расширения Lampa';
 // Lampa дописывает версию в UA; обычный браузер этого не делает.
 const LAMPA_UA = 'Mozilla/5.0 (AppleTV; CPU OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Lampa/0.20.4';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -248,5 +248,48 @@ describe('PLUGIN-INSTALL-002: изоляция и отсутствие секр�
       const body = await resp.text();
       assert.ok(!body.includes('test-secret-001'), `${label}: секрет не в теле`);
     }
+  });
+});
+
+describe('PLUGIN-INSTALL-003: Media Station X (Lampa web UI) — origin-query гейт', () => {
+  // MSX = Lampa web UI в WKWebView: UA БЕЗ «Lampa», но при загрузке плагина
+  // дописывает ?logged=…&reset=…&origin=bylampa.online (дискриминатор из прод-логов).
+  const MSX_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+  const MSX_QUERY = 'logged=abc&reset=abc&origin=bylampa.online';
+  const msxFetch = (url, init) => fetchAs(MSX_UA, url, init);
+
+  it('19. MSX + origin-query на legacy-шортлинке: полный JS с токеном', async () => {
+    const response = await msxFetch(`${base}/user-a_ffff00001111.js?${MSX_QUERY}`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^application\/javascript/);
+    const body = await response.text();
+    assert.ok(body.includes(`window.MANIYA_ONLINE_TOKEN=${JSON.stringify(USER_A.token)}`), 'вшит токен A');
+  });
+
+  it('20. MSX + origin-query на /p/<install>.js: лоадер со скрытым /x/ (обратная совместимость)', async () => {
+    const response = await msxFetch(`${base}/p/${USER_A.install}.js?${MSX_QUERY}`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^application\/javascript/);
+    const body = await response.text();
+    assert.match(body, /\(function \(\)/, 'лоадер');
+    assert.ok(body.includes(`/x/${USER_A.install}_`), 'скрытый путь');
+  });
+
+  it('21. MSX без origin-query (голая ссылка): stub — как браузер', async () => {
+    await assertStub(await msxFetch(`${base}/user-a_ffff00001111.js`), 'MSX bare shortlink');
+    await assertStub(await msxFetch(`${base}/p/${USER_A.install}.js`), 'MSX bare /p/');
+  });
+
+  it('22. только logged+reset (без origin): JS (запасной дискриминатор)', async () => {
+    const response = await msxFetch(`${base}/user-a_ffff00001111.js?logged=1&reset=1`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^application\/javascript/);
+    assert.match(await response.text(), /MANIYA_ONLINE_TOKEN=/);
+  });
+
+  it('23. только origin=bylampa.online (без logged/reset): JS', async () => {
+    const response = await msxFetch(`${base}/user-a_ffff00001111.js?origin=bylampa.online`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^application\/javascript/);
   });
 });
