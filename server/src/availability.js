@@ -479,6 +479,18 @@ export function createAvailabilityChecker(options = {}) {
   // Пауза перед повторной пробой подтверждения «нет»: окно насыщения
   // online8-туннеля успевает отойти (эмпирически ~0.5с хватало, 2026-08-13).
   const backoffMs = options.backoffMs || 500;
+  // BALANCER-ONLINE8-002 (SHADOW-режим, по умолчанию ВЫКЛЮЧЕН): политика голоса
+  // резервной легаси-ноды online8 для НЕ-kinopub балансеров.
+  //   'legacy'  — текущее поведение (byte-identical): не-2xx (403 `disable`/503) и
+  //               2xx-non-content online8 считаются «нет»-голосом.
+  //   'abstain' — фикс (док. BALANCER-ONLINE8-001 §9-б/г): для не-kinopub online8
+  //               ВОЗДЕРЖИВАЕТСЯ — быстрый 403 `disable`/503 легаси-ноды это политика
+  //               ноды «модуль выключен», а НЕ «контента нет»; hide требует
+  //               content-«нет» от primary (2xx-non-content / accsdb-«Ожидаем фильм»).
+  //               Kinopub НЕ затрагивается (реально живёт на online8, rule 8).
+  // Три-стейт сохранён: show при отсутствии content-«нет» — inconclusive
+  // (authoritative:false, hasInconclusive, self-heal по TTL), не permanent show:true.
+  const reservePolicy = options.reservePolicy || 'legacy';
   const cache = new Map();
 
   /**
@@ -564,9 +576,16 @@ export function createAvailabilityChecker(options = {}) {
     const base = buildUrl(balancer, query, checksearch);
     let lastStatus = 0;
     let lastHost = '';
-    let sawDefinitiveNo = false; // хоть один хост ответил «нет» (статус/2xx-non-content)
+    let sawDefinitiveNo = false; // хоть один хост ответил content-«нет» (2xx-non-content/accsdb-ожидаем; в legacy и не-2xx)
     let sawNoResponse = false;   // хоть один хост не ответил (таймаут/сеть)
     let sawAccsdb = false;       // хоть один хост отказал учётке (accsdb) — вердикта нет
+    // BALANCER-ONLINE8-002: сигналы abstain-политики (только при reservePolicy='abstain'
+    // и balancer !== 'kinopub'). Резервная нода (online8) для не-kinopub ВОЗДЕРЖИВАЕТСЯ:
+    // её быстрый 403 `disable`/503/2xx-non-content — политика ноды «модуль выключен», а
+    // НЕ «контента нет» → не даёт «нет»-голос (док. BALANCER-ONLINE8-001 §9-б/г).
+    const newMode = reservePolicy === 'abstain' && balancer !== 'kinopub';
+    let sawStatusNo = false;     // primary ответил не-2xx (403/503/5xx) — статусный шум, не вердикт
+    let sawReserveAbstain = false; // online8 ответил (403/503/2xx-non-content/accsdb-ожидаем) — воздержался
     for (let index = 0; index < hosts.length; index += 1) {
       if (Date.now() >= deadline) {
         // RULE-4: «нет» от ЧИСТОГО ответа хостов (без no-response) при исчерпании
@@ -590,6 +609,16 @@ export function createAvailabilityChecker(options = {}) {
       lastHost = host;
       // Не-2xx — кластер ответил (503/404/403/5xx): «нет источника» на ЭТОЙ ноде.
       if (!(response.status >= 200 && response.status < 300)) {
+        if (newMode) {
+          // Не-2xx — статусный шум, НЕ content-вердикт (rule 3: 503/таймаут online8 не
+          // доказывает отсутствие; primary 503/403 — сатурация кластера, не «нет»).
+          // Резервная нода с выключенным модулем отвечает 403 `disable` одинаково для
+          // реального и фейк-id (query-independent) → воздерживается. Primary не-2xx →
+          // sawStatusNo (не прячем, но помечаем mixed — три-стейт сохранён).
+          if (isReserveHost(host)) sawReserveAbstain = true;
+          else sawStatusNo = true;
+          continue;
+        }
         sawDefinitiveNo = true;
         continue;
       }
@@ -617,7 +646,13 @@ export function createAvailabilityChecker(options = {}) {
           if (parsed && typeof parsed.msg === 'string' && parsed.msg) msg = parsed.msg;
         } catch { /* остаёмся на сыром тексте */ }
         if (/ожидаем\s+фильм\s+в\s+хорошем\s+качестве/i.test(msg)) {
-          sawDefinitiveNo = true;
+          // Content-«нет» (RULE-2): primary → authoritative «нет»; online8 (abstain) →
+          // воздерживается (модуль выключен — тот же 403-профиль, см. isNonContentAnswer).
+          if (newMode && isReserveHost(host)) {
+            sawReserveAbstain = true;
+          } else {
+            sawDefinitiveNo = true;
+          }
           lastHost = host;
           continue;
         }
@@ -628,7 +663,13 @@ export function createAvailabilityChecker(options = {}) {
       }
       // 2xx «нет источника» на хосте → следующий хост (как не-2xx).
       if (isNonContentAnswer(text)) {
-        sawDefinitiveNo = true;
+        // online8 (abstain): 2xx `null`/`disable` — та же политика «модуль выключен»,
+        // что и 403 `disable` (query-independent) → воздерживается, не «нет».
+        if (newMode && isReserveHost(host)) {
+          sawReserveAbstain = true;
+        } else {
+          sawDefinitiveNo = true;
+        }
         continue;
       }
       // 2xx content-bearing — авторитетно: предикат, стоп. RULE-1: предикат возвращает
@@ -643,6 +684,23 @@ export function createAvailabilityChecker(options = {}) {
         host,
         authoritative: predicate.verdict !== 'inconclusive',
         ...(predicate.verdict === 'inconclusive' ? { inconclusive: true, reason: 'predicate-inconclusive' } : {})
+      };
+    }
+    // BALANCER-ONLINE8-002 (abstain): hide возможен ТОЛЬКО от content-«нет» primary
+    // (sawDefinitiveNo, 2xx-non-content/accsdb-ожидаем) — rule 2. Статусный шум
+    // (primary 503/403 = sawStatusNo) и воздержание online8 (sawReserveAbstain) не
+    // дают «нет»-голос → show/inconclusive (rule 3, три-стейт rule 4). Чистый
+    // content-«нет» без no-response → authoritative absent (rule 5/6: primary-вердикт
+    // авторитетен; online8 без авторитетного контента не переворачивает его, rule 7).
+    if (newMode) {
+      if (sawDefinitiveNo && !sawNoResponse) {
+        return { show: false, rch: false, quality: '', status: lastStatus, host: lastHost, authoritative: true, verdict: 'absent' };
+      }
+      return {
+        show: true, rch: false, quality: '', status: lastStatus, host: lastHost,
+        authoritative: false, inconclusive: true,
+        ...(sawDefinitiveNo || sawStatusNo || sawReserveAbstain ? { mixed: true } : {}),
+        ...(sawAccsdb ? { accsdb: true } : {})
       };
     }
     // Все хосты без content-вердикта.
@@ -906,7 +964,12 @@ export function createAvailabilityChecker(options = {}) {
   return { card, checkBalancer, confirmAbsence, checkSearchPredicate };
 }
 
-/** Singleton для продакшна/скриптов (config.skaz + реальный fetch). */
-export const defaultChecker = createAvailabilityChecker({});
+/** Singleton для продакшна/скриптов (config.skaz + реальный fetch).
+ * reservePolicy:'abstain' — BALANCER-ONLINE8-002 (принято 2026-08-14): online8
+ * (легаси-нода) для не-kinopub ВОЗДЕРЖИВАЕТСЯ (403 `disable`/503/2xx-non-content
+ * ≠ «нет»), hide только от content-«нет» primary. Shadow: 29/29 gate, REGR=0.
+ * Kinopub вне абстаина (rule 8). Опция-дефолт внутри остаётся 'legacy' — любой
+ * другой создатель checker'а получает прежнее поведение. */
+export const defaultChecker = createAvailabilityChecker({ reservePolicy: 'abstain' });
 
 export default defaultChecker;
