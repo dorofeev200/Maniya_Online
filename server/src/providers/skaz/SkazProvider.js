@@ -177,7 +177,9 @@ export class SkazProvider extends Provider {
     }
 
     // 2) postid-схема Lime (kinopub): карточка → postid → перезапрос.
-    const postid = this.postidFromCards(cards);
+    //    Только подходящая карточка (год/название/ID = запрошенный фильм);
+    //    нет подходящей → null → возвращаем пусто, НЕ чужой фильм по similar.
+    const postid = this.postidFromCards(cards, query);
     if (postid != null) {
       const postCards = this.normalizer.cards((await this.client.getLite({ ...pageParams, postid: String(postid) })) || '');
       if (hasMovieItems(postCards)) return { cards: postCards };
@@ -280,9 +282,13 @@ export class SkazProvider extends Provider {
     return url.toString();
   }
 
-  postidFromCards(cards) {
+  postidFromCards(cards, query = {}) {
     for (const card of cards || []) {
       if (!card || card.method !== 'link') continue;
+      // BALANCER-KINOPUB-004: similar-ссылка НА ДРУГОЙ фильм (год/название/ID не
+      // совпали) не является целью навигации — её postid не выбираем. Нет ни одной
+      // подходящей → null → collectMovieCards вернёт пусто (не чужой фильм).
+      if (!linkCardMatchesQuery(card, query)) continue;
       const value = paramValueOf(card.url || card.href || '', 'postid');
       if (value == null || value === '') continue;
       const parsed = Number.parseInt(value, 10);
@@ -299,6 +305,9 @@ export class SkazProvider extends Provider {
 
     for (const card of cards || []) {
       if (card.method !== 'link' && !card.method) continue;
+      // BALANCER-KINOPUB-004: similar-карточка ДРУГОГО фильма (год/название/ID не
+      // совпали) не участвует в скоринге — её href не выберется даже при тай-брейке.
+      if (!linkCardMatchesQuery(card, query)) continue;
       // geosaitebi/animelib-паттерн: у link-карточки нет явного `href`-поля,
       // но в её URL лежит параметр `href=<slug>.html` («KinoPan/AniTrue»).
       // Приоритет: явный card.href → внутренний параметр href → сам card.url.
@@ -660,6 +669,111 @@ function setParam(url, key, value) {
   } catch {
     return url;
   }
+}
+
+// ===== BALANCER-KINOPUB-004: выбор ЦЕЛИ навигации по similar-ссылкам =====
+// Проблема: поисковая выдача kinopub (Lime) несёт только `method:link` карточки
+// `similar:true` — похожие фильмы. movieHref/postidFromCards выбирали ПЕРВУЮ такую
+// карточку без проверки, из-за чего «Одиссея 2026» уходила на postid=1362
+// (мини-сериал 1997), а «Последний дом 2026» — на postid=2536 (хоррор 2009).
+// Фикс: link-карточка является целью навигации, только если соответствует
+// запрошенному фильму — по ID (сильнее), году, названию. Нет подходящей → пусто.
+
+/** Нормализация названия для сравнения (нижний регистр, без пунктуации/пробелов). */
+function normalizeNavTitle(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKC')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/** Хвостовые цифры (год в названии: «Форрест Гамп (1994)») → «форрестгамп». */
+function stripTrailingDigits(value) {
+  return String(value || '').replace(/\d+$/u, '');
+}
+
+/** Совпадают ли алфавиты (кириллица/латиница) — как comparableScripts в availability. */
+function comparableTexts(a, b) {
+  const aCyr = /[Ѐ-ӿ]/.test(String(a));
+  const bCyr = /[Ѐ-ӿ]/.test(String(b));
+  const aLat = /[a-z]/i.test(String(a));
+  const bLat = /[a-z]/i.test(String(b));
+  return (aCyr && bCyr) || (aLat && bLat);
+}
+
+/** Реальные идентификаторы цели из URL link-карточки (не эхо параметров запроса). */
+function cardTargetIds(url) {
+  let kp = 0;
+  let imdb = '';
+  try {
+    const parsed = new URL(String(url || ''));
+    kp = Number(parsed.searchParams.get('kinopoisk_id') || parsed.searchParams.get('kp') || 0) || 0;
+    imdb = String(parsed.searchParams.get('imdb_id') || '').trim().toLowerCase();
+  } catch { /* не URL — идентификаторов нет */ }
+  return { kp, imdb };
+}
+
+/** Части названия карточки: «Русское / Original» → ['Русское', 'Original']. */
+function cardTitleTexts(raw) {
+  return String(raw || '')
+    .split(/\s*[\/|]\s*/)
+    .map(normalizeNavTitle)
+    .filter(Boolean);
+}
+
+/** Любая часть названия карточки совпала с query-title (с учётом хвостового года). */
+function matchesAnyTitle(cardParts, qTitle, qOriginalTitle) {
+  const qVariants = new Set();
+  for (const q of [qTitle, qOriginalTitle]) {
+    if (!q) continue;
+    qVariants.add(q);
+    qVariants.add(stripTrailingDigits(q));
+  }
+  for (const part of cardParts) {
+    for (const candidate of new Set([part, stripTrailingDigits(part)])) {
+      if (qVariants.has(candidate)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * BALANCER-KINOPUB-004: является ли link-карточка ЦЕЛЬЮ навигации (postid/href).
+ * Правило «лучше показать источник недоступным, чем дать видео другого фильма»:
+ *   - KP/IMDb в URL карточки — сильнейший идентификатор: совпал → цель, чужой → нет;
+ *   - год известен у обеих сторон и различается → другой фильм → нет;
+ *   - название: части «Русское / Original»; совпала любая с query-title → цель;
+ *     алфавиты сопоставимы, но ни одна часть не совпала → другой фильм → нет;
+ *   - данных недостаточно (нет title/года/ID или несопоставимые алфавиты) → НЕ отвергать.
+ * Не-link карточки (play/call) не фильтруются — они уже контент, не кандидаты цели.
+ */
+function linkCardMatchesQuery(card, query = {}) {
+  if (!card || typeof card !== 'object') return false;
+  const method = String(card.method || '').toLowerCase();
+  if (method !== 'link') return true;
+
+  const qKp = Number(query.kinopoisk_id || query.kp || 0) || 0;
+  const qImdb = String(query.imdb_id || query.imdb || '').trim().toLowerCase();
+  const { kp, imdb } = cardTargetIds(card.url || card.href || '');
+  if (qKp && kp) return kp === qKp;
+  if (qImdb && imdb) return imdb === qImdb;
+
+  const qYear = Number(query.year) || 0;
+  const cardYear = Number(card.year) || 0;
+  if (qYear && cardYear && cardYear !== qYear) return false;
+
+  const cardParts = cardTitleTexts(card.title || card._text || '');
+  const qTitle = normalizeNavTitle(query.title);
+  const qOriginalTitle = normalizeNavTitle(query.original_title || query.originalTitle);
+  if (cardParts.length && (qTitle || qOriginalTitle)) {
+    if (matchesAnyTitle(cardParts, qTitle, qOriginalTitle)) return true;
+    for (const part of cardParts) {
+      if ((qTitle && comparableTexts(part, qTitle)) || (qOriginalTitle && comparableTexts(part, qOriginalTitle))) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 function searchNeedle(query = {}) {
