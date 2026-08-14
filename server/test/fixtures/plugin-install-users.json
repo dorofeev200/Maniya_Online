@@ -1,0 +1,31 @@
+[
+  {
+    "telegram_id": "222",
+    "email": "a@test.local",
+    "token": "mo-aaaabbbbccccddddeeeeffff00001111",
+    "install_token": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+    "slug": "user-a",
+    "active": true,
+    "plan": "full",
+    "expires_at": null
+  },
+  {
+    "telegram_id": "333",
+    "email": "b@test.local",
+    "token": "mo-11112222333344445555666677778888",
+    "install_token": "efef5678efef5678efef5678efef5678efef5678efef5678",
+    "slug": "user-b",
+    "active": true,
+    "plan": "full",
+    "expires_at": null
+  },
+  {
+    "telegram_id": "444",
+    "token": "mo-99998888777766665555444433332222",
+    "install_token": "9999abcd9999abcd9999abcd9999abcd9999abcd9999abcd",
+    "slug": "user-c",
+    "active": false,
+    "plan": "trial",
+    "expires_at": "2020-01-01T00:00:00.000Z"
+  }
+]

@@ -81,8 +81,14 @@ test('/start: разные аккаунты получают разные ссы
   assert.equal(store.users[1].slug, 'anya');
   assert.notEqual(store.users[0].token, store.users[1].token);
   assert.notEqual(a.text, b.text);
-  assert.match(a.text, /vasya_[0-9a-f]{12}\.js/);
-  assert.match(b.text, /anya_[0-9a-f]{12}\.js/);
+  // PLUGIN-INSTALL-001: ссылки opaque /i/<install> — уникальные, без реального токена.
+  assert.ok(store.users[0].install_token, 'install_token создан');
+  assert.ok(store.users[1].install_token, 'install_token создан');
+  assert.notEqual(store.users[0].install_token, store.users[1].install_token, 'install-токены уникальны');
+  assert.match(a.text, /\/i\/[0-9a-f]{32,}/);
+  assert.match(b.text, /\/i\/[0-9a-f]{32,}/);
+  assert.ok(!a.text.includes(store.users[0].token), 'реальный токен не в ответе');
+  assert.ok(!b.text.includes(store.users[1].token), 'реальный токен не в ответе');
 });
 
 test('/start выдает триал новому чату и создаёт пользователя', async () => {
@@ -90,7 +96,9 @@ test('/start выдает триал новому чату и создаёт п�
   const reply = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
   assert.match(reply.text, /Осталось/);
-  assert.match(reply.text, /dorofeev200_[0-9a-f]{12}\.js/);
+  // PLUGIN-INSTALL-001: opaque install-ссылка вместо legacy /dorofeev200_<short>.js
+  assert.match(reply.text, /\/i\/[0-9a-f]{32,}/);
+  assert.ok(store.users[0].install_token, 'install_token в записи пользователя');
   assert.ok(!/🔑 Токен:/.test(reply.text));
   assert.equal(store.users.length, 1);
   assert.equal(store.users[0].telegram_id, '222');
@@ -103,9 +111,11 @@ test('/start повторно не выдаёт новый триал, а воз
   const store = memStore();
   await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   const before = store.users[0].token;
+  const installBefore = store.users[0].install_token;
   const again = await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.equal(store.users.length, 1);
   assert.equal(store.users[0].token, before);
+  assert.equal(store.users[0].install_token, installBefore, 'install_token не пересоздаётся');
   assert.match(again.text, /Ваша подписка активна/);
 });
 
@@ -253,15 +263,18 @@ test('/start: баннер-бренд MANIYA ONLINE, остаток дней и 
   assert.ok(reply.replyMarkup.inline_keyboard[0].some((b) => b.callback_data === 'get_link'));
 });
 
-test('handleCallback get_link: возвращает ссылку существующего пользователя', async () => {
+test('handleCallback get_link: возвращает opaque install-ссылку пользователя', async () => {
   const store = memStore();
   await handleCommand({ text: '/start', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   const token = store.users[0].token;
+  const installToken = store.users[0].install_token;
   const reply = await handleCallback({ data: 'get_link', chatId: 222, config: cfg, getUsers: store.get, setUsers: store.set, now: NOW });
   assert.match(reply.text, /MANIYA ONLINE/);
-  assert.ok(reply.text.includes('dorofeev200_'));
-  assert.ok(reply.text.includes(`${shortId(token)}.js`));
-  assert.ok(!reply.text.includes(token));
+  assert.ok(installToken, 'install_token задан');
+  // PLUGIN-INSTALL-001: opaque /i/<install>, legacy-ссылка не используется.
+  assert.ok(reply.text.includes(`/i/${installToken}`), 'ссылка — /i/<install>');
+  assert.ok(!reply.text.includes('dorofeev200_'), 'legacy-ссылка не используется');
+  assert.ok(!reply.text.includes(token), 'реальный токен не в ответе');
   assert.equal(store.users.length, 1);
 });
 

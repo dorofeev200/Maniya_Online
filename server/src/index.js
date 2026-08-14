@@ -2,10 +2,10 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { config } from './config.js';
 import { HttpError, toHttpError } from './errors.js';
-import { sendJson, sendPluginForToken, sendStatic } from './http.js';
+import { sendInstallPage, sendJson, sendPluginForToken, sendStatic } from './http.js';
 import { logger } from './logger.js';
 import { assertCorsAllowed, assertRateLimit, clientIp } from './security.js';
-import { findUserByRequest, findUserByShortToken, getVideoForRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
+import { findUserByInstallToken, findUserByRequest, findUserByShortToken, getVideoForRequest, getVideosForRequest, isSubscriptionActive, requireSubscription } from './store.js';
 import { subscriptionStatus } from './status.js';
 import { providerById, registeredProviders } from './providers/registry.js';
 import { PROVIDER_FALLBACK_ICON, providerMeta } from './providers/meta.js';
@@ -71,6 +71,26 @@ async function route(context, response) {
     const short = shortLink[1].toLowerCase();
     const user = await findUserByShortToken(short);
     if (!user) throw new HttpError(404, 'not_found', 'User not found');
+    if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
+    return sendPluginForToken(request, response, user.token);
+  }
+
+  // PLUGIN-INSTALL-001: opaque install-ссылки. `/i/<opaque>` — HTML-страница
+  // установки (НИКОГДА не JS); `/p/<opaque>.js` — сам плагин. Opaque-токен →
+  // пользователь → активная подписка; реальный subscription-токен в URL не попадает.
+  // Невалидный/короткий opaque → 404 (информации о пользователе не раскрываем).
+  const installPage = pathname.match(/^\/i\/([0-9a-fA-F]{32,})$/);
+  if (installPage) {
+    const user = await findUserByInstallToken(installPage[1]);
+    if (!user) throw new HttpError(404, 'install_link_not_found', 'Install link not found');
+    if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
+    return sendInstallPage(request, response, user.install_token);
+  }
+
+  const installPlugin = pathname.match(/^\/p\/([0-9a-fA-F]{32,})\.js$/);
+  if (installPlugin) {
+    const user = await findUserByInstallToken(installPlugin[1]);
+    if (!user) throw new HttpError(404, 'install_link_not_found', 'Install link not found');
     if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
     return sendPluginForToken(request, response, user.token);
   }

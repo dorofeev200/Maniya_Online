@@ -7,6 +7,23 @@ export function makeToken(prefix = 'mo') {
   return `${prefix}-${crypto.randomBytes(16).toString('hex')}`;
 }
 
+/**
+ * PLUGIN-INSTALL-001: случайный opaque install-токен (24 байта = 192 бита).
+ * НЕ выводим из subscription-токена, не содержит user id/email/slug/послед. ID.
+ * По нему сервер мапит пользователя на страницу `/i/<opaque>` и плагин
+ * `/p/<opaque>.js`; реальный токен подписки в ссылку не попадает.
+ */
+export function makeInstallToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+/** Заполнить install_token у пользователя, если его нет (лениво, старые записи). */
+export function ensureInstallToken(user) {
+  if (!user || user.install_token) return user?.install_token || '';
+  user.install_token = makeInstallToken();
+  return user.install_token;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -108,14 +125,24 @@ export function shortId(token) {
   return (hex || t).slice(-12).toLowerCase();
 }
 
-/** Ссылка плагина для конкретного пользователя: /{prefix}_{slug}_...js — ник в ссылке. */
+/**
+ * Ссылка плагина для конкретного пользователя. PLUGIN-INSTALL-001: если у
+ * пользователя есть install_token — отдаём opaque-ссылку `/i/<install>`
+ * (страница установки, в URL нет subscription-токена). Без install_token —
+ * legacy `/i-…/` вид `/{slug}_<short>.js` (обратная совместимость).
+ */
 export function pluginUrl(config, token, user) {
+  const base = config?.publicBaseUrl || '';
+  const installToken = user && user.install_token;
+  if (installToken) {
+    return `${base}/i/${String(installToken).toLowerCase()}`;
+  }
+
   const prefix = config?.telegram?.linkPrefix || 'dorofeev200';
   const short = shortId(token);
   const slug = (user && user.slug ? String(user.slug) : '').replace(/[^a-z0-9_-]/g, '').slice(0, 20);
   const tokenEnc = encodeURIComponent(token);
   const prefixEnc = encodeURIComponent(prefix);
-  const base = config?.publicBaseUrl || '';
 
   // Уникальная ссылка пользователя — по его нику, БЕЗ общего префикса.
   if (slug) {
@@ -299,6 +326,7 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
           telegram_id: String(chatId),
           email: '',
           token: makeToken(),
+          install_token: makeInstallToken(),
           slug: slugFrom(nick) || undefined,
           active: true,
           plan: config?.telegram?.trialPlan || 'trial',
@@ -307,10 +335,13 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
         users.push(target);
         await setUsers(users);
         fresh = true;
-      } else if (!target.slug && nick) {
-        // У старых пользователей проставляем ник при следующем /start.
-        target.slug = slugFrom(nick) || undefined;
-        await setUsers(users);
+      } else {
+        // У старых пользователей проставляем ник при следующем /start и лениво
+        // заполняем install_token (PLUGIN-INSTALL-001), если его ещё нет.
+        const changed = Boolean(nick && !target.slug) || !target.install_token;
+        if (nick && !target.slug) target.slug = slugFrom(nick) || undefined;
+        ensureInstallToken(target);
+        if (changed) await setUsers(users);
       }
       const reply = linkReply(config, target, fresh, now);
       if (fresh) {
@@ -360,6 +391,7 @@ export async function handleCommand({ text, chatId, config, getUsers = listUsers
       }
       const target = findBySubject(users, tokens.slice(0, -1).join(' '));
       if (!target) return { text: 'Не найден пользователь. Указание: @ник / id / токен' };
+      ensureInstallToken(target);
       applyGrant(target, days, now);
       await setUsers(users);
       const granted = statusText(config, target, now);
@@ -425,6 +457,7 @@ export async function handleCallback({ data, chatId, config, getUsers = listUser
       if (!isAdmin) return { text: 'Команда только для админ‑чата.' };
       const target = users.find((u) => String(u.telegram_id) === m[1]);
       if (!target) return { text: 'Пользователь не найден. Список: /list' };
+      ensureInstallToken(target);
       applyGrant(target, Number(m[2]), now);
       await setUsers(users);
       const granted = statusText(config, target, now);

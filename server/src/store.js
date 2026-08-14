@@ -44,6 +44,20 @@ export async function findUserByShortToken(short, min = 8) {
   }) || null;
 }
 
+/**
+ * Поиск пользователя по opaque install-токену (страница `/i/<opaque>` и плагин
+ * `/p/<opaque>.js`). ТОЧНОЕ совпадение (не суффикс!): install-токен случайный
+ * (crypto.randomBytes, 24 байта) и НЕ выводится из subscription-токена, поэтому
+ * частичное совпадение исключено. Минимальная длина — анти-гадалка.
+ * PLUGIN-INSTALL-001.
+ */
+export async function findUserByInstallToken(opaque, min = 32) {
+  const s = String(opaque || '').toLowerCase().trim();
+  if (!/^[0-9a-f]+$/.test(s) || s.length < min) return null;
+  const users = await listUsers();
+  return users.find((u) => u.install_token && String(u.install_token).toLowerCase() === s) || null;
+}
+
 function bearerToken(context) {
   const authorization = context.request?.headers?.authorization || '';
   const match = String(authorization).match(/^Bearer\s+(.+)$/i);
