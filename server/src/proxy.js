@@ -121,12 +121,17 @@ function rewriteHlsManifest(manifest, baseUrl, makeProxy) {
 }
 
 /**
- * Директивы с `URI="…"` (#EXT-X-MAP init, #EXT-X-KEY ключ шифрования):
- * относительные ссылки тоже резолвятся против базы манифеста и проксируются.
+ * Директивы с `URI="…"` — любые (#EXT-X-MAP init, #EXT-X-KEY ключ,
+ * #EXT-X-MEDIA аудио/субтитры, #EXT-X-I-FRAME-STREAM-INF):
+ * относительные ссылки резолвятся против базы манифеста и проксируются.
  * Не-URI директивы (#EXTINF, #EXTM3U, ENDLIST…) возвращаются не тронутыми.
+ *
+ * ВАЖНО: #EXT-X-MEDIA с относительным URI ломает плеер «Не удалось декодировать»,
+ * если его не переписать — hls.js резолвит URI против URL плейлиста, который он
+ * получил (наш /api/lampa/proxy), а не против реального CDN (BALANCER-SKAZ-VEO-015).
  */
 function rewriteDirectiveUri(line, baseUrl, makeProxy) {
-  const match = String(line).match(/^(#EXT-X-(?:MAP|KEY):.*?\bURI=")([^"]+)(".*)$/);
+  const match = String(line).match(/^(#EXT-X-[A-Z0-9-]+:.*?\bURI=")([^"]+)(".*)$/);
   if (!match) return line;
   const resolved = resolveSegmentUrl(baseUrl, match[2]);
   if (!resolved) return line;

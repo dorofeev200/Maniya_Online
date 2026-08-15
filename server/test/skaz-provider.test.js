@@ -526,6 +526,68 @@ test('movie: сразу play-карточки — follow НЕ вызываетс
   assert.ok(result.items.length >= 1);
 });
 
+// ===== BALANCER-SKAZ-VEO-015: метаданные veoveo (title из data-json, а НЕ «1080p»)
+// Оригинальный Lampac parseJsonDate: инлайн-текст «1080p» = качество → синтез
+// quality-map + title из data-json (название фильма). Maniya повторяет 1:1.
+// veoveo data-json НЕ несёт `quality` — мапа синтезируется из `_text`/translate.
+
+test('veoveo: play-карточка — title из data-json (название фильма), а не «1080p»', async () => {
+  const veoveoHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/1080.m3u8","translate":"1080p","title":"Последний дом (1080p)"}\'>1080p</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/720.m3u8","translate":"720p","title":"Последний дом (720p)"}\'>720p</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/480.m3u8","translate":"480p","title":"Последний дом (480p)"}\'>480p</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/360.m3u8","translate":"360p","title":"Последний дом (360p)"}\'>360p</div>'
+  ].join('');
+  const provider = makeProvider(new FakeSkazClient({ lite: veoveoHtml }), 'veoveo');
+
+  const result = await provider.videos(context({ title: 'Последний дом', serial: '0' }));
+
+  assert.equal(result.items.length, 4);
+  // title = название фильма (из data-json), НЕ метка качества.
+  assert.deepEqual(
+    result.items.map((i) => i.title),
+    ['Последний дом (1080p)', 'Последний дом (720p)', 'Последний дом (480p)', 'Последний дом (360p)']
+  );
+  // translate/voice_name несут метку качества (как в RAW).
+  assert.deepEqual(result.items.map((i) => i.translate), ['1080p', '720p', '480p', '360p']);
+  assert.deepEqual(result.items.map((i) => i.voice_name), ['1080p', '720p', '480p', '360p']);
+});
+
+test('veoveo: quality-map синтезируется из метки качества (нет поля quality в data-json)', async () => {
+  const veoveoHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/1080.m3u8","translate":"1080p","title":"Последний дом (1080p)"}\'>1080p</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/720.m3u8","translate":"720p","title":"Последний дом (720p)"}\'>720p</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/480.m3u8","translate":"480p","title":"Последний дом (480p)"}\'>480p</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/360.m3u8","translate":"360p","title":"Последний дом (360p)"}\'>360p</div>'
+  ].join('');
+  const provider = makeProvider(new FakeSkazClient({ lite: veoveoHtml }), 'veoveo');
+
+  const result = await provider.videos(context({ title: 'Последний дом', serial: '0' }));
+
+  // 4 карточки → каждая со своей мапой {Np: url-прокси} (как оригинал data.quality[text]=data.url).
+  const labels = result.items.map((i) => Object.keys(i.quality || {}).sort());
+  assert.deepEqual(labels, [['1080p'], ['720p'], ['480p'], ['360p']]);
+  for (const item of result.items) {
+    for (const [, url] of Object.entries(item.quality)) {
+      assert.ok(String(url).includes('/api/lampa/proxy'), `синтезированное качество через прокси: ${url}`);
+    }
+  }
+});
+
+test('play-карточка с НЕкачественной меткой: title остаётся _text, качество не синтезируется', async () => {
+  // «Дубляж» — не `\d+p`, поведение прежнее: title = _text, quality = {} (без поля).
+  const playHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v.m3u8","quality":{"1080p":"http://h/1080.m3u8"},"title":"Х"}\'>Дубляж</div>'
+  ].join('');
+  const provider = makeProvider(new FakeSkazClient({ lite: playHtml }), 'filmix');
+
+  const result = await provider.videos(context({ serial: '0' }));
+  const item = result.items[0];
+
+  assert.equal(item.title, 'Дубляж', 'некачественная метка → _text как title');
+  assert.deepEqual(Object.keys(item.quality), ['1080p'], 'мапа из data-json, НЕ синтезированная');
+});
+
 test('поиск без id/imdb — пусто', async () => {
   const provider = makeProvider(new FakeSkazClient({ lite: '<html/>' }));
   assert.deepEqual(await provider.search({ title: '' }), []);

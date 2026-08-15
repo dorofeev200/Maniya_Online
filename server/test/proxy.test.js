@@ -120,6 +120,37 @@ function startTestServer() {
         ].join('\n'));
         return;
       }
+      if (req.url.startsWith('/veoveo-master.m3u8')) {
+        // Точная структура veoveo мастера (BALANCER-SKAZ-VEO-015): аудио-группа
+        // #EXT-X-MEDIA с ОТНОСИТЕЛЬНЫМ URI + вариант. Если аудио-URI не переписать,
+        // hls.js резолвит его против URL плейлиста (наш /api/lampa/proxy) → 404 →
+        // аудио-группа (DEFAULT=YES) падает → «Не удалось декодировать видео».
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        res.end([
+          '#EXTM3U',
+          '#EXT-X-VERSION:3',
+          '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio0",NAME="default",AUTOSELECT=YES,DEFAULT=YES,CHANNELS="2",URI="index-f1-a1.m3u8"',
+          '#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5200893,RESOLUTION=1920x808,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio0"',
+          'index-f1-v1.m3u8',
+          ''
+        ].join('\n'));
+        return;
+      }
+      if (req.url.startsWith('/absolute-dirs.m3u8')) {
+        // АБСОЛЮТНЫЕ URI внутри директив: не должны резолвиться против базы манифеста —
+        // проксируется сам absolute (makeProxy(absolute)), база для него не нужна.
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        res.end([
+          '#EXTM3U',
+          '#EXT-X-KEY:METHOD=AES-128,URI="https://cdn.example/keys/key.bin",IV=0x00000000000000000000000000000001',
+          '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio0",NAME="default",DEFAULT=YES,URI="https://cdn.example/audio/en.m3u8"',
+          '#EXTINF:6.000,',
+          'https://cdn.example/seg-1.m3u8',
+          '#EXT-X-ENDLIST',
+          ''
+        ].join('\n'));
+        return;
+      }
       const body = Buffer.from('WXYZ');
       const range = req.headers.range;
       if (range) {
@@ -219,6 +250,65 @@ test('proxyMedia: #EXT-X-MAP init и #EXT-X-KEY URI переписываются
     assert.match(body, /#EXT-X-PLAYLIST-TYPE:VOD/);
     assert.match(body, /#EXTINF:6\.000,/);
     assert.match(body, /#EXT-X-ENDLIST/);
+  } finally {
+    server.close();
+  }
+});
+
+test('proxyMedia: #EXT-X-MEDIA аудио-URI переписывается на прокси (BALANCER-SKAZ-VEO-015)', async () => {
+  const server = await startTestServer();
+  try {
+    const port = server.address().port;
+    const makeProxyUrl = (url) => `https://maniya.test/proxy?url=${encodeURIComponent(url)}`;
+    const response = new MockResponse();
+    const request = { headers: {} };
+
+    await proxyMedia(`http://127.0.0.1:${port}/veoveo-master.m3u8`, request, response, {
+      allowHosts: ['127.0.0.1'],
+      makeProxyUrl,
+      maxRedirects: 1,
+      timeoutMs: 3000
+    });
+
+    const body = await collect(response);
+    assert.equal(response.status, 200);
+    // Аудио-URI (относительный) — резолв против мастер-базы → прокси. Ровно то,
+    // что не переписывалось и давало hls.js 404 → аудио-группа падает → decode error.
+    assert.match(body, /#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio0",NAME="default",AUTOSELECT=YES,DEFAULT=YES,CHANNELS="2",URI="https:\/\/maniya\.test\/proxy\?url=.+index-f1-a1\.m3u8"/);
+    // Вариант (не-директива) — тоже прокси.
+    assert.match(body, /https:\/\/maniya\.test\/proxy\?url=.+index-f1-v1\.m3u8/);
+    // Служебные атрибуты директивы не тронуты.
+    assert.match(body, /AUDIO="audio0"/);
+  } finally {
+    server.close();
+  }
+});
+
+test('proxyMedia: АБСОЛЮТНЫЕ URI в директивах проксируются как есть (не резолв против базы)', async () => {
+  const server = await startTestServer();
+  try {
+    const port = server.address().port;
+    const makeProxyUrl = (url) => `https://maniya.test/proxy?url=${encodeURIComponent(url)}`;
+    const response = new MockResponse();
+    const request = { headers: {} };
+
+    await proxyMedia(`http://127.0.0.1:${port}/absolute-dirs.m3u8`, request, response, {
+      allowHosts: ['127.0.0.1'],
+      makeProxyUrl,
+      maxRedirects: 1,
+      timeoutMs: 3000
+    });
+
+    const body = await collect(response);
+    assert.equal(response.status, 200);
+    // Absolute X-KEY: проксируется absolute-значение, IV и METHOD сохраняются.
+    assert.match(body, /#EXT-X-KEY:METHOD=AES-128,URI="https:\/\/maniya\.test\/proxy\?url=https%3A%2F%2Fcdn\.example%2Fkeys%2Fkey\.bin",IV=0x00000000000000000000000000000001/);
+    // Absolute X-MEDIA: тоже проксируется.
+    assert.match(body, /#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio0",NAME="default",DEFAULT=YES,URI="https:\/\/maniya\.test\/proxy\?url=https%3A%2F%2Fcdn\.example%2Faudio%2Fen\.m3u8"/);
+    // Не-директива absolute — тоже прокси.
+    assert.match(body, /https:\/\/maniya\.test\/proxy\?url=https%3A%2F%2Fcdn\.example%2Fseg-1\.m3u8/);
+    // Никакого резолва против локальной базы (порт сервера не должен протекать в absolute-URI).
+    assert.ok(!body.includes(`:${port}`), 'absolute URI не резолвится против базы манифеста');
   } finally {
     server.close();
   }

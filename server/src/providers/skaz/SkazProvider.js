@@ -128,7 +128,7 @@ export class SkazProvider extends Provider {
           method: 'play',
           title: this.normalizerCardTitle(card),
           url: streamProxy(String(card.url || '')),
-          quality: cleanedQualityMap(card.quality, streamProxy),
+          quality: this.cardQualityMap(card, streamProxy),
           translate: card.translate || card.voice_translate || '',
           voice_name: card.voice_translate || card.translate || '',
           type: 'movie',
@@ -552,10 +552,35 @@ export class SkazProvider extends Provider {
     return [];
   }
 
+  /**
+   * Заголовок play-карточки в списке. Зеркалит Lampac parseJsonDate (plugin.js:544-559):
+   * инлайн-текст карточки, похожий на метку качества («1080p»/«720p»), — это
+   * КАЧЕСТВО, а не название фильма. Название лежит в data-json `title`
+   * (например «Последний дом (1080p)»). Без этой проверки список veoveo показывает
+   * «1080p / 720p / 480p / 360p» вместо названия (BALANCER-SKAZ-VEO-015).
+   */
   normalizerCardTitle(card) {
+    const text = String(card._text || '').trim();
+    if (/^\d+p$/i.test(text) && card.title) return String(card.title).trim();
     return String(
       card._text || card.title || card.translate || card.voice_translate || ''
     ).trim() || 'Оригінал';
+  }
+
+  /**
+   * Мапа качеств play-карточки. У некоторых балансеров (veoveo) data-json НЕ несёт
+   * поля `quality` — оригинальный Lampac синтезирует его из инлайн-текста-качества
+   * (`data.quality[text] = data.url`, plugin.js:547-550). Повторяем: если мапы нет,
+   * а `_text`/translate — метка качества, кладём {label: url}. Только для play-карточек
+   * с прямым URL (без мапы не теряем качество в плеере).
+   */
+  cardQualityMap(card, streamProxy) {
+    const mapped = cleanedQualityMap(card.quality, streamProxy);
+    if (Object.keys(mapped).length) return mapped;
+    const label = String(card._text || card.translate || '').trim();
+    const url = String(card.url || card.stream || '').trim();
+    if (/^\d+p$/i.test(label) && url) mapped[label] = streamProxy(url);
+    return mapped;
   }
 
   seasonLinkHref(cards, voice, seasonNumber) {
