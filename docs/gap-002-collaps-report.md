@@ -405,3 +405,88 @@ config.js. Никаких IP/прокси/allowlist/`COLLAPS_EMBED_HOST` — egr
 проходят, полный suite 567/0 без регрессий, live-shadow на реальном egress подтвердил **FP 10/10 → 0/10**
 с `confirmed` hide, FN=0, recovery проверен на контентом кейсе. **Commit/push/deploy НЕ выполнялись** —
 ожидание отдельного шага деплоя.
+
+---
+
+## 26. PRODUCTION (фаза C — commit + deploy + prod-verify)
+
+### 26.1 Commit / push / deploy
+
+| Параметр | Значение |
+|---|---|
+| Commit | `9eda6cd` `fix(availability): GAP-002 — Collaps host-block (403/422/451) → authoritative «нет»` |
+| Push target | ТОЛЬКО `backup` (`github.com/dorofeev200/Maniya_Online_backup.git`, ветка `gap-012-veoveo`) — подтверждено `git ls-remote backup` = `9eda6cd` |
+| origin | НЕ трогался |
+| Deploy | штатный `scripts/deploy.sh` (tar-over-ssh root@95.85.241.121 → `/opt/maniya-online`, .env не перезаписан) |
+| Изменённые файлы | ровно 3: `server/src/availability.js`, `server/test/availability-hidden-twin.test.js`, `docs/gap-002-collaps-report.md` (staged diff проверен, `git diff --check` чист, секреты/токены не просканированы как включённые) |
+| Runtime-целостность | deployed `md5(availability.js) = 607d0ecc…` = локальный working tree; `git diff 9eda6cd -- availability.js` пуст (рабочее дерево = commit) |
+
+### 26.2 Post-deploy health
+
+- `systemctl is-active maniya-online` → **active**; `NRestarts = 0` (единственные stop/start — сам deploy 15:19 + 16:37, аварийных рестартов нет).
+- `/health` → **HTTP 200** (повторено при финальном прогоне).
+- nginx access log после деплоя: **0** ответов `5xx`. error.log: только одна mid-stream-обрезка `.ts`-сегмента veoveo-CDN (`deovi.mvapspdmpg.com`) при проксировании — транзиентный сбой сегмента, не 5xx сервера и не GAP-002.
+- journal: ни одного `uncaught`/`unhandled`/`FATAL` с момента деплоя.
+
+### 26.3 Production FP/FN (live API, реальные uid, `force:true`, 10 тайтлов)
+
+| Метрика | Ожидание | Факт |
+|---|---|---|
+| Collaps FP на карточке (`/sources/card`) | 0/10 | **0/10** (все 10 тайтлов `collaps.show=false`) |
+| `reason`/`authoritative` = host-block | host-block | runtime-проба на ДЕПЛОЙНОМ коде: `{show:false, authoritative:true, reason:'host-block', status:422, confirmed:true}` (Форрест и Дом Дракона) |
+| `/videos?provider=collaps` НЕ playable | items 0, без provider_error | **items=0, providerError=null** на 3/3 (Форрест/Матрица/Интерстеллар) |
+| Остальные источники карточки не исчезли | не исчезли | filmix 10/10 show:true (trusted), rezka 9/10 (Одиссея — легитимное «нет», как в OLD), skaz-alloha 10/10, skaz-veoveo 10/10, cdnvideohub как раньше |
+| Collaps FN | 0 | 0 — на доступном egress контент находится (см. 26.5) |
+
+Промежуточный флап `skaz-kinopub` 5/10 (pre-existing burst-насыщение кластера, GAP-003 — задокументировано; НЕ влияние GAP-002: kinopub не проходит через nativeProbe).
+
+### 26.4 Regression (после деплоя)
+
+- `/sources` — 16 источников, collaps присутствует (реестр не тронут), `/sources/card` 10/10 HTTP 200.
+- `/videos` Форрест (дефолт) — **101 item**, первый `method:'play'`; filmix 5 items, rezka 22 items (провайдеры не затронуты).
+- Playback: rezka item через `/api/lampa/proxy` → **HTTP 200 `application/vnd.apple.mpegurl`** (реальный HLS, EXT-X, 553KB); filmix MP4 variant → **HTTP 206 `video/mp4`** (`ftypisom` — настоящие байты). Первый filmix-вариант 4К-HLS → cdnsqu 403 — известный pre-existing CDN-блок конкретного варианта, НЕ регрессия (MP4 работает).
+- Неизменены и подтверждены работой: single-flight (без изменений в коде), OLD∩NEW-гейт (`confirmed:true` на прод-пробах — подтверждение вторым сигналом работает), HIDE_TTL_MS (не тронут), online8 `abstain` (reservePolicy не менялся), uid/кэш-изоляция (запросы с force разделены), `force` (отдельный flight), providers/playback/proxy/UI/registry/store/config — нулевой дифф.
+
+### 26.5 Recovery / self-heal на контентом кейсе
+
+- Доступный egress (резидентный IP, тот же патченный код): `{show:true, authoritative:true, reason:'found'}` — 423ms.
+- Прод (datacenter egress): `{show:false, authoritative:true, reason:'host-block', status:422}`.
+- Один код, разный вердикт только из-за egress-состояния → после операционного восстановления доступа к embed-хосту следующий probe вернёт `found` → источник снова видим (self-heal без sticky-hide). Egress `api.ortified.ws` **не менялся** (вне scope).
+
+### 26.6 Найденный риск: orphan-promise при исчерпанном card-дедлайне (не блокер, требует решения)
+
+Во время прод-верификации standalone runtime-проба (запуск ДЕПЛОЙНОГО кода на VPS) **упала** на втором тайтле с
+необработанным `HttpError: Collaps HTTP 422`, чей стек (`CollapsClient.getText → embed → recordByKeys → Object.present`)
+не содержит `nativeProbe` — отказ сбежал из try/catch. Разбор:
+
+- **Механизм (воспроизведён локально, `Temp/gap002-orphan-repro.mjs`):** в `nativeProbe` (availability.js:476)
+  `probe.present(...)` создаёт промис ДО входа в `attempt`. При `remaining <= 0` (card-дедлайн исчерпан к моменту
+  confirm-пробы) `attempt` (строки 455-463) возвращает `Promise.reject('deadline')` **не прикрепив обработчик к
+  in-flight `present()`-промису** (строка 457). Этот промис позже отклоняется HttpError 422 → **unhandled rejection →
+  crash процесса** (Node default `--unhandled-rejections=throw`; в сервере нет глобального guard'а — проверено grep'ом).
+- **Когда достижимо:** GAP-002 делает вердикт `host-block` authoritative → row становится eligible для OLD∩NEW-гейта →
+  `confirmNativeAbsence` вызывает `nativeProbe` ВТОРОЙ раз с тем же дедлайном (availability.js:981). Если первичный
+  probe-цикл (Promise.allSettled по всем 16 источникам) съел весь card-дедлайн, вторая проба стартует с
+  `remaining <= 0` → orphan. До GAP-002 422 → inconclusive → show:true → не eligible → confirm не запускался — бага не
+  всплывала.
+- **Почему прод не упал:** подтверждение успевало в дедлайн (`confirmed:true`), standalone-проба упала из-за
+  back-to-back прогонов с `force` (кластер под нагрузкой съел дедлайн). journal после деплоя чист (0 unhandled).
+- **Оценка:** латентный дефект пред-существующего хелпера `attempt` (не внесён этим коммитом), который GAP-002 делает
+  ДОСТИЖИМЫМ для host-block источников. НЕ проявился на проде за время верификации; риск — падение процесса под
+  burst-нагрузкой при исчерпании дедлайна на serial-карточке.
+- **Рекомендуемый фикс (минимальный, ~1 строка, ОТДЕЛЬНО от этого коммита):** в `attempt` при `remaining <= 0` перед
+  `return Promise.reject(...)` прикрепить `.catch(() => {})` к переданному промису (или передавать в `attempt` функцию,
+  а не промис). НЕ входит в scope GAP-002 (одобрение разрешало менять ТОЛЬКО nativeProbe catch). Решение — за
+  пользователем.
+
+### 26.7 Egress-подтверждение
+
+`api.ortified.ws` / `luxembd.ws` / IP 89.42.231.152 — **не менялись**: никаких IP/прокси/allowlist/`COLLAPS_EMBED_HOST`.
+Дефект классифицирован как операционный (datacenter egress заблокирован host'ом), вердикт hide — авторитетный на
+этом деплое, self-heal восстановит показ после операционного открытия.
+
+### 26.8 Итог фазы C
+
+GAP-002 полностью выкачен: commit → push(backup only) → deploy → health OK → prod FP 10/10 → 0/10, FN=0,
+/videos не playable, остальные источники не тронуты, регрессия чистая, recovery подтверждён на контентом кейсе.
+Найденный orphan-promise риск задокументирован (§26.6) и вынесен на решение пользователя (отдельный фикс).
