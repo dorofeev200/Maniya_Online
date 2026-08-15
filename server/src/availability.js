@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { registeredProviders, twinFor } from './providers/registry.js';
 import { HttpError } from './errors.js';
+import { orderedSkazHosts, isReserveHost } from './providers/skaz/hostOrder.js';
 
 /**
  * BALANCER-002 — per-card source availability (`/api/lampa/sources/card`).
@@ -88,19 +89,13 @@ const HIDE_TTL_MS = 60 * 1000;
 const DEFAULT_HOST = 'http://online3.skaz.tv';
 const NON_CONTENT_FIRST_LINE = new Set(['null', 'disable', 'false', 'not found']);
 
-/** Хост = «резервная нода» (online8) — переместить в конец пула. */
-function isReserveHost(host) {
-  return String(host || '').includes('online8');
-}
-
-function reorderHosts(hosts) {
-  const primary = [];
-  const reserve = [];
-  for (const host of hosts) {
-    (isReserveHost(host) ? reserve : primary).push(host);
-  }
-  return [...primary, ...reserve];
-}
+// BALANCER-SEMANTICS-005-W1 (фикс (a)): порядок пула переехал в общий
+// hostOrder.js `orderedSkazHosts` (online8 ПОСЛЕДНИЙ) — ОДИН источник правды
+// для карточки (здесь) и SkazClient.getLite (/videos). Раньше reorderHosts
+// применялся только в availability, а клиент брал сырой config.skaz.hosts
+// (online8 ВТОРОЙ) → карточка и /videos обходили ноды в разном порядке.
+// isReserveHost импортируется из того же модуля (нужен probe: abstain-политика
+// online8, BAALANCER-ONLINE8-002).
 
 /** Сопоставимы ли названия по алфавиту (кириллица↔кириллица / латиница↔латиница). */
 function comparableScripts(a, b) {
@@ -520,7 +515,7 @@ export async function nativeProbe(provider, query, requestContext, deadline) {
  * Создать checker availability. Опции перекрывают config.skaz (для тестов/скриптов).
  */
 export function createAvailabilityChecker(options = {}) {
-  const hosts = reorderHosts(options.hosts || config.skaz.hosts || []);
+  const hosts = orderedSkazHosts(options.hosts || config.skaz.hosts || []);
   const accountEmail = String(options.accountEmail || config.skaz.accountEmail || '').trim();
   const uid = String(options.uid || config.skaz.uid || '').trim();
   const fetchImpl = options.fetchImpl || fetch;
@@ -554,6 +549,13 @@ export function createAvailabilityChecker(options = {}) {
   // идущим non-force calc'ом и наоборот. Entry удаляется в finally — rejected/timeout
   // calc не отравляет flight (следующий запрос пересчитает).
   const inflight = new Map(); // flightKey → Promise<card result>
+
+  // BALANCER-SEMANTICS-005-W1 (§2.4): пин «карточка → /videos». Авторитетно
+  // найденная нода (row.host authoritative FOUND) запоминается per-userUid|providerId;
+  // /videos и /video стартуют с неё (preferred-first). TTL = TTL кэш-entry того же
+  // ряда; любой не-FOUND вердикт рекомпута чистит пин. uid-скоупед (кэш availability
+  // и так uid-скоупед — STABILITY-003): разные юзеры могут иметь разные granted-ноды.
+  const pinMap = new Map(); // `${userUid}|${providerId}` → { host, ts, ttl }
 
   /**
    * GET URL с таймаутом (бюджет ≤ остатка до дедлайна). Возвращает Response для
@@ -1041,6 +1043,27 @@ export function createAvailabilityChecker(options = {}) {
     // self-heal за минуту (кейс 2026-08-13: OLD items>0, NEW скрыл на 5 мин).
     const hasInconclusive = rows.some((row) => row.inconclusive);
     const hasConfirmedHide = rows.some((row) => row.show === false);
+
+    // BALANCER-SEMANTICS-005-W1 (§2.4): пин «карточка → /videos» пишем ПАРАЛЛЕЛЬНО
+    // кэшу rows (тот же вердикт, тот же TTL). Авторитетный FOUND-ряд (show+authoritative
+    // с host, не trusted-хардкод, не accsdb) → пин ноды на TTL этого же entry;
+    // любой другой вердикт (dated ""/absent, show:false, na, inconclusive) → пин удаляем.
+    // Ключ = userUid|providerId: разные юзеры (granted-устройства разных аккаунтов
+    // skaz) — разные ноды; trusted-ряды (filmix) пина не имеют (host нетипично).
+    // TTL зеркалирует кэш (HIDE_TTL_MS при скрытии, ttlMs иначе) — устаревший пин
+    // сам истекает и не может вечно блокировать ротацию (§8.7).
+    const pinTtl = hasConfirmedHide ? HIDE_TTL_MS : ttlMs;
+    for (const row of rows) {
+      const pk = `${userUid}|${row.id}`;
+      const isFound = row.show === true && row.authoritative && Boolean(row.host)
+        && !row.trusted && !row.accsdb;
+      if (isFound) {
+        pinMap.set(pk, { host: row.host, ts: Date.now(), ttl: pinTtl });
+      } else {
+        pinMap.delete(pk);
+      }
+    }
+
     cache.set(key, {
       ts: Date.now(),
       sources: rows,
@@ -1052,7 +1075,23 @@ export function createAvailabilityChecker(options = {}) {
     return { sources: rows, count, cached: false, elapsedMs, hasInconclusive };
   }
 
-  return { card, checkBalancer, confirmAbsence, checkSearchPredicate };
+  // BALANCER-SEMANTICS-005-W1 (§2.4): чтение пина. Устаревший (ts+ttl < now) пин
+  // удаляется на чтении — preferred-first не превращается в жёсткий keep-on-host.
+  // Возврат: host строкой или null. Вызывается ТОЛЬКО при живом context.userUid
+  // (иначе uid не соотносим с кэшем карточки).
+  function pinnedHost(providerId, userUid_) {
+    if (!userUid_) return null;
+    const pk = `${userUid_}|${providerId}`;
+    const entry = pinMap.get(pk);
+    if (!entry) return null;
+    if (Date.now() - entry.ts >= entry.ttl) {
+      pinMap.delete(pk);
+      return null;
+    }
+    return entry.host || null;
+  }
+
+  return { card, checkBalancer, confirmAbsence, checkSearchPredicate, pinnedHost };
 }
 
 /** Singleton для продакшна/скриптов (config.skaz + реальный fetch).

@@ -233,7 +233,11 @@ async function route(context, response) {
   }
 
   if (pathname === '/api/lampa/videos') {
-    await requireSubscription(context);
+    const user = await requireSubscription(context);
+    // BALANCER-SEMANTICS-005-W1: пин availability keyed по userUid → прокидываем
+    // тот же uid, на котором кэшируется карточка (STABILITY-003). store.js читает
+    // per-provider пин (query.host) для preferred-first ноды /videos.
+    context.userUid = sha256Hex(user.token).slice(0, 16);
     const payload = await getVideosForRequest(context);
     const body = { items: payload.items };
     if (Array.isArray(payload.seasons) && payload.seasons.length) body.seasons = payload.seasons;
@@ -245,7 +249,8 @@ async function route(context, response) {
   if (pathname === '/api/lampa/video') {
     // Ленивый резолв `method:"call"` item'а (голос/серия) → играбельный
     // дескриптор. Отдельно от /videos: НЕ резолвит все голоса заранее.
-    await requireSubscription(context);
+    const user = await requireSubscription(context);
+    context.userUid = sha256Hex(user.token).slice(0, 16);
     const item = await getVideoForRequest(context);
     if (!item) throw new HttpError(404, 'video_not_found', 'Поток не найден');
     return sendJson(request, response, 200, item);

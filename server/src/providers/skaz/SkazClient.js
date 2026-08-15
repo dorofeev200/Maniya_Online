@@ -1,4 +1,5 @@
 import { HttpError } from '../../errors.js';
+import { orderedSkazHosts } from './hostOrder.js';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -47,7 +48,10 @@ const STATUS_REST = new Set([200, 201, 202, 203, 204, 206]);
 export class SkazClient {
   constructor(options = {}) {
     this.balancer = String(options.balancer || '').trim();
-    this.hosts = normalizeHosts(options.hosts);
+    // BALANCER-SEMANTICS-005-W1 (фикс (a)): ЕДИНЫЙ порядок пула с availability
+    // (online8 ПОСЛЕДНИЙ). Раньше клиент брал сырой config.skaz.hosts (online8
+    // второй) → карточка и /videos обходили ноды в разном порядке.
+    this.hosts = orderedSkazHosts(normalizeHosts(options.hosts || SKAZ_DEFAULT_HOSTS));
     this.accountEmail = String(options.accountEmail || '').trim();
     this.uid = String(options.uid || '').trim();
     this.origin = String(options.origin || 'http://lampa.mx').trim();
@@ -56,6 +60,14 @@ export class SkazClient {
     this._hostIndex = 0;
     /** @type {{message: string}|null} последний accsdb-ответ (учётная запись не grant). */
     this.lastAccsdb = null;
+    /**
+     * Классификация последнего скана getLite/openLiteUrl
+     * (BALANCER-SEMANTICS-005-W1 §2.3): { nonContent, noResponse, total }.
+     * EMPTY ⇔ nonContent == total && noResponse == 0 (все ноды ответили
+     * content-«нет»); иначе UNABLE (транзиент, НЕ EMPTY).
+     * @type {{nonContent: number, noResponse: number, total: number}|null}
+     */
+    this.lastScan = null;
   }
 
   enabled() {
@@ -64,49 +76,115 @@ export class SkazClient {
 
   /**
    * GET `lite/<balancer>?…`. Возвращает HTML-строку (финальная страница),
-   * или null если источник для тайтла недоступен (rch/accsdb/503/disable).
+   * или null если источник для тайтла недоступен.
    *
-   * При 5xx/сетевой ошибке на одном хосте пула перебираем остальные хосты
-   * (fetchHosts) — это и есть честный «балансер как в Е-Online»: кластерные
-   * ноды флакают по одной (напр. online3.skaz.tv даёт 503 для kinoflix при
-   * живых карточках на online8/94.249.*).
+   * BALANCER-SEMANTICS-005-W1 (фикс (b)): СКАНИРУЮЩИЙ обход вместо
+   * FAIL-NOT-RETRY. Раньше первый же 2xx-non-usable (rch/JSON/null/disable)
+   * останавливал перебор → один «пустой» кластер = «весь источник пуст»
+   * (доказанный FP Паразиты/kinopub: карточка нашла контент на non-первой ноде,
+   * а /videos остановился на первой 2xx-non-content). Теперь — единое правило
+   * cluster-selection: 2xx-usable → CONTENT (стоп); 2xx-non-usable → следующая
+   * нода; не-2xx/timeout/сеть → следующая нода; accsdb-отказ учётки → стоп +
+   * lastAccsdb. EMPTY только когда ВСЕ ноды ответили content-«нет» (lastScan).
+   *
+   * `options.pinnedHost` — preferred-first стартовая нода (пин карточки,
+   * BALANCER-SEMANTICS-005-W1 §2.4): при её провале обход продолжается по
+   * остальным нодам пула (обратный сценарий, НЕ EMPTY).
    */
-  async getLite(params = {}) {
-    const url = this.buildLiteUrl(params);
+  async getLite(params = {}, options = {}) {
+    const pinnedHost = String(options.pinnedHost || '').trim() || undefined;
+    const url = this.buildLiteUrl(params, { pinnedHost });
     if (!url) return null;
-    this.lastAccsdb = null;
-    const response = await this.fetchHosts(url);
-    if (!response) return null;
-    const text = await response.text().catch(() => null);
-    if (text == null) return null;
-    const accsdb = extractAccsdbMessage(text);
-    if (accsdb) {
-      this.lastAccsdb = accsdb;
-      return null;
-    }
-    return isUsablePage(text) ? text : null;
+    return this._scanLite(this._liteTargets(url, pinnedHost));
   }
 
   /**
    * Открыть URL из карточки `method:"link"`. Абсолютный lite URL (часто на
-   * skaz-хосте). Дописываем auth-параметры, если их там нет. 5xx на одном
-   * хосте → следующий хост пула (fetchResolvedHosts).
+   * skaz-хосте). Дописываем auth-параметры, если их там нет. Тот же
+   * сканирующий обход, что getLite (BALANCER-SEMANTICS-005-W1 §2.3): контент
+   * может жить на ноде ниже первой (kinopub → online8 через 302-туннель).
    */
-  async openLiteUrl(url) {
+  async openLiteUrl(url, options = {}) {
     if (!url) return null;
-    this.lastAccsdb = null;
+    const pinnedHost = String(options.pinnedHost || '').trim() || undefined;
     const target = withAuth(url, this.accountEmail, this.uid);
-    const { response, finalUrl } = await this.fetchResolvedHosts(target);
-    if (!response) return null;
-    const finalURL = finalUrl || target;
-    const text = await response.text().catch(() => null);
-    if (text == null) return null;
-    const accsdb = extractAccsdbMessage(text);
-    if (accsdb) {
-      this.lastAccsdb = accsdb;
-      return null;
+    return this._scanLite(this._liteTargets(target, pinnedHost));
+  }
+
+  /**
+   * Сканирующий обход lite-страницы (BALANCER-SEMANTICS-005-W1 §2.3) — единое
+   * правило cluster-selection, зеркало availability.probe:
+   *   2xx, тело usable (isUsablePage)   → CONTENT: вернуть HTML, СТОП
+   *   2xx, тело non-usable (null/disable/…)  → nonContent++, продолжай
+   *   accsdb-«Ожидаем фильм в хорошем качестве» → content-«нет»: nonContent++, продолжай
+   *   accsdb-отказ учётки (прочие msg)  → СТОП: lastAccsdb, null (credentials, не нода)
+   *   не-2xx / timeout / сеть           → noResponse++, продолжай
+   * EMPTY ТОЛЬКО когда все ноды ответили content-«нет»
+   * (nonContent == total && noResponse == 0); иначе UNABLE (транзиент, НЕ EMPTY).
+   * Классификация — в this.lastScan.
+   */
+  async _scanLite(targets) {
+    this.lastAccsdb = null;
+    let nonContent = 0;
+    let noResponse = 0;
+    const total = targets.length;
+    for (const target of targets) {
+      const response = await this.fetch(target);
+      if (!response) {
+        noResponse += 1; // не-2xx / timeout / сеть — ответа НЕТ (не «нет источника»)
+        continue;
+      }
+      const text = await response.text().catch(() => null);
+      if (text == null) {
+        noResponse += 1;
+        continue;
+      }
+      const accsdb = extractAccsdbMessage(text);
+      if (accsdb) {
+        // «Ожидаем фильм» = контента пока нет (как non-usable, RULE-2 availability);
+        // прочие accsdb = отказ учётной записи → стоп, ротация не продолжается.
+        if (isAwaitingFilmAccsdb(accsdb)) {
+          nonContent += 1;
+          continue;
+        }
+        this.lastAccsdb = accsdb;
+        this.lastScan = { nonContent, noResponse, total };
+        return null;
+      }
+      if (isUsablePage(text)) {
+        this.lastScan = { nonContent, noResponse, total };
+        return text;
+      }
+      nonContent += 1;
     }
-    return isUsablePage(text) ? text : null;
+    this.lastScan = { nonContent, noResponse, total };
+    return null;
+  }
+
+  /**
+   * Кандидаты скана для lite-страницы: старт с пина (preferred-first, если он
+   * ∈ пула) или hosts[0]; каждый хост пула — ровно один раз (rotation-инвариант).
+   * URL пере-доменяется на каждый хост пула (тот же путь/query — lite-страницы
+   * обслуживаются любым бэкендом).
+   */
+  _liteTargets(url, pinnedHost) {
+    const pool = this.hosts.length ? this.hosts : orderedSkazHosts(SKAZ_DEFAULT_HOSTS);
+    const targets = [];
+    const startIndex = this._poolIndex(pinnedHost);
+    const start = startIndex !== -1 ? startIndex : 0;
+    for (let step = 0; step < pool.length; step += 1) {
+      targets.push(swapHost(url, pool[(start + step) % pool.length]));
+    }
+    return targets;
+  }
+
+  /** Индекс хоста в пуле (для пина) или -1, если хост вне пула/конфиг сменился. */
+  _poolIndex(host) {
+    if (!host) return -1;
+    const origin = safeOrigin(host);
+    if (!origin) return -1;
+    const pool = this.hosts.length ? this.hosts : orderedSkazHosts(SKAZ_DEFAULT_HOSTS);
+    return pool.indexOf(origin);
   }
 
   /**
@@ -186,7 +264,9 @@ export class SkazClient {
     }
     query.set('account_email', this.accountEmail);
     query.set('uid', this.uid);
-    this._hostIndex += 1;
+    // W1 (риск §8.7): на пин-вызове _hostIndex НЕ инкрементируем — стартовая нода
+    // задаётся пином (см. _liteTargets); иначе не-пин-вызовы сдвигали бы ротацию.
+    if (!extra.pinnedHost) this._hostIndex += 1;
     return `${host}/lite/${this.discoverPath(extra) || this.balancer}?${query.toString()}`;
   }
 
@@ -240,9 +320,10 @@ export class SkazClient {
    * GET `lite/…` с перебором хостов пула: первый кандидат — URL как есть
    * (уже на хосте ротации buildLiteUrl), при 5xx/network/reset пробуем
    * каждый следующий хост пула с тем же путём. Возвращает первый рабочий
-   * Response (status 2xx) либо null, когда весь пул мёртв. FAIL-NOT-RETRY:
-   * 200-ответы (в т.ч. rch/accsdb/JSON) НЕ перебираются — это «нет источника
-   * для тайтла», а не сбой хоста.
+   * Response (status 2xx) либо null, когда весь пул мёртв. FAIL-NOT-RETRY
+   * сохранён НАМЕРЕННО: используется только discover()/resolveVideoJson()
+   * (семантика JSON/withsearch, не lite-страницы карточек). getLite/openLiteUrl
+   * используют сканирующий обход _scanLite (W1 §2.3).
    */
   async fetchHosts(url, options = {}) {
     for (const target of this._hostTargets(url)) {
@@ -307,6 +388,15 @@ export function isRchPayload(text) {
 /** Детект `{"accsdb":true}` — неверная пара email+uid (в JSON-теле). */
 export function isAccsdbPayload(text) {
   return /"accsdb"\s*:\s*true/i.test(String(text || ''));
+}
+
+/**
+ * accsdb-«Ожидаем фильм в хорошем качестве…» = content-«нет» (контента пока
+ * нет), НЕ отказ учётной записи (RULE-2 availability, зеркало). Такой accsdb
+ * продолжает обход скана (как 2xx-non-usable); прочие accsdb — стоп + lastAccsdb.
+ */
+export function isAwaitingFilmAccsdb(accsdb) {
+  return /ожидаем\s+фильм\s+в\s+хорошем\s+качестве/i.test(String(accsdb?.message || ''));
 }
 
 /**

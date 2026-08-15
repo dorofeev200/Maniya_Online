@@ -191,7 +191,29 @@ test('ретрай по хостам: весь пул мёртв → null', asyn
   assert.equal(seen.length, 2, 'перебрали оба хоста пула');
 });
 
-test('ретрай по хостам: rch/JSON (200) НЕ перебирает хосты — это «нет источника»', async () => {
+// BALANCER-SEMANTICS-005-W1 (§2.3, фикс (b) FAIL-NOT-RETRY): 2xx-non-usable —
+// «нет на ЭТОЙ ноде», а НЕ «нет источника» → скан ПРОДОЛЖАЕТСЯ. EMPTY (все ноды
+// content-«нет») ≠ UNABLE (noResponse>0) — классификация в lastScan.
+test('W1 continue-скан: h1 2xx-non-usable + h2 usable → HTML со второго хоста', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.includes('h1')) return Promise.resolve(response(200, '{"rch":true}'));
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.getLite({});
+  assert.ok(html, 'контент со 2-й ноды, 1-я ответила 2xx-non-usable');
+  assert.equal(seen.length, 2, 'перебрали обе ноды (2xx-non-usable НЕ останавливает скан)');
+  assert.deepEqual(client.lastScan, { nonContent: 1, noResponse: 0, total: 2 }, 'nonContent=1, НЕ UNABLE');
+});
+
+test('W1 EMPTY: все ноды 2xx-non-usable → null + lastScan EMPTY', async () => {
   const seen = [];
   const client = new SkazClient({
     balancer: 'x',
@@ -204,7 +226,139 @@ test('ретрай по хостам: rch/JSON (200) НЕ перебирает �
   });
 
   assert.equal(await client.getLite({}), null);
-  assert.equal(seen.length, 1, '200-ответ не запускает перебор хостов');
+  assert.equal(seen.length, 2, 'сканируем весь пул (FAIL-NOT-RETRY устранён)');
+  assert.deepEqual(client.lastScan, { nonContent: 2, noResponse: 0, total: 2 }, 'EMPTY = все ноды content-«нет»');
+});
+
+test('W1 UNABLE: нода без ответа (timeout/5xx) → НЕ EMPTY', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.includes('h1')) return Promise.resolve(response(200, 'null'));
+      return Promise.resolve(response(503, 'disable'));
+    }
+  });
+
+  assert.equal(await client.getLite({}), null);
+  assert.equal(seen.length, 2, '5xx → continue, как и 2xx-non-content');
+  assert.deepEqual(client.lastScan, { nonContent: 1, noResponse: 1, total: 2 }, 'noResponse=1 → UNABLE, НЕ EMPTY');
+});
+
+test('W1 пин: старт скана с пин-ноды, провал → контент на следующей', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2', 'http://h3'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.includes('h2')) return Promise.resolve(response(200, '{"rch":true}')); // пин-нода — пусто
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.getLite({}, { pinnedHost: 'http://h2' });
+  assert.ok(html, 'пин-нода пуста → скан продолжается → контент на h3');
+  assert.ok(seen[0].startsWith('http://h2/lite/x?'), 'первый запрос — пин-нода (preferred-first)');
+  assert.equal(seen.length, 2);
+  assert.deepEqual(client.lastScan, { nonContent: 1, noResponse: 0, total: 3 });
+});
+
+test('W1 пин не из пула → игнор, обычная ротация с hosts[0]', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.getLite({}, { pinnedHost: 'http://ghost.example' });
+  assert.ok(html);
+  assert.ok(seen[0].startsWith('http://h1/lite/x?'), 'пин вне пула → старт с hosts[0]');
+  assert.equal(seen.length, 1);
+});
+
+test('W1 accsdb на пин-ноде → СТОП, ротация не продолжается', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      return Promise.resolve(response(200, '{"accsdb":true,"msg":"Доступ запрещён"}'));
+    }
+  });
+
+  assert.equal(await client.getLite({}, { pinnedHost: 'http://h1' }), null);
+  assert.equal(seen.length, 1, 'accsdb → стоп на первой ноде (пин-ноде), не перебираем h2');
+  assert.ok(client.lastAccsdb);
+});
+
+test('W1 accsdb «Ожидаем фильм в хорошем качестве» → content-нет, скан продолжается', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.includes('h1')) {
+        return Promise.resolve(response(200, '{"accsdb":true,"msg":"Ожидаем фильм в хорошем качестве"}'));
+      }
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.getLite({}, { pinnedHost: 'http://h1' });
+  assert.ok(html, '«Ожидаем фильм» = content-нет, не отказ учётки → контент со 2-й ноды');
+  assert.equal(seen.length, 2);
+  assert.equal(client.lastAccsdb, null, 'не отказ учётки → lastAccsdb НЕ установлен');
+  assert.deepEqual(client.lastScan, { nonContent: 1, noResponse: 0, total: 2 });
+});
+
+test('W1 openLiteUrl: пин первым, провал → скан по пулу', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2', 'http://h3'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      if (url.includes('h2')) return Promise.resolve(response(200, 'null')); // пин-нода — пусто
+      return Promise.resolve(response(200, '<div class="videos__item">ok</div>'));
+    }
+  });
+
+  const html = await client.openLiteUrl('http://h2/lite/x/serial?s=1', { pinnedHost: 'http://h2' });
+  assert.ok(html, 'пин пуст → скан идёт дальше → контент со следующей ноды');
+  assert.ok(seen[0].startsWith('http://h2/lite/x/serial?s=1'), 'openLiteUrl стартует с пин-ноды');
+  assert.equal(seen.length, 2, 'h2 2xx-non-usable → h3 usable → стоп; h1 не дёргается');
+  assert.deepEqual(client.lastScan, { nonContent: 1, noResponse: 0, total: 3 });
+});
+
+test('W1 битая страница: все ноды content-нет → null + lastScan EMPTY', async () => {
+  const seen = [];
+  const client = new SkazClient({
+    balancer: 'x',
+    hosts: ['http://h1', 'http://h2'],
+    ...ACCOUNT,
+    fetchImpl: (url) => {
+      seen.push(url);
+      return Promise.resolve(response(200, 'null'));
+    }
+  });
+  assert.equal(await client.getLite({}), null);
+  assert.equal(seen.length, 2);
+  assert.deepEqual(client.lastScan, { nonContent: 2, noResponse: 0, total: 2 });
 });
 
 test('openLiteUrl: 5xx на хосте карточки → страница с другого хоста пула', async () => {

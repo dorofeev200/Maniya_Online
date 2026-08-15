@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { HttpError } from './errors.js';
 import { validateToken } from './security.js';
 import { allProviders, registeredProviders, twinFor } from './providers/registry.js';
+import { defaultChecker } from './availability.js';
 
 async function readJson(filePath, fallback) {
   if (!filePath) return fallback;
@@ -111,7 +112,7 @@ export async function getVideoForRequest(context) {
   if (!provider || typeof provider.resolveVideo !== 'function') {
     return null;
   }
-  return provider.resolveVideo(context);
+  return provider.resolveVideo(withPinnedHost(context, provider.id));
 }
 
 export async function getVideosForRequest(context) {
@@ -194,9 +195,24 @@ export async function getVideosForRequest(context) {
   return { items: videos[key] || videos.default || [], seasons: [], voices: [] };
 }
 
+/**
+ * BALANCER-SEMANTICS-005-W1 (§2.4): per-provider пин ноды в query.host.
+ * Пин — only-by-uid, только когда карточка (availability) авторитетно нашла
+ * контент на конкретной ноде (preferred-first, НЕ жёсткий — провал пина ведёт
+ * к ротации в SkazClient). Хост провайдера A не может утечь в B: keyed по
+ * providerId, контекст-копия не мутирует общий context. Без context.userUid
+ * (SCRIPT-вызовы / не /videos) — контекст как был: пина нет, чистая ротация.
+ */
+function withPinnedHost(context, providerId) {
+  if (!context?.userUid || !providerId) return context;
+  const host = defaultChecker.pinnedHost(providerId, context.userUid);
+  if (!host) return context;
+  return { ...context, query: { ...(context.query || {}), host } };
+}
+
 async function payloadOrNull(provider, context) {
   try {
-    return await provider.videos(context);
+    return await provider.videos(withPinnedHost(context, provider.id));
   } catch {
     return null;
   }
@@ -207,7 +223,7 @@ async function twinForPayload(nativeId, context) {
   const twin = twinFor(nativeId);
   if (!twin || !twin.enabled()) return null;
   try {
-    const payload = await twin.videos(context);
+    const payload = await twin.videos(withPinnedHost(context, twin.id));
     return payload?.items?.length ? payload : null;
   } catch {
     return null;

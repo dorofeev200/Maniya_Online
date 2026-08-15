@@ -117,8 +117,18 @@ export class SkazProvider extends Provider {
     return params;
   }
 
-  async movieVideos(query, requestContext, streamProxy) {
-    const { cards } = await this._cachedCollectMovieCards(query);
+  /**
+   * BALANCER-SEMANTICS-005-W1 (§2.4): пин карточки (preferred-first нода) из
+   * per-provider query.host (store.js подставляет pinnedHost по providerId).
+   * host никогда не утекает клиенту — buildPageParams-whitelist его исключает.
+   */
+  pinFromContext(requestContext = {}) {
+    const host = String(requestContext.query?.host || '').trim();
+    return host || undefined;
+  }
+
+  async movieVideos(query, requestContext, streamProxy, pinnedHost) {
+    const { cards } = await this._cachedCollectMovieCards(query, pinnedHost);
     const items = [];
     let callIndex = 0;
 
@@ -163,16 +173,16 @@ export class SkazProvider extends Provider {
    * voice-индекс ленивого резолва не совпадёт с items в списке.
    * Возвращает финальные карточки (фильтр-предикат `hasMovieItems`).
    */
-  async collectMovieCards(query) {
+  async collectMovieCards(query, pinnedHost) {
     const pageParams = this.buildPageParams(query);
-    const firstHtml = await this.client.getLite(pageParams);
+    const firstHtml = await this.client.getLite(pageParams, { pinnedHost });
     let cards = this.normalizer.cards(firstHtml || '');
     if (hasMovieItems(cards)) return { cards };
 
     // 1) follow-карточка (посительный title-скоринг; rezka/lumina).
     const href = this.movieHref(cards, query);
     if (href) {
-      const followed = this.normalizer.cards((await this.client.getLite({ ...pageParams, href })) || '');
+      const followed = this.normalizer.cards((await this.client.getLite({ ...pageParams, href }, { pinnedHost })) || '');
       if (hasMovieItems(followed)) return { cards: followed };
     }
 
@@ -181,7 +191,7 @@ export class SkazProvider extends Provider {
     //    нет подходящей → null → возвращаем пусто, НЕ чужой фильм по similar.
     const postid = this.postidFromCards(cards, query);
     if (postid != null) {
-      const postCards = this.normalizer.cards((await this.client.getLite({ ...pageParams, postid: String(postid) })) || '');
+      const postCards = this.normalizer.cards((await this.client.getLite({ ...pageParams, postid: String(postid) }, { pinnedHost })) || '');
       if (hasMovieItems(postCards)) return { cards: postCards };
     }
 
@@ -198,12 +208,15 @@ export class SkazProvider extends Provider {
    * финальные карточки — resolveVideo() на Play берёт их же, а не повторяет
    * getLite→href→postid (второй поход = «долго думает» + «видео не найдено» при
    * флапе кластера). Кэшируем только непустой результат (пусто = транзиент → ретрай).
+   * W1: ключ БЕЗ хоста (пин не входит) — контент карточки от любой ноды того же
+   * балансера идентичен (риск §8.2 безопасен); пин лишь выбирает, КУДА идти при
+   * cache-miss.
    */
-  async _cachedCollectMovieCards(query = {}) {
+  async _cachedCollectMovieCards(query = {}, pinnedHost) {
     const key = this._movieNavKey(query);
     const hit = this._navCache.get(key);
     if (hit && Date.now() - hit.ts < NAV_CACHE_TTL_MS) return { cards: hit.cards };
-    const result = await this.collectMovieCards(query);
+    const result = await this.collectMovieCards(query, pinnedHost);
     if (result.cards && result.cards.length) {
       this._navCache.set(key, { ts: Date.now(), cards: result.cards });
       this._sweepNavCache();
@@ -217,11 +230,11 @@ export class SkazProvider extends Provider {
   }
 
   /** openSeasonPage с тем же кэшем (сериал: videos → resolveSerialVideo). */
-  async _cachedOpenSeasonPage(query = {}) {
+  async _cachedOpenSeasonPage(query = {}, pinnedHost) {
     const key = this._serialNavKey(query);
     const hit = this._navCache.get(key);
     if (hit && Date.now() - hit.ts < NAV_CACHE_TTL_MS) return hit.nav;
-    const nav = await this.openSeasonPage(query);
+    const nav = await this.openSeasonPage(query, pinnedHost);
     if (nav) {
       this._navCache.set(key, { ts: Date.now(), nav });
       this._sweepNavCache();
@@ -242,21 +255,22 @@ export class SkazProvider extends Provider {
     const requestContext = context || {};
     const query = requestContext.query || {};
     if (!this.enabled()) return null;
+    const pinnedHost = this.pinFromContext(requestContext);
     const streamProxy = (url) => buildProxyUrl(requestContext, url, {
       origin: this.client.origin,
       ref: this.client.origin
     });
     try {
       return this.serialQuery(query)
-        ? await this.resolveSerialVideo(query, requestContext, streamProxy)
-        : await this.resolveMovieVideo(query, requestContext, streamProxy);
+        ? await this.resolveSerialVideo(query, requestContext, streamProxy, pinnedHost)
+        : await this.resolveMovieVideo(query, requestContext, streamProxy, pinnedHost);
     } catch {
       return null;
     }
   }
 
-  async resolveMovieVideo(query, requestContext, streamProxy) {
-    const { cards } = await this._cachedCollectMovieCards(query);
+  async resolveMovieVideo(query, requestContext, streamProxy, pinnedHost) {
+    const { cards } = await this._cachedCollectMovieCards(query, pinnedHost);
     const index = Number(query.voice) || 0;
     const videoCards = cards.filter((card) => card.method === 'call' && card.s == null && card.e == null);
     // Один и тот же предикат/порядок, что и в movieVideos (callIndex).
@@ -328,8 +342,8 @@ export class SkazProvider extends Provider {
     return best;
   }
 
-  async serialVideos(query, requestContext, streamProxy) {
-    const nav = await this._cachedOpenSeasonPage(query);
+  async serialVideos(query, requestContext, streamProxy, pinnedHost) {
+    const nav = await this._cachedOpenSeasonPage(query, pinnedHost);
     if (!nav) return { items: [], seasons: [], voices: [] };
     const { seasons, voices, seasonNumber, pageCards, voice } = nav;
 
@@ -381,9 +395,11 @@ export class SkazProvider extends Provider {
    * Навигация сериала (база → перевод+сезон → страница сезона). Единый путь
    * для serialVideos() и resolveSerialVideo() — обе должны попасть на ту же
    * страницу сезона, иначе episode-резолв не совпадёт со списком.
+   * W1: базовый getLite и follow openLiteUrl — тот же сканирующий обход с
+   * пином (preferred-first), что и фильм-путь.
    */
-  async openSeasonPage(query) {
-    const html = await this.client.getLite(this.buildPageParams(query));
+  async openSeasonPage(query, pinnedHost) {
+    const html = await this.client.getLite(this.buildPageParams(query), { pinnedHost });
     if (!html) return null;
 
     const cards = this.normalizer.cards(html);
@@ -406,7 +422,7 @@ export class SkazProvider extends Provider {
     }
 
     const targetHref = this.seasonLinkHref(cards, voice, seasonNumber);
-    const pageHtml = targetHref ? await this.client.openLiteUrl(targetHref) : html;
+    const pageHtml = targetHref ? await this.client.openLiteUrl(targetHref, { pinnedHost }) : html;
     if (!pageHtml) return null;
     const pageCards = targetHref ? this.normalizer.cards(pageHtml) : cards;
 
@@ -418,8 +434,8 @@ export class SkazProvider extends Provider {
   }
 
   /** Ленивый резолв `call`-серии: (voice, season, episode) from query → дескриптор. */
-  async resolveSerialVideo(query, requestContext, streamProxy) {
-    const nav = await this._cachedOpenSeasonPage(query);
+  async resolveSerialVideo(query, requestContext, streamProxy, pinnedHost) {
+    const nav = await this._cachedOpenSeasonPage(query, pinnedHost);
     if (!nav) return null;
     const { pageCards, seasonNumber } = nav;
     const season = Number(query.season) || seasonNumber || 0;
@@ -460,6 +476,7 @@ export class SkazProvider extends Provider {
 
     if (!this.enabled()) return { items: [], seasons: [], voices: [] };
 
+    const pinnedHost = this.pinFromContext(requestContext);
     let result;
     try {
       const streamProxy = (url) => buildProxyUrl(requestContext, url, {
@@ -467,8 +484,8 @@ export class SkazProvider extends Provider {
         ref: this.client.origin
       });
       result = this.serialQuery(query)
-        ? await this.serialVideos(query, requestContext, streamProxy)
-        : await this.movieVideos(query, requestContext, streamProxy);
+        ? await this.serialVideos(query, requestContext, streamProxy, pinnedHost)
+        : await this.movieVideos(query, requestContext, streamProxy, pinnedHost);
     } catch {
       result = { items: [], seasons: [], voices: [] };
     }
