@@ -454,7 +454,19 @@ export async function nativeProbe(provider, query, requestContext, deadline) {
   const label = `native:${id}`;
   const attempt = (promise) => {
     const remaining = Math.max(0, deadline - Date.now());
-    if (remaining <= 0) return Promise.reject(new Error(`${label} deadline`));
+    if (remaining <= 0) {
+      // STABILITY-004: дедлайн исчерпан, но `promise` уже ЗАПУЩЕН (аргумент attempt()
+      // — это вызов async-функции, он стартует сразу). Нам его результат больше не
+      // нужен (attempt всё равно reject'ится «deadline»), но без rejection-consumer
+      // его поздний reject (например HttpError 422/403 от probe.present) станет
+      // unhandledRejection и УРОНИТ Node-процесс (live: journald 17:34:25,
+      // HttpError: Collaps HTTP 422 → exit status=1 → systemd restart). Безопасный
+      // no-op catch: вердикт в этой ветке не меняется (attempt не отдаёт его наружу),
+      // реальные ошибки не скрываются (они и не доходили бы никуда) — гасим только
+      // «никому не нужный» rejection, чтобы процесс пережил поздний reject.
+      promise.catch(() => {});
+      return Promise.reject(new Error(`${label} deadline`));
+    }
     let timer;
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error(`${label} timeout`)), remaining);
