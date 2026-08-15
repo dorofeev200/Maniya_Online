@@ -139,6 +139,52 @@ test('checkSearchPredicate (RULE-1): link без данных для сравн�
   assert.equal(checkSearchPredicate(entities, odyssey).verdict, 'content');
 });
 
+// ===== GAP-005: составной title «RU / EN» — части сравниваются отдельно, не склейкой =====
+
+test('checkSearchPredicate (GAP-005): «Интерстеллар / Interstellar» + совпавший год → content', () => {
+  const q = { title: 'Интерстеллар', original_title: 'Interstellar', year: '2014' };
+  const card = '{"method":"link","similar":true,"year":2014,"title":"Интерстеллар / Interstellar","url":"http://x/lite/kinopub?postid=8613"}';
+  assert.equal(checkSearchPredicate(card, q).verdict, 'content', 'составной title по частям + год → искомый фильм');
+});
+
+test('checkSearchPredicate (GAP-005): одиночные названия по-прежнему content', () => {
+  const q = { title: 'Интерстеллар', original_title: 'Interstellar', year: '2014' };
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Интерстеллар","year":2014,"url":"http://x/lite/kinopub?postid=1"}', q).verdict, 'content');
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Interstellar","year":2014,"url":"http://x/lite/kinopub?postid=2"}', q).verdict, 'content');
+});
+
+test('checkSearchPredicate (GAP-005): decoy-карточки остаются absent (даже при совпавшем годе)', () => {
+  const q = { title: 'Интерстеллар', original_title: 'Interstellar', year: '2014' };
+  // Реальный decoy (postid=123847): правая часть «interstellar» совпала, но год другой.
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Schiller / Interstellar","year":2026,"url":"http://x/lite/kinopub?postid=123847"}', q).verdict, 'absent', 'Schiller 2026 → чужой год');
+  // Чужой тайтл + чужой год.
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Быстрее света / Faster than Light","year":2017,"url":"http://x/lite/kinopub?postid=52882"}', q).verdict, 'absent', 'Быстрее света → чужой фильм');
+  // Док «Наука Интерстеллар»: год совпал, но часть НЕ равна ровно (подстрока) → absent.
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Наука Интерстеллар / The Science of Interstellar","year":2014,"url":"http://x/lite/kinopub?postid=19932"}', q).verdict, 'absent', 'док с совпавшим годом → absent');
+
+  // «Последний дом слева» vs запрос «Последний дом»: части не равны ровно, даже если год совпал.
+  const lh = { title: 'Последний дом', original_title: 'The Last House', year: '2026' };
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Последний дом слева / The Last House on the Left","year":2026,"url":"http://x/lite/kinopub?postid=2536"}', lh).verdict, 'absent', 'год совпал, но название другое');
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Последний дом слева / The Last House on the Left","year":2009,"url":"http://x/lite/kinopub?postid=2536"}', lh).verdict, 'absent', 'чужой год');
+
+  // «Одиссей / The Odyssey» 1997 vs запрос «Одиссея» 2026: часть odyssey совпала, но год другой.
+  const od = { title: 'Одиссея', original_title: 'The Odyssey', year: '2026' };
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Одиссей / The Odyssey","year":1997,"url":"http://x/lite/kinopub?postid=1362"}', od).verdict, 'absent', 'namesake-сериал 1997');
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Одиссея / The Odyssey","year":1992,"url":"http://x/lite/kinopub?postid=17578"}', od).verdict, 'absent', 'namesake-сериал 1992');
+});
+
+test('checkSearchPredicate (GAP-005): ID сильнее title/year; чужой ID — absent', () => {
+  const q = { title: 'Интерстеллар', original_title: 'Interstellar', year: '2014', imdb_id: 'tt0816692', kinopoisk_id: '157336' };
+  // Совпавший imdb при «чужом» составном title/год → content (ID побеждает).
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Другое / Something","year":1999,"url":"http://x/lite/kinopub?postid=1&imdb_id=tt0816692"}', q).verdict, 'content', 'imdb совпал → контент');
+  // Совпавший kp при «чужом» title/год → content.
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Другое / Something","year":1999,"url":"http://x/lite/kinopub?postid=2&kinopoisk_id=157336"}', q).verdict, 'content', 'kp совпал → контент');
+  // Чужой imdb при совпавшем составном title/год → absent (ID чужой).
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Интерстеллар / Interstellar","year":2014,"url":"http://x/lite/kinopub?postid=3&imdb_id=tt9999999"}', q).verdict, 'absent', 'чужой imdb → другой фильм');
+  // Чужой kp при совпавшем title/год → absent.
+  assert.equal(checkSearchPredicate('{"method":"link","title":"Интерстеллар / Interstellar","year":2014,"url":"http://x/lite/kinopub?postid=4&kinopoisk_id=999999"}', q).verdict, 'absent', 'чужой kp → другой фильм');
+});
+
 test('fnv1aKey: стабильный и разный для разных ключей', () => {
   const a = fnv1aKey('13:0:tmdb:4:uid-1');
   const b = fnv1aKey('94997:0:tmdb:4:uid-1');

@@ -208,6 +208,25 @@ function classifyLinkCard(card, query) {
   const comparable = cardTitle && titleText && comparableScripts(cardTitle, titleText);
   const titleMatch = comparable && (cardTitle === qTitle || cardTitle === qOriginalTitle);
   if (titleMatch) return 'content';
+
+  // Составной title «RU / EN» (GAP-005): части сравниваются ПО ОТДЕЛЬНОСТИ, а не склейкой
+  // normalizeTitle («интерстелларinterstellar» ≠ «интерстеллар»). Часть ТОЧНО совпала с
+  // запрошенным названием И год совпал → контент. Нужно для kinopub-link-карточек без
+  // kp/imdb (только postid), где реальная карточка искомого фильма имеет составной title.
+  // Точное равенство частей (а не подстрока) сохраняет защиту от decoy-карточек:
+  // «Наука Интерстеллар / The Science of Interstellar» и «Последний дом слева / …»
+  // частями не совпадают и остаются absent даже при совпавшем годе.
+  const compoundParts = String(card.title || '')
+    .split('/')
+    .map((part) => normalizeTitle(part))
+    .filter(Boolean);
+  if (compoundParts.length > 1) {
+    const partMatched = compoundParts.some(
+      (part) => part === qTitle || part === qOriginalTitle
+    );
+    if (partMatched && cardYear > 0 && qYear > 0 && cardYear === qYear) return 'content';
+  }
+
   if (comparable && !titleMatch) return 'absent';
 
   // Год: чужой → чужой фильм; совпал → контент (слабое совпадение, но по ТЗ RULE-1).
