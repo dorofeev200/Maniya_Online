@@ -1,8 +1,8 @@
 # GAP-012 — VeoVeo «виден, но мёртв»: ROOT-CAUSE ANALYSIS + FIX
 
 Дата: 2026-08-15
-Ветка: `gap-012-veoveo` (не закоммичено, не задеплоено)
-Статус: **ROOT CAUSE ДОКАЗАН, фикс протестирован + LIVE SHADOW 12/12, НЕ в проде** (жёсткий STOP после отчёта)
+Ветка: `gap-012-veoveo` → `dccad9c` (закоммичено + push `backup/feature/alloha-provider`)
+Статус: **ЗАКОММИЧЕНО (`dccad9c`) + ЗАДЕПЛОЕНО + PROD-VERIFIED 17/17** (см. §17)
 
 ---
 
@@ -268,4 +268,34 @@ VPS: OLD = прод :3000 (без фикса), NEW = shadow :3100 (фикс че
 | Playback через NEW | ✅ master→variant→TS 0x47, PLAYBACK_OK |
 | Полный тестовый прогон, новых падений 0 | ✅ 547 pass / 2 pre-existing fail / 6 skip |
 | Отчёт без реальных кредов | ✅ (маскированные фингерпринты, токены не выводятся) |
-| **STOP: без commit/push/deploy** | ⏸ ждёт отдельного подтверждения пользователя |
+| **STOP: без commit/push/deploy** | ✅ выполнено в первоначальном цикле; затем юзер разрешил → `dccad9c` + backup + deploy + prod-verify (§17) |
+
+---
+
+## 17. Production verification (2026-08-15, после деплоя)
+
+Коммит `dccad9c` → push `backup/feature/alloha-provider` → `scripts/deploy.sh` → live-проверка.
+
+- **Health**: `https://plugin.maniya-kvn.online/health` → `{"ok":true}`.
+- **Целостность деплоя**: md5 `server/src/config.js` локальный == VPS
+  (`520aa444a0d88cc4f214fbe8ee28b5f4`), `mvapspdmpg` на VPS = 1 вхождение,
+  systemd `active`, NRestarts=0.
+- **veoveo live-trace (все 15 тайтлов + forrest×3 = 17 строк, скрипт
+  `scripts/gap012-veoveo-trace.mjs` против `127.0.0.1:3000`)**: **17/17 probe=206**
+  (было 403), `cardShow:true` на всех, videos 1 (фильмы) / 8–10 (сериалы).
+  0 сломанных.
+- **Playback-цепочка через прод-прокси** (`gap012-prod-playback.mjs`):
+  odyssey master 206 HLS (272ms) → variant 206 HLS (219ms) → сегмент 206 TS 0x47
+  (383ms); hotd master 206 (241ms) → variant 206 (121ms) → сегмент 206 TS 0x47
+  (73ms); `masterHasProxySegments:true` → `PLAYBACK_OK`.
+- **veoveo через публичный HTTPS** (путь реального плеера, Range probe):
+  206 `application/vnd.apple.mpegurl`, `#EXTM3U`.
+- **Регрессии**:
+  - filmix (Форрест Гамп, trusted): 206 `video/mp4` (ftyp isom, 2160p), стабильно ×2.
+  - skaz-alloha (Интерстеллар 8 items / Матрица 7 items), rezka (Матрица 18 items) — OK.
+  - kodik: 0 items на проверенных тайтлах — **подтверждено upstream-данные**
+    (прямой `kodik-api.com` с прод-токеном: `total:0` по kinopoisk_id/imdb_id Матрицы,
+    но `title="matrix"` → 2 результата — токен жив; код kodik и KODIK_TOKEN не менялись,
+    allowlist не участвует в API-пути kodik). НЕ регрессия.
+- **Latency** (прод): master 241–272ms, variant 121–219ms, сегмент 73–383ms —
+  включает redirect-хоп routing-ноды veoveo.
