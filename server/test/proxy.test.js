@@ -13,6 +13,21 @@ test('isHostAllowed: корень и поддомены, чужой хост о�
   assert.equal(isHostAllowed('', ['filmix.tv']), false);
 });
 
+// GAP-012: veoveo-CDN — routing-нода api.rstprgapipt.com отвечает 307 на CDN-хост
+// *.mvapspdmpg.com (vn50007/deovi/vn50006/old). Один суффикс корня покрывает все
+// поддомены; без него наш прокси отвечает 403 proxy_host_forbidden на Play.
+test('isHostAllowed: mvapspdmpg.com покрывает все поддомены veoveo-CDN (GAP-012)', () => {
+  const allow = ['mvapspdmpg.com'];
+  for (const host of ['vn50007.mvapspdmpg.com', 'deovi.mvapspdmpg.com', 'vn50003.mvapspdmpg.com', 'old.mvapspdmpg.com']) {
+    assert.equal(isHostAllowed(host, allow), true, `${host} должен быть разрешён`);
+  }
+  assert.equal(isHostAllowed('mvapspdmpg.com', allow), true);
+  assert.equal(isHostAllowed('evil.mvapspdmpg.com.evil.com', allow), false);
+  assert.equal(isHostAllowed('mvapspdmpg.com.evil.com', allow), false);
+  // Без суффикса в allowlist поддомены CDN блокируются — исходная причина 403.
+  assert.equal(isHostAllowed('vn50007.mvapspdmpg.com', ['rstprgapipt.com']), false);
+});
+
 test('validateProxyTarget: SSRF-гард', () => {
   const allow = ['filmix.tv'];
   assert.ok(validateProxyTarget('https://vip.filmix.tv/s/x/y.mp4', allow));
@@ -21,6 +36,29 @@ test('validateProxyTarget: SSRF-гард', () => {
   assert.throws(() => validateProxyTarget('ftp://filmix.tv/x', allow), (e) => e instanceof HttpError && e.statusCode === 400);
   // loopback http — только для локальных источников (тесты/dev)
   assert.ok(validateProxyTarget('http://127.0.0.1:9999/x.mp4', allow));
+});
+
+// GAP-012: veoveo-CDN — routing-нода api.rstprgapipt.com отвечает 307 на CDN-хост
+// *.mvapspdmpg.com (vn50007/deovi/vn50006/old). validateProxyTarget валидирует
+// redirect-цель по allowlist: без суффикса корня — 403 (исходная продакшн-проблема),
+// с суффиксом — OK.
+test('validateProxyTarget: veoveo redirect-цель *.mvapspdmpg.com (GAP-012)', () => {
+  const allowWithCdn = ['rstprgapipt.com', 'mvapspdmpg.com'];
+  const allowRoutingOnly = ['rstprgapipt.com'];
+  const cdnUrls = [
+    'https://vn50007.mvapspdmpg.com/1786781699/seg-1.ts',
+    'https://deovi.mvapspdmpg.com/1786781699/index.m3u8',
+    'https://old.mvapspdmpg.com/1786781699/seg-2.ts'
+  ];
+  // С фиксом (суффикс CDN-корня в allowlist) — все redirect-цели проходят.
+  for (const url of cdnUrls) {
+    assert.ok(validateProxyTarget(url, allowWithCdn), `${url} должен пройти с mvapspdmpg.com`);
+  }
+  // Без фикса (только routing-нода) — redirect-цель отклоняется 403: ТОЧНО исходный 403.
+  for (const url of cdnUrls) {
+    assert.throws(() => validateProxyTarget(url, allowRoutingOnly),
+      (e) => e instanceof HttpError && e.statusCode === 403 && e.code === 'proxy_host_forbidden');
+  }
 });
 
 test('validateProxyTarget: http только из явного httpAllowHosts', () => {
@@ -251,4 +289,83 @@ test('proxyMedia: отклоняет неразрешённый хост', async
     () => proxyMedia('https://evil.com/video.mp4', { headers: {} }, response, { allowHosts: ['filmix.tv'] }),
     (e) => e instanceof HttpError && e.statusCode === 403
   );
+});
+
+// GAP-012: veoveo-механизм — routing-нода api.rstprgapipt.com отвечает 307 на
+// CDN-хост *.mvapspdmpg.com. Прокси должен валидировать redirect-цель:
+//   • 403-тест — сервер 307-ит на https://vn50007.mvapspdmpg.com (НЕ в allowlist) →
+//     validateProxyTarget бросает 403 синхронно на redirect-цели, соединения нет —
+//     это ТОЧНЫЙ продакшн-фейл до фикса;
+//   • success-тест — сервер 307-ит на loopback-CDN (в allowlist) → манифест
+//     переписывается. А вот allowlist-гейт на https-CDN-хосте (суффикс корня)
+//     доказан юнит-тестами isHostAllowed/validateProxyTarget выше, т.к. в интеграции
+//     реальный vn50007.mvapspdmpg.com недоступен локально.
+function startRedirectTestServer() {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      // Routing-нода: два маршрута, оба 307.
+      if (req.url.startsWith('/routing-real.m3u8')) {
+        // Редирект на реальный CDN-хост (как в проде): до фикса → 403.
+        res.writeHead(307, { location: 'https://vn50007.mvapspdmpg.com/cdn/manifest.m3u8' });
+        res.end();
+        return;
+      }
+      if (req.url.startsWith('/routing-loop.m3u8')) {
+        // Редирект на локальный CDN — для проверки, что после валидации цели
+        // контент реально проксируется и манифест переписывается.
+        res.writeHead(307, { location: `http://127.0.0.1:${server.address().port}/cdn/manifest.m3u8` });
+        res.end();
+        return;
+      }
+      if (req.url.startsWith('/cdn/manifest.m3u8')) {
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        res.end(['#EXTM3U', '#EXT-X-STREAM-INF:BANDWIDTH=1280000', 'seg-1.ts', ''].join('\n'));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': '4' });
+      res.end(Buffer.from('WXYZ'));
+    });
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
+}
+
+test('proxyMedia: следует 307 и переписывает манифест, если redirect-цель разрешена (GAP-012 veoveo)', async () => {
+  const server = await startRedirectTestServer();
+  try {
+    const port = server.address().port;
+    const makeProxyUrl = (url) => `https://maniya.test/proxy?url=${encodeURIComponent(url)}`;
+    const response = new MockResponse();
+
+    // Начальный URL — loopback http (проходит scheme-чек), routing-нода 307-ит
+    // на loopback-CDN, который тоже проходит валидацию → контент проксируется.
+    await proxyMedia(`http://127.0.0.1:${port}/routing-loop.m3u8`, { headers: {} }, response, {
+      allowHosts: ['127.0.0.1', 'mvapspdmpg.com'],
+      makeProxyUrl, maxRedirects: 2, timeoutMs: 3000
+    });
+    const body = await collect(response);
+    assert.equal(response.status, 200);
+    assert.match(body, /#EXTM3U/);
+    assert.match(body, /https:\/\/maniya\.test\/proxy\?url=.+seg-1\.ts/);
+  } finally {
+    server.close();
+  }
+});
+
+test('proxyMedia: 403 на redirect-цель, которой нет в allowHosts (GAP-012 исходный 403)', async () => {
+  const server = await startRedirectTestServer();
+  try {
+    const port = server.address().port;
+    // allowlist содержит ТОЛЬКО локальный хост тест-сервера, БЕЗ суффикса CDN —
+    // ровно продакшн-ситуация до фикса: routing-нода 307 → vn50007.mvapspdmpg.com
+    // (не в allowlist) → validateProxyTarget бросает 403 на redirect-цели.
+    const response = new MockResponse();
+    await assert.rejects(
+      () => proxyMedia(`http://127.0.0.1:${port}/routing-real.m3u8`, { headers: {} }, response, {
+        allowHosts: ['127.0.0.1'], maxRedirects: 2, timeoutMs: 3000
+      }),
+      (e) => e instanceof HttpError && e.statusCode === 403 && e.code === 'proxy_host_forbidden'
+    );
+  } finally {
+    server.close();
+  }
 });
