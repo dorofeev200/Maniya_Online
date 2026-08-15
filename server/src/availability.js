@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { registeredProviders, twinFor } from './providers/registry.js';
+import { HttpError } from './errors.js';
 
 /**
  * BALANCER-002 — per-card source availability (`/api/lampa/sources/card`).
@@ -434,6 +435,14 @@ function genericCardKey(query = {}) {
   );
 }
 
+// GAP-002: детерминированный отказ контент/embed-хоста (напр. geo/IP-гейт
+// `/embed/*` → 422 у collaps). Это операционный факт «из этого деплоя контент
+// недоступен», а НЕ транзиентная сетевая ошибка → authoritative «нет» вместо
+// inconclusive-показа. 5xx/таймаут/ECONNRESET/ECONNREFUSED/DNS намеренно НЕ входят:
+// они оставляют inconclusive (см. nativeProbe catch). Без provider-specific хардкода:
+// применимо к любому native-провайдеру, чей контент-хост ответил жёстким отказом.
+const HARD_REFUSAL_STATUSES = new Set([403, 422, 451]);
+
 /**
  * Вердикт native-пробы по дедлайну карточки. Возвращает
  * { show, authoritative, inconclusive?, status, reason, error? } — совместимо
@@ -475,7 +484,19 @@ export async function nativeProbe(provider, query, requestContext, deadline) {
     const present = Array.isArray(results) && results.length > 0;
     return { show: Boolean(present), authoritative: true, status: 0, reason: present ? 'found' : 'absent' };
   } catch (error) {
-    // Сеть/HTTP/таймаут/дедлайн — вердикта нет: показываем (не прячем рабочий).
+    // GAP-002: детерминированный отказ контент/embed-хоста (403/422/451) —
+    // authoritative «нет» (host-block). Не транзиентный сбой: это стабильный
+    // гео/IP-гейт хоста против egress-IP деплоя. Существующий OLD∩NEW-гейт
+    // подтверждает второй пробой (confirmNativeAbsence) и прячет НА HIDE_TTL_MS —
+    // self-heal: как только доступ к хосту восстановится, следующий probe
+    // вернёт found → источник снова видим (без ручного включения).
+    if (error instanceof HttpError && HARD_REFUSAL_STATUSES.has(error.statusCode)) {
+      return {
+        show: false, authoritative: true, status: error.statusCode,
+        reason: 'host-block', error: String((error && error.message) || error).slice(0, 60)
+      };
+    }
+    // Сеть/HTTP/таймаут/дедлайн/5xx/прочие 4xx — вердикта нет: показываем (не прячем рабочий).
     return {
       show: true, authoritative: false, inconclusive: true, status: 0,
       reason: 'error', error: String((error && error.message) || error).slice(0, 60)

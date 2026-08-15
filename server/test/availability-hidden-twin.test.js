@@ -25,6 +25,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const { createAvailabilityChecker, nativeProbe, isTrustedAlwaysVisible, TRUSTED_ALWAYS_VISIBLE } = await import('../src/availability.js');
+const { HttpError } = await import('../src/errors.js');
 
 function fakeFetch(handler) {
   return async (url, options = {}) => handler(String(url), options);
@@ -273,4 +274,123 @@ test('nativeProbe: таймаут по дедлайну → inconclusive (show)'
   assert.equal(v.show, true);
   assert.equal(v.inconclusive, true);
   assert.equal(v.reason, 'error');
+});
+
+// ===== GAP-002: host-block — детерминированный отказ контент/embed-хоста =====
+// 403/422/451 (HttpError) → authoritative «нет» (show:false, reason:'host-block').
+// Сеть/таймаут/DNS/5xx/прочие 4xx → прежнее inconclusive-поведение (show:true).
+// Без provider-specific хардкода: тот же код для любого native-провайдера.
+
+function hostBlockStub(statusCode) {
+  return {
+    id: 'collaps',
+    recordByKeys: async () => { throw new HttpError(statusCode, 'collaps_http_error', `Collaps HTTP ${statusCode}`); },
+    client: { search: async () => [] }
+  };
+}
+
+test('GAP-002 host-block: HttpError 422 → show:false + authoritative:true', async () => {
+  const v = await nativeProbe(hostBlockStub(422), { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, false);
+  assert.equal(v.authoritative, true);
+  assert.equal(v.inconclusive, undefined, 'не inconclusive — определённый ответ');
+  assert.equal(v.reason, 'host-block');
+  assert.equal(v.status, 422);
+});
+
+test('GAP-002 host-block: HttpError 403 → show:false + authoritative:true', async () => {
+  const v = await nativeProbe(hostBlockStub(403), { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, false);
+  assert.equal(v.authoritative, true);
+  assert.equal(v.reason, 'host-block');
+  assert.equal(v.status, 403);
+});
+
+test('GAP-002 host-block: HttpError 451 → show:false + authoritative:true', async () => {
+  const v = await nativeProbe(hostBlockStub(451), { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, false);
+  assert.equal(v.authoritative, true);
+  assert.equal(v.reason, 'host-block');
+  assert.equal(v.status, 451);
+});
+
+test('GAP-002 НЕ host-block: HttpError 500 → inconclusive (show:true)', async () => {
+  const v = await nativeProbe(hostBlockStub(500), { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, true);
+  assert.equal(v.inconclusive, true);
+  assert.equal(v.reason, 'error');
+});
+
+test('GAP-002 НЕ host-block: timeout → inconclusive (show:true)', async () => {
+  const probe = {
+    id: 'collaps',
+    recordByKeys: async () => { throw new Error('collaps:deadline timeout'); },
+    client: { search: async () => [] }
+  };
+  const v = await nativeProbe(probe, { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, true);
+  assert.equal(v.inconclusive, true);
+  assert.equal(v.reason, 'error');
+});
+
+test('GAP-002 НЕ host-block: DNS (ENOTFOUND) → inconclusive (show:true)', async () => {
+  const probe = {
+    id: 'collaps',
+    recordByKeys: async () => { throw new Error('fetch failed: ENOTFOUND api.ortified.ws'); },
+    client: { search: async () => [] }
+  };
+  const v = await nativeProbe(probe, { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, true);
+  assert.equal(v.inconclusive, true);
+  assert.equal(v.reason, 'error');
+});
+
+test('GAP-002 НЕ host-block: ECONNRESET → inconclusive (show:true)', async () => {
+  const probe = {
+    id: 'collaps',
+    recordByKeys: async () => { throw new Error('ECONNRESET'); },
+    client: { search: async () => [] }
+  };
+  const v = await nativeProbe(probe, { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, true);
+  assert.equal(v.inconclusive, true);
+  assert.equal(v.reason, 'error');
+});
+
+test('GAP-002 НЕ host-block: plain Error с текстом "HTTP 403" (не HttpError) → inconclusive', async () => {
+  const probe = {
+    id: 'collaps',
+    recordByKeys: async () => { throw new Error('HTTP 403'); },
+    client: { search: async () => [] }
+  };
+  const v = await nativeProbe(probe, { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, true);
+  assert.equal(v.inconclusive, true);
+  assert.equal(v.reason, 'error');
+});
+
+test('GAP-002 self-heal: host-block → hidden; следующий успешный probe → show:true', async () => {
+  let mode = 'blocked';
+  const probe = {
+    id: 'collaps',
+    recordByKeys: async () => {
+      if (mode === 'blocked') throw new HttpError(422, 'collaps_http_error', 'Collaps HTTP 422');
+      return { provider: 'collaps', type: 'movie' };
+    },
+    client: { search: async () => [] }
+  };
+
+  // Фаза 1: embed-хост блокирует egress → authoritative «нет» (источник скрыт).
+  const v1 = await nativeProbe(probe, { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v1.show, false);
+  assert.equal(v1.authoritative, true);
+  assert.equal(v1.reason, 'host-block');
+
+  // Egress восстановлен: СЛЕДУЮЩАЯ проба (тот же код, без перезапуска) → found → show:true.
+  mode = 'ok';
+  const v2 = await nativeProbe(probe, { imdb_id: 'tt0109830' }, {}, FUTURE_DEADLINE);
+  assert.equal(v2.show, true);
+  assert.equal(v2.authoritative, true);
+  assert.equal(v2.reason, 'found');
+  assert.equal(v2.inconclusive, undefined, 'после восстановления источник определённо видим');
 });
