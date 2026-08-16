@@ -82,6 +82,79 @@ test('validateProxyTarget: http только из явного httpAllowHosts', 
     (e) => e instanceof HttpError && e.statusCode === 400);
 });
 
+// KODIK-PLAYBACK-FIX-001: CDN-хост Kodik — sky.solodcdn.com / cloud.solodcdn.com
+// и динамические serving-ноды (*.sky.solodcdn.com / *.cloud.solodcdn.com) через
+// 302-редирект. Один корневой суффикс solodcdn.com покрывает корень и все
+// поддомены (suffix-match); без него — 403 proxy_host_forbidden (исходный кейс).
+test('isHostAllowed: solodcdn.com покрывает корень и все serving-ноды Kodik-CDN (KODIK-PLAYBACK-FIX-001)', () => {
+  const allow = ['solodcdn.com'];
+  // Корни и serving-ноды редиректов (проверены live в аудите).
+  for (const host of [
+    'solodcdn.com',
+    'sky.solodcdn.com',
+    'cloud.solodcdn.com',
+    'loki.sky.solodcdn.com',
+    'hydrus.sky.solodcdn.com',
+    'rubidium.sky.solodcdn.com',
+    'anteros.sky.solodcdn.com',
+    'falcon.cloud.solodcdn.com',
+    'iridium.cloud.solodcdn.com',
+    'prism.cloud.solodcdn.com',
+    'orange.cloud.solodcdn.com',
+    'pegasus.cloud.solodcdn.com',
+    'noise.cloud.solodcdn.com'
+  ]) {
+    assert.equal(isHostAllowed(host, allow), true, `${host} должен быть разрешён`);
+  }
+  // Чужие суффиксы — НЕ разрешаются (straddle/registrar-атаки).
+  for (const host of [
+    'solodcdn.com.attacker.com',
+    'evil-solodcdn.com',
+    'solodcdn.com.evil',
+    'attacker.solodcdn.example.com',
+    'notsolodcdn.com',
+    'solodcdn.com.evil.com'
+  ]) {
+    assert.equal(isHostAllowed(host, allow), false, `${host} должен быть отклонён`);
+  }
+});
+
+test('validateProxyTarget: Kodik-CDN цели проходят, чужой хост 403 (KODIK-PLAYBACK-FIX-001)', () => {
+  const allow = ['solodcdn.com'];
+  // Мастер/variant/segment — все под solodcdn.com.
+  for (const url of [
+    'https://sky.solodcdn.com/movies/aaaa/mmanifest.m3u8',
+    'https://cloud.solodcdn.com/useruploads/bbb/seg-1-v1-a1.ts',
+    'https://loki.sky.solodcdn.com/animes/ccc/720.mp4:hls:manifest.m3u8'
+  ]) {
+    assert.ok(validateProxyTarget(url, allow), `${url} должен пройти`);
+  }
+  // Чужой хост — 403, хотя выглядит «похоже».
+  assert.throws(() => validateProxyTarget('https://evil-solodcdn.com/x.m3u8', allow),
+    (e) => e instanceof HttpError && e.statusCode === 403 && e.code === 'proxy_host_forbidden');
+  assert.throws(() => validateProxyTarget('https://solodcdn.com.attacker.com/x.m3u8', allow),
+    (e) => e instanceof HttpError && e.statusCode === 403 && e.code === 'proxy_host_forbidden');
+});
+
+// KODIK-PLAYBACK-FIX-001: SSRF-гейт остаётся прежним — loopback/private/metadata НЕ
+// пропускаются https-allowlist'ом (solodcdn.com не открывает никаких внутренних адресов).
+test('validateProxyTarget: внутренние адреса блокируются, несмотря на allowlist-CDН (KODIK-PLAYBACK-FIX-001)', () => {
+  const allow = ['solodcdn.com'];
+  for (const url of [
+    'https://127.0.0.1/x.m3u8',
+    'https://localhost/x.m3u8',
+    'https://10.0.0.1/x.m3u8',
+    'https://172.16.0.1/x.m3u8',
+    'https://192.168.1.1/x.m3u8',
+    'https://169.254.169.254/latest/meta-data',
+    'https://[::1]/x.m3u8'
+  ]) {
+    assert.throws(() => validateProxyTarget(url, allow),
+      (e) => e instanceof HttpError && e.statusCode === 403 && e.code === 'proxy_host_forbidden',
+      `${url} должен быть отклонён (SSRF)`);
+  }
+});
+
 function startTestServer() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
