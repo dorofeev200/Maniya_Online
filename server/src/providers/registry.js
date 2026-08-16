@@ -30,7 +30,7 @@ const EO_TITLES = {
   kinoteatrkg: 'Maniya · KinoteatrKG',
   solntse: 'Maniya · Solntse',
   rutubemovie: 'Maniya · RutubeMovie',
-  vkmovie: 'Maniya · VKMovie',
+  vkmovie: 'Maniya · RUmovie-1',
   geosaitebi: 'Maniya · GeoVideo',
   aniliberty: 'Maniya · AniLiberty',
   // BALANCER-002: rhsprem — live probe 2026-08-13: data-json=true на online3 (REST).

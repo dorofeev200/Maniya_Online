@@ -59,7 +59,7 @@ export const PROVIDER_META = {
   cdnvideohub: { name: 'CDNVideo', icon: '☁️', qualityLabel: '4K' },
   collaps: { name: 'Collaps', icon: '🧩', qualityLabel: 'Full HD' },
   kinoteatrkg: { name: 'KinoteatrKG', icon: '🎭', qualityLabel: 'Full HD' },
-  vkmovie: { name: 'VKMovie', icon: '▶️', qualityLabel: 'Full HD' }
+  vkmovie: { name: 'RUmovie-1', icon: '▶️', qualityLabel: 'Full HD' }
 };
 
 /** Нейтральный fallback-значок для неизвестного источника (требование 8). */
