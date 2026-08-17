@@ -108,7 +108,9 @@ async function main() {
   console.log('\n=== B. DIRECT CLUSTER: OUR account vs E-ONLINE account (online3) ===');
   for (const balancer of ['alloha', 'filmix', 'rezka', 'videoseed', 'kinoflix', 'veoveo', 'pidtor', 'hdvb']) {
     await directClusterProbe(balancer, email, process.env.SKAZ_UID || process.env.EO_UID || '', 'OUR');
-    await directClusterProbe(balancer, 'nazarov6@gmail.com', 'dg4xu2tj', 'E-ONLINE');
+    // SECURITY-001: сравнение с «E-ONLINE»-аккаунтом убрано — учётка снята/мертва,
+    // креды не хранятся. При необходимости — задать через env EO_ACCOUNT_EMAIL/EO_UID.
+    await directClusterProbe(balancer, process.env.EO_ACCOUNT_EMAIL || '<unset>', process.env.EO_UID || '', 'E-ONLINE');
   }
   process.exit(0);
 }

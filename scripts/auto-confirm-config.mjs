@@ -1,8 +1,8 @@
 // Конфиг для auto-confirm.mjs: типовой набор тайтлов и источников.
-// TOKEN подставляется из env или берётся тут (реальный пользовательский токен,
-// в git не коммитится — для локальных прогонов через env TOKEN=...).
+// SECURITY-001: TOKEN берётся ТОЛЬКО из env PROD_TOKEN (см. _creds.mjs).
+// Никаких реальных токенов в этом файле.
 export const config = {
-  TOKEN: 'mo-54f4ada00dc5bd8ed3b03cfdc9c00227',
+  TOKEN: process.env.PROD_TOKEN || '',
   CONCURRENCY: 4,
   TIMEOUT_MS: 25000,
   MOVIES: [

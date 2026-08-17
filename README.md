@@ -66,8 +66,9 @@ TOKEN=YOUR_REAL_TOKEN ./scripts/verify-remote.sh
 Reproducible deploy / backup / restore (no `rsync` on the Windows side — uses tar-over-SSH):
 
 ```bash
+# SECURITY-001: пароль — только из env VPS_PASSWORD (не хранится в git).
 export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=dummy:0
-printf '#!/bin/sh\necho "root_password"\n' > /tmp/askpass.sh   # recreate before each deploy
+printf '#!/bin/sh\necho "$VPS_PASSWORD"\n' > /tmp/askpass.sh   # recreate before each deploy
 
 # Deploy code + infra (systemd/nginx/tls). Does NOT overwrite remote server/.env or server/data.
 bash scripts/deploy.sh

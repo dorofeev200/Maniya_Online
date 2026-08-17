@@ -163,8 +163,9 @@ E2E). Плагин использует их для `externalids` и интер�
 ### Что показала деобфускация
 - `_0x49e98d = "dg4x у2tj"`; `Lampa.Storage.set("lampac_unic_id", _0x49e98d)` —
   **uid ЗАХАрдкожен константой в код плагина** (не генерируется, не регистрируется).
-- `account_email = "nazarov6@gmail.com"` — единственный email в дампе кода
+- `account_email = "<REDACTED: захардкоженная учётка upstream>"` — единственный email в дампе кода
   (захардкожен; берётся из `Storage.get('account_email','')`, пишется в каждый URL).
+  *(Значение удалено из git — SECURITY-001.)*
 - `cub_id = Lampa.Utils.hash(account_email)` — привязка к подписке (cub/lp).
 
 **Что показал живой probe (VPS, один и тот же запрос lite/filmix Интерстеллар):**
@@ -213,8 +214,10 @@ E2E). Плагин использует их для `externalids` и интер�
 
 ### A. Что доказано КОДОМ
 - `_0x267bd9()` — единая точка вставки auth в любой URL:
-  `account_email=nazarov6@gmail.com` (захардкожен как строка `encodeURIComponent("nazarov6@gmail.com")`);
-  `uid=Storage.get('lampac_unic_id')` (значение dg4xu2tj записывает `Storage.set` в инициализации).
+  `account_email=<REDACTED: захардкоженная учётка upstream>` (захардкожен как строка
+  `encodeURIComponent("…")`; значение удалено из git — SECURITY-001);
+  `uid=Storage.get('lampac_unic_id')` (захардкоженное значение записывает `Storage.set` в инициализации;
+  значение удалено из git — SECURITY-001).
 - В деобе **вовсе нет** `register/create/login/sync/activate/createAccount/аккаунт-UI`
   (grep «register», «login», «sync», «create» отвечают только DOM/map; «activate» — пусто).
 - `account_email`/`unic_id`/`profile_id` читаются из `Lampa.Storage`, `nws_id` — из RCH.

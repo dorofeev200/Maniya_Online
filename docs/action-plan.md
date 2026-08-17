@@ -88,8 +88,9 @@
   **мгновенный 404 `video_not_found`** на Play (без единого сетевого запроса). До фикса live:
   `skaz-rezka→404/0.002s`, `skaz-alloha→200/0.816s`. Вчера стабильно потому, что eager отдавал `method=play`
   (прямой URL) — `/api/lampa/video` не вызывался.
-- **Исключено данными**: аккаунт skaz = тот же, что у работающего E-Online (`nazarov6@gmail.com`/`dg4xu2tj`,
-  из /proc/PID/environ) — НЕ причина; ротация хостов стабильна (20/20 videos 200, 20/20 getLite 200);
+- **Исключено данными**: аккаунт skaz = тот же, что у работающего E-Online (захардкоженная учётка
+  в upstream-плагине — значение в git удалено SECURITY-001) — НЕ причина; ротация хостов стабильна
+  (20/20 videos 200, 20/20 getLite 200);
   nav cache корректен (дескриптор перезапрашивается на Play, подписанные URL ~24ч ≫ TTL 5 мин);
   плагин-404 = боты (реальные загрузки юзеров 200/41889B); nginx 404 = только боты.
 - **ФИКС (минимальный, `9f9daf6`, задеплоен)**: `registry.js` — новый `allProviders()` (native + ВСЕ skaz,
@@ -461,8 +462,9 @@
   online3/8.skaz.tv, cf 188.114.*). `cors/check` 200, `lite/events?life=true` 200.
 - **Вывод:** наш EoClient/EoProvider ходит **напрямую на skaz-кластер** (`lite/<balancer>`) — это и есть
   «другой сервер», из которого всё берётся; плагин-вход только посредник, смена его IP не требует
-  изменений в коде. Токены `account_email=nazarov6@gmail.com`/`uid=dg4xu2tj` живут в `server/.env`
-  (EO_ACCOUNT_EMAIL/EO_UID), из вход-скрипта наружу они НЕ читаются. Обновлено: `docs/action-plan.md`
+  изменений в коде. Токены `account_email`/`uid` живут в `server/.env`
+  (EO_ACCOUNT_EMAIL/EO_UID; значения в git удалены SECURITY-001), из вход-скрипта наружу они
+  НЕ читаются. Обновлено: `docs/action-plan.md`
   (этот блок) + `E-ONLINE-REPORT.md` (источник — новый вход). Диагностические скрипты `diag-eo-*.mjs`
   остались в `C:\tmp\showy`, в git не коммитятся.
 - **TODO-future:** если балансеры снова слетят — проверять `:8085/check` на входном IP напрямую
@@ -538,8 +540,9 @@
 cd C:/Users/Admin/Maniya_Online/server && NODE_ENV=test node --test
 
 # <-- Инфраструктура SSH (Windows-сторона, без rsync):
+# SECURITY-001: пароль берётся ТОЛЬКО из env VPS_PASSWORD (не хранится в git).
 export SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=dummy:0
-printf '#!/bin/sh\necho "789zxc789"\n' > /tmp/askpass.sh   # пересоздать перед деплоем
+printf '#!/bin/sh\necho "$VPS_PASSWORD"\n' > /tmp/askpass.sh   # пересоздать перед деплоем (VPS_PASSWORD задаётся вручную)
 
 # Деплой кода + инфраструктуры (tar-over-SSH; .env/data НЕ трогает):
 bash scripts/deploy.sh

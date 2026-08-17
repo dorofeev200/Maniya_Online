@@ -277,5 +277,74 @@ NODE_ENV=test BURST_CARDS=20 BURST_DELAY_MS=100 node test-helpers/stability-004-
 
 Фикс минимален (одна ветка в `attempt()`), изолирован, процесс-уровень доказан и в OLD
 (краш воспроизведён 20/20 orphan) и в NEW (0 orphan, exit 0), вердикты availability
-идентичны, полный прогон без регрессий. Ничего не закоммичено, не запушено, не задеплоено.
-Следующий шаг — по отдельному одобрению: commit → backup, деплой, live-verify.
+идентичны, полный прогон без регрессий.
+
+---
+
+## 17. PRODUCTION (задеплоено 2026-08-15)
+
+По отдельному одобрению выполнен production release.
+
+### 17.1 Commit + push
+- Commit **`e5561b7`** — ровно 6 файлов (625 insertions / 1 deletion):
+  `server/src/availability.js`, `server/test/stability-004.test.js`,
+  `server/test-helpers/stability-004-child.mjs`, `stability-004-old-attempt-child.mjs`,
+  `stability-004-burst-child.mjs`, `docs/stability-004-orphan-promise-report.md`.
+- `api.test.js` и все прочие pre-existing изменения (README/docs/scripts) в коммит НЕ вошли.
+- Push: **только** `backup` → `b536466..e5561b7 gap-012-veoveo`
+  (github.com/dorofeev200/Maniya_Online_backup.git). **origin НЕ тронут**
+  (ветки `gap-012-veoveo` на origin нет; push выполнялся только в `backup`).
+
+### 17.2 Деплой
+`scripts/deploy.sh` → root@95.85.241.121, рестарт `maniya-online` 18:12:22.
+
+| Проверка | Результат |
+|----------|-----------|
+| service | `active` + `enabled`, **NRestarts=0** (ни одного падения/рестарта после деплоя), PID 1906781 (старт 18:12:22) |
+| /health | **200** за 0.144s |
+| journal после рестарта | чистый: shutdown_completed → Started → `server_started` → `/health 200`; **unhandledRejection/uncaughtException = 0** |
+| новые 5xx после рестарта | **0** (последние строки access.log: 200; один 404 `/SDK/webLanguage` — Lampa SDK-путь, не наш, не 5xx) |
+| deployed availability.js = commit | **sha256 `2c20eefe…` идентичен локальному**; строка 467 `promise.catch(() => {})` на месте |
+| process-level regression (NEW) | exit 0, `RESULT:error:show=true`, **ORPHANS:0** |
+| process-level negative control | exit 1, `ORPHAN:Collaps HTTP 422`, **ORPHANS:1** (харнесс ловит регрессию) |
+| burst/stress (20 карточек) | `CARDS:20 VERDICTS:all-inconclusive ORPHANS:0`, exit 0 |
+
+### 17.3 Availability semantics НЕ изменились (production)
+- Задеплоенный файл **побайтово идентичен** локально протестированному (sha256 совпал) —
+  все вердикты (host-block 422 до дедлайна, timeout→inconclusive, normal found/absent)
+  подтверждены тестами 7–10 на этом же коде.
+- Живая карточка на проде возвращает структурированный JSON (гейт подписки
+  `403 subscription_required` — ожидаемое поведение, не 5xx; сервер работает).
+- GAP-013, Collaps visibility/ID-route, HIDE_TTL, single-flight, provider/registry/meta/UI
+  — не менялись (коммит содержит только 6 файлов STABILITY-004).
+
+### 17.4 Identity источников (по provider ID, НЕ по display name)
+Живой `/api/lampa/sources` (валидный токен, на VPS, токен не выводился), 16 источников:
+
+```
+filmix  → Filmix         | kodik  → Kodik          | rezka  → For Serial
+rutubemovie → Rutube     | cdnvideohub → CDNVideo  | collaps → Collaps
+hdvb    → XDVB           | skaz-alloha → Allo-XA   | skaz-videoseed → VideoS
+skaz-kinopub → Lime      | skaz-kinoflix → KinoFlix | skaz-veoveo → Ozvuchky
+skaz-pidtor → PidTor     | skaz-solntse → Solntse   | skaz-geosaitebi → GeoVideo
+skaz-rhsprem → HDRezka 4K
+```
+
+- **VeoVeo присутствует: provider ID `skaz-veoveo`, display name «Ozvuchky»** — это и есть
+  пример identity ≠ presentation (в Skaz-универсуме имя «Ozvuchky», ID стабильный) — НЕ регрессия.
+- Все 16 по ID на месте, все `show=true`, дублей нет, качество-метки не изменились.
+- Display names между Skaz/E-Online/Maniya могут отличаться — по ID всё стабильно.
+
+### 17.5 Cleanup / безопасность
+- Локальный scratch `stability004-old` удалён; VPS `/tmp`: наших артефактов (src.json,
+  card.json, sources.json) нет — удалены в сессии.
+- В `/tmp` VPS найдены **pre-existing файлы прошлых сессий** (не STABILITY-004):
+  `eo-rezka2.html`, `pv-d.body`, `pv-b.body`, `v1.txt`, `v3.txt`, `direct-plugin.js`,
+  `Lampac-main/`, `shadow-fix/src/config.js*` — помечаются как вне scope этой задачи,
+  их удаление требует отдельного решения.
+- Реальные токены/пароли в выводе не появлялись; `api.ortified.ws` egress не менялся.
+
+### 17.6 Итог production
+STABILITY-004 **задеплоено и live-подтверждено**: процесс переживает поздние rejection-ы
+(0 unhandled, 0 NRestarts), вердикты availability и identity источников не изменились.
+Производство стабильно. Следующая задача (GAP-013 и др.) — только по отдельному одобрению.

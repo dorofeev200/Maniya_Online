@@ -2,7 +2,8 @@
 // Read-only, run on VPS: node scripts/p1b-live-test.mjs
 
 const BASE = 'http://127.0.0.1:3000';
-const TOKEN = 'mo-54f4ada00dc5bd8ed3b03cfdc9c00227';
+// SECURITY-001: TOKEN — только из env PROD_TOKEN (см. _creds.mjs).
+const TOKEN = process.env.PROD_TOKEN || '';
 
 // Interstellar — known to work with alloha
 const MOVIE = {
