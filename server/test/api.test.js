@@ -76,7 +76,9 @@ describe('Maniya Online API', () => {
     // M-Online badge: данные из реальной подписки, не хардкод.
     assert.equal(body.authorized, true);
     assert.equal(typeof body.days_left, 'number');
-    assert.match(body.subscription_text, /^Осталось \d+ дней$/);
+    // Склонение зависит от числа (status.js pluralDays): «день/дня/дней».
+    // Хардкод «дней» ломался на date-drift (expires 2099-12-31 → 26801 день).
+    assert.match(body.subscription_text, /^Осталось \d+ (день|дня|дней)$/);
   });
 
   it('subscription/check: tz=MSK сдвигает календарный день у полуночи (23:59Z=01:59 MSK)', async () => {
@@ -84,7 +86,7 @@ describe('Maniya Online API', () => {
     const msk = await fetch(`${base}/api/lampa/subscription/check?token=unit-test-token&tz=-180`).then((r) => r.json());
     // expires_at = 2099-12-31T23:59:59Z: в UTC-календаре это 31.12, в MSK — уже 01.01.2100.
     assert.equal(msk.days_left, utc.days_left + 1);
-    assert.match(msk.subscription_text, /^Осталось \d+ дней$/);
+    assert.match(msk.subscription_text, /^Осталось \d+ (день|дня|дней)$/);
   });
 
   it('subscription/check: неавторизованный → authorized=false без текста для badge', async () => {
