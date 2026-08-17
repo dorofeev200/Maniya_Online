@@ -396,7 +396,8 @@ export const NATIVE_PROBES = {
       return Boolean(Array.isArray(root?.items) && root.items.length);
     }
   },
-  // Карточные ключи: kp → imdb → orid (recordByKeys) или поиск по названию.
+  // Канон-identity (kp → imdb → orid), при их отсутствии — title→search+bestMatch
+  // с кэшем (COLLAPS-SHAPE-FIX-001): вердикт = playable по ТОЙ ЖЕ identity, что /videos.
   collaps: {
     hasKey: (query) => Boolean(
       Number(query.kinopoisk_id || query.kp || 0) || 0
@@ -405,17 +406,14 @@ export const NATIVE_PROBES = {
       || String(query.title || '').trim()
     ),
     async present(provider, query, requestContext) {
-      const cardKey = Number(query.kinopoisk_id || query.kp || 0) || 0
-        || String(query.imdb_id || query.imdb || '').trim()
-        || Number(query.orid || query.id || 0) || 0;
-      if (cardKey) {
-        // recordByKeys: embed-страница → запись или null; бросает HttpError на ошибке.
-        const record = await provider.recordByKeys(query, requestContext);
-        return Boolean(record);
-      }
-      // Только название: поиск по списку. Пустой results = «нет».
-      const root = await provider.client.search(String(query.title || '').trim()); // бросает на ошибке
-      return Boolean(root && Array.isArray(root.results) && root.results.length);
+      // COLLAPS-SHAPE-FIX-001: вердикт карточки = playable по КАНОНИЧЕСКОЙ identity,
+      // прогоняемой тем же путём, что /videos (recordByKeys → resolveIdentity:
+      // kp→imdb→orid, иначе title→search+bestMatch с кэшем → embed). Раньше title-only
+      // ветка судила по «results.length» поиска, а /videos выбирал другую запись/route →
+      // show:true + «видео не найдено» (COLLAPS-SHAPE). 404/422/сеть из embed уходят в
+      // httpError → nativeProbe классифицирует (host-block/inconclusive) как и для карточек с ключом.
+      const record = await provider.recordByKeys(query, requestContext);
+      return Boolean(record);
     }
   }
 };

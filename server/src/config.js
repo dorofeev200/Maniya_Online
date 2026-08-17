@@ -158,7 +158,7 @@ export const config = {
   collaps: {
     enabled: bool('COLLAPS_ENABLED', true),
     apihost: (process.env.COLLAPS_API_HOST || 'https://api.bhcesh.me').replace(/\/+$/, ''),
-    embedHost: (process.env.COLLAPS_EMBED_HOST || 'https://api.ortified.ws').replace(/\/+$/, ''),
+    embedHost: (process.env.COLLAPS_EMBED_HOST || 'https://api.luxembd.ws').replace(/\/+$/, ''),
     // Публичный токен зашит в Lampac = поведенческий реф, но по соглашению
     // выносим в config. Задать COLLAPS_TOKEN (иначе enabled()=false).
     token: (process.env.COLLAPS_TOKEN || '').trim()

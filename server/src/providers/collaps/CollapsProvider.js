@@ -8,6 +8,14 @@ import { searchNameTo } from '../shared/normalize/searchNameTo.js';
 // Референс для потока — поток-референс kinokrad (как Lampac headers_stream).
 const STREAM_REFERER = 'https://kinokrad.my/';
 
+// COLLAPS-SHAPE-FIX-001: canonical identity для (title|year) кэшируется, чтобы
+// search/card и последующий /videos использовали ИДЕНТИЧНЫЙ маршрут embed. Без кэша
+// title-only /videos повторно запускал client.search + bestMatch и мог выбрать другую
+// запись/route (или упасть в каскад поисков), тогда как карточка показывала «FOUND»
+// по первому поиску — отсюда «видео не найдено» при show:true.
+const IDENTITY_CACHE_TTL_MS = 30 * 60 * 1000; // 30 мин
+const IDENTITY_CACHE_MAX = 256;
+
 /**
  * Провайдер Collaps — перенос Lampac OnlineRUS/Collaps.
  *
@@ -25,6 +33,9 @@ export class CollapsProvider extends Provider {
     this.enabledFlag = enabled;
     this.client = client || new CollapsClient({ apihost, embedHost, token });
     this.normalizer = normalizer || new CollapsNormalizer();
+    // COLLAPS-SHAPE-FIX-001: кэш канон-identity (title|year) → {kp, imdb, orid, embedHost}.
+    // Инстанс-кэш безопасен: identity — данные, а не токен; TTL/размер ограничены.
+    this.identityCache = new Map();
   }
 
   name() {
@@ -50,6 +61,12 @@ export class CollapsProvider extends Provider {
 
     try {
       const root = await this.client.search(title);
+      // COLLAPS-SHAPE-FIX-001: search предзаполняет кэш канон-identity для (title|year) —
+      // последующий title-only /videos для найденной карточки идёт по ТОМУ ЖЕ маршруту
+      // (kp→imdb→orid + embedHost из iframe_url) БЕЗ повторного поиска и без расхождения
+      // «card FOUND → videos другая запись/route». Клочок bestMatch дешёвый (без сети).
+      const match = root ? this.bestMatch(root, query) : null;
+      if (match) this.rememberIdentity(query, this.identityFromMatch(match));
       return this.normalizer.search(root, query);
     } catch {
       return [];
@@ -210,8 +227,10 @@ export class CollapsProvider extends Provider {
   }
 
   /**
-   * Каноническая identity Collaps: явные kp/imdb/orid → иначе поиск по названию
-   * и выбор лучшего совпадения (bestMatch). Возвращает однородный объект.
+   * Каноническая identity Collaps: явные kp/imdb/orid (прямой маршрут, БЕЗ кэша);
+   * title-only — из кэша (search/card/probe уже резолвили ТУ ЖЕ запись) либо
+   * однократный search+bestMatch с записью в кэш. Возвращает однородный объект.
+   * query.id (TMDB) в identity НЕ участвует (COLLAPS-ID-ROUTE).
    */
   async resolveIdentity(query = {}, requestContext = null) {
     const kinopoiskId = Number(query.kinopoisk_id || query.kp || 0) || 0;
@@ -224,16 +243,62 @@ export class CollapsProvider extends Provider {
     const title = String(query.title || '').trim();
     if (!title) return null;
 
+    // COLLAPS-SHAPE-FIX-001: «НЕ делать повторный title-search в /videos, если
+    // identity уже известна». Сначала кэш — ТОТ ЖЕ route, что дал карточке playable.
+    const cached = this.cachedIdentity(query);
+    if (cached) return cached;
+
     const root = await this.client.search(title);
     const match = this.bestMatch(root, query);
     if (!match) return null;
 
+    const identity = this.identityFromMatch(match);
+    this.rememberIdentity(query, identity);
+    return identity;
+  }
+
+  /**
+   * Идентичность из записи поиска: kp → imdb → orid. Presentation (iframe_url,
+   * display-name) в identity НЕ участвует: embed-хост задаёт конфиг/env
+   * (COLLAPS_EMBED_HOST) / дефолт клиента — как в Lampac (Invoke.Embed берёт
+   * conf.host и игнорирует iframe_url). GAP-013: iframe_url до сих пор указывает
+   * на вымерший api.ortified.ws — пининг по нему навсегда ломал бы playback.
+   */
+  identityFromMatch(match = {}) {
     return {
       kinopoiskId: Number(match.kinopoisk_id || 0) || 0,
       imdbId: match.imdb_id || '',
       orid: Number(match.id || 0) || 0,
       embedHost: match.embedHost || ''
     };
+  }
+
+  /** Кэш-ключ title-only identity: нормализованный title + год. */
+  identityCacheKey(query = {}) {
+    const title = searchNameTo(String(query.title || '')).trim();
+    const year = Number(query.year) || 0;
+    return title ? `${title}|${year}` : '';
+  }
+
+  cachedIdentity(query = {}) {
+    const key = this.identityCacheKey(query);
+    if (!key) return null;
+    const entry = this.identityCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.at > IDENTITY_CACHE_TTL_MS) {
+      this.identityCache.delete(key);
+      return null;
+    }
+    return entry.identity;
+  }
+
+  rememberIdentity(query = {}, identity = null) {
+    const key = this.identityCacheKey(query);
+    if (!key || !identity) return;
+    if (this.identityCache.size >= IDENTITY_CACHE_MAX) {
+      this.identityCache.delete(this.identityCache.keys().next().value);
+    }
+    this.identityCache.set(key, { identity, at: Date.now() });
   }
 
   /**

@@ -256,8 +256,8 @@ test('nativeProbe collaps: recordByKeys бросает (сеть) → inconclusi
   assert.equal(v.reason, 'error');
 });
 
-test('nativeProbe collaps: только название + результаты → show; пусто → «нет»', async () => {
-  const found = collapsStub({ searchResults: [{ id: 1, name: 'X' }] });
+test('nativeProbe collaps: только название + играбельная канон-запись → show; пусто → «нет»', async () => {
+  const found = collapsStub({ record: { provider: 'collaps', type: 'movie' }, searchResults: [{ id: 1, name: 'X' }] });
   const v1 = await nativeProbe(found, { title: 'Форрест Гамп' }, {}, FUTURE_DEADLINE);
   assert.equal(v1.show, true);
   assert.equal(v1.reason, 'found');
@@ -266,6 +266,18 @@ test('nativeProbe collaps: только название + результаты 
   const v2 = await nativeProbe(empty, { title: 'Форрест Гамп' }, {}, FUTURE_DEADLINE);
   assert.equal(v2.show, false);
   assert.equal(v2.reason, 'absent');
+});
+
+test('COLLAPS-SHAPE-FIX-001: title-only — search-карточки есть, но канон-route не открыл контент → «нет» (не FOUND)', async () => {
+  // COLLAPS-SHAPE: probe судил по results.length (client.search) → любой результат =
+  // FOUND/show:true, а /videos резолвил ДРУГУЮ identity/route → «видео не найдено».
+  // Теперь вердикт = recordByKeys (та же канон-identity + embed, что /videos):
+  // поиск нашёл карточки, но playable путь пуст → authoritative absent, не флап.
+  const ghost = collapsStub({ searchResults: [{ id: 1, name: 'Форрест Гамп' }] }); // record: null
+  const v = await nativeProbe(ghost, { title: 'Форрест Гамп' }, {}, FUTURE_DEADLINE);
+  assert.equal(v.show, false);
+  assert.equal(v.authoritative, true);
+  assert.equal(v.reason, 'absent');
 });
 
 test('nativeProbe: таймаут по дедлайну → inconclusive (show)', async () => {

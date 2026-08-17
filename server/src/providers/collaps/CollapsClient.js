@@ -2,7 +2,11 @@ import { HttpError } from '../../errors.js';
 import { defaultUserAgent } from '../shared/utils/UserAgent.js';
 
 const DEFAULT_APIHOST = 'https://api.bhcesh.me';
-const DEFAULT_EMBEDHOST = 'https://api.ortified.ws';
+// GAP-013: актуальный Lampac master (Modules/OnlineRUS/Collaps ModInit conf.host)
+// ходит на api.luxembd.ws; api.ortified.ws (старый дефолт и то, что отдаёт
+// iframe_url поиска) с 2026-08 закрыт на уровне сервера (422 0b для /embed/*).
+// Хост переопределяется env COLLAPS_EMBED_HOST (см. .env.example).
+const DEFAULT_EMBEDHOST = 'https://api.luxembd.ws';
 
 // Референр/Origin как Lampac ModInit (kinokrad). API возвращает 403 без них.
 const DEFAULT_HEADERS = {

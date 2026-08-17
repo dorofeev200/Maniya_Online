@@ -16,7 +16,7 @@ class FakeCollapsClient {
     this.enabledFlag = enabled;
     this.embedError = embedError;
     this.apihost = 'https://api.bhcesh.me';
-    this.embedHost = 'https://api.ortified.ws';
+    this.embedHost = 'https://api.luxembd.ws'; // GAP-013: актуальный Lampac master host
   }
 
   enabled() {
@@ -365,6 +365,82 @@ test('COL-6 подтверждённое отсутствие контента �
   const payload = await provider.videos({ query: { orid: 101, title: 'Дюна' } });
 
   assert.deepEqual(payload, { items: [], seasons: [], voices: [] });
+});
+
+// --- COLLAPS-SHAPE-FIX-001: канон-identity кэшируется, /videos не пересобирает маршрут ---
+
+test('COL-8 title-only /videos дважды → ОДИНАКОВЫЙ embed-маршрут, search НЕ повторяется', async () => {
+  // Второй /videos (тот же (title|year)) берёт identity из кэша, а не re-search —
+  // маршрут идентичен тому, что дал show:true первой карточке (shape-консистентность).
+  const client = new FakeCollapsClient({ searchData: SEARCH_ROOT, embedByKey: { 999: MOVIE_EMBED } });
+  const provider = new CollapsProvider({ client });
+
+  const first = await provider.videos({ query: { title: 'Дюна' } });
+  const second = await provider.videos({ query: { title: 'Дюна' } });
+
+  assert.equal(first.items.length, 1);
+  assert.equal(second.items.length, 1);
+  assert.equal(client.calls.filter(([name]) => name === 'search').length, 1,
+    'второй /videos использует кэш — повторного title-search нет');
+  const embeds = client.calls.filter(([name]) => name === 'embed').map(([, o]) => o);
+  assert.equal(embeds.length, 2);
+  assert.deepEqual(embeds[0], embeds[1], 'идентичный embed-маршрут (та же канон-identity)');
+});
+
+test('COL-9 search() предзаполняет кэш → title-only /videos идёт ТОЙ ЖЕ identity без repeat-search', async () => {
+  const client = new FakeCollapsClient({ searchData: SEARCH_ROOT, embedByKey: { 999: MOVIE_EMBED } });
+  const provider = new CollapsProvider({ client });
+
+  const records = await provider.search({ title: 'Дюна' });
+  assert.equal(records.length, 2);
+  assert.equal(client.calls.filter(([name]) => name === 'search').length, 1);
+
+  const payload = await provider.videos({ query: { title: 'Дюна' } });
+  assert.equal(payload.items.length, 1);
+  assert.equal(client.calls.filter(([name]) => name === 'search').length, 1,
+    'search() → /videos: поиск выполнен ровно ОДИН раз (вторая фаза из кэша)');
+  const embedCall = client.calls.find(([name]) => name === 'embed')[1];
+  assert.equal(embedCall.kinopoiskId, 999, 'канон-identity из карточки это kp, не display-name');
+  assert.equal(embedCall.orid, 101);
+  // GAP-013: identity embedHost НЕ пинится из iframe_url — fallback на дефолт/конфиг
+  // клиента (api.luxembd.ws). Иначе мёртвый host из карточки ломал бы playback навсегда.
+  assert.equal(embedCall.embedHost, undefined, 'embedHost решает клиент (дефолт/env), не iframe_url');
+});
+
+test('COL-10 кэш ключуется (title|year) → явные kp/imdb/orid по-прежнему прямой маршрут без кэша', async () => {
+  const client = new FakeCollapsClient({ searchData: SEARCH_ROOT, embedByKey: { 777: MOVIE_EMBED } });
+  const provider = new CollapsProvider({ client });
+
+  // Явный kp: identity известна СРАЗУ, клиент идёт по kp — search не вызывается вовсе.
+  const payload = await provider.videos({ query: { kinopoisk_id: 777, title: 'Дюна' } });
+  assert.equal(payload.items.length, 1);
+  assert.equal(client.calls.filter(([name]) => name === 'search').length, 0,
+    'explicit-key запрос НЕ делает title-search (identity уже дана карточкой)');
+  const embedCall = client.calls.filter(([name]) => name === 'embed')[0][1];
+  assert.equal(embedCall.kinopoiskId, 777);
+});
+
+test('COL-11 GAP-013: iframe_url НЕ пинит embed-host — fallback на дефолт/конфиг клиента', async () => {
+  // iframe_url поиска до сих пор указывает на вымерший api.ortified.ws (422 у егресса).
+  // Identity берёт kp→imdb→orid, а embed-host решает клиент (дефолт luxembd / env
+  // COLLAPS_EMBED_HOST) — как Lampac Invoke.Embed (conf.host, iframe_url игнорируется).
+  const rootWithDeadHost = {
+    total: 1,
+    results: [{
+      id: 55, name: 'Властелин колец', origin_name: 'The Lord of the Rings', year: 2001,
+      type: 'film', kinopoisk_id: 321, imdb_id: 'tt0120737',
+      iframe_url: 'https://api.ortified.ws/embed/movie/55'
+    }]
+  };
+  const client = new FakeCollapsClient({ searchData: rootWithDeadHost, embedByKey: { 321: MOVIE_EMBED } });
+  const provider = new CollapsProvider({ client });
+
+  const payload = await provider.videos({ query: { title: 'Властелин колец', year: 2001 } });
+  assert.equal(payload.items.length, 1);
+  const embedCall = client.calls.find(([name]) => name === 'embed')[1];
+  assert.equal(embedCall.orid, 55);
+  assert.equal(embedCall.embedHost, undefined,
+    'iframe_url не задаёт embed-host — host из клиента (api.luxembd.ws), иначе мёртвый ortified ломал бы playback');
 });
 
 test('COL-7 Collaps НЕ входит в Skaz: ни балансером, ни twin (архитектурный инвариант)', () => {
