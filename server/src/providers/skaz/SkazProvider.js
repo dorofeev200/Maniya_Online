@@ -15,6 +15,27 @@ import { SkazNormalizer } from './SkazNormalizer.js';
 const NAV_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
+ * PidTor-кластера отдаёт карточки-магнеты `/lite/pidtor/s<hex>?tr=<trackers>`:
+ * адаптер солокурактирующего торрент-гейта, ЧЕРЕЗ HTTP-прокси НЕ играется
+ * (попытка play → 502: `magnet:`-семантика не стримится). Такие карточки
+ * не должны светиться как «играбельные» (TASK-SOURCES-007). Прямые медиа
+ * (m3u8/mp4) этот предикат НЕ трогает.
+ */
+function isTorrentDescriptor(url = '') {
+  const s = String(url || '').trim();
+  if (!s) return false;
+  if (/^magnet:/i.test(s)) return true;
+  try {
+    const u = new URL(s);
+    // pathname `/lite/<balancer>/s<hex>` — торрент-магнет PidTor (трекеры в query
+    // НЕ обязательны: третья карточка не имела `tr=`, только account_email/uid).
+    return /\/lite\/[^/]+\/s[0-9a-f]{16,}$/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Провайдер одного skaz-балансера (filmix/alloha/rezka/videoseed/…).
  *
  * Это 1:1-порт `EoProvider` на SkazClient/SkazNormalizer (E-ONLINE-REPORT §9
@@ -133,7 +154,7 @@ export class SkazProvider extends Provider {
     let callIndex = 0;
 
     for (const card of cards) {
-      if (card.method === 'play') {
+      if (card.method === 'play' && !isTorrentDescriptor(card.url)) {
         items.push({
           method: 'play',
           title: this.normalizerCardTitle(card),
@@ -356,7 +377,7 @@ export class SkazProvider extends Provider {
       // (resolveSerialVideo), как в E-Online: НЕ резолвим все серии заранее.
       if (episode.method === 'play') {
         const url = episode.url || episode.stream;
-        if (!url) continue;
+        if (!url || isTorrentDescriptor(url)) continue;
         items.push({
           method: 'play',
           title: episode.title || `${episode.episode} серия`,
@@ -448,7 +469,7 @@ export class SkazProvider extends Provider {
     if (!card) return null;
     if (card.method === 'play') {
       const url = card.url || card.stream;
-      if (!url) return null;
+      if (!url || isTorrentDescriptor(url)) return null;
       return {
         method: 'play',
         title: this.normalizerCardTitle(card) || `${episode} серия`,
@@ -542,9 +563,9 @@ export class SkazProvider extends Provider {
     }
 
     const raw = String(card.stream || card.url || '').trim();
-    if (!raw) return null;
+    if (!raw || isTorrentDescriptor(raw)) return null;
     const streamUrl = await this.client.resolveStream(raw);
-    if (!streamUrl) return null;
+    if (!streamUrl || isTorrentDescriptor(streamUrl)) return null;
     return {
       method: 'play',
       title,
@@ -559,9 +580,9 @@ export class SkazProvider extends Provider {
 
   async resolveStream(card, requestContext) {
     const url = String(card.stream || card.url || '').trim();
-    if (!url) return null;
+    if (!url || isTorrentDescriptor(url)) return null;
     const final = await this.client.resolveStream(url);
-    if (!final) return null;
+    if (!final || isTorrentDescriptor(final)) return null;
     return final;
   }
 

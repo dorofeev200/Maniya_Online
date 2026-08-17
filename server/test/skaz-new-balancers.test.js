@@ -21,7 +21,9 @@ const { SkazProvider } = await import('../src/providers/skaz/SkazProvider.js');
 // Видимые skaz-балансеры (без native-дублей): реестр Maniya.
 // TASK-SOURCES-005 (2026-08-17): +zetflixdb/zagonka/xvideocdnultra — show:true в
 // live-deck withsearch И REST-контент (live-probe: карточки по 2 фильмам).
-const VISIBLE_SKAZ = ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'geosaitebi', 'rhsprem', 'zetflixdb', 'zagonka', 'xvideocdnultra'];
+// TASK-SOURCES-007 (2026-08-17): +filmixtv — live-probe: movie=4/serial=7 play
+// (CDN cdnsqu.com) через skaz-REST, в дефолтный список добавлен.
+const VISIBLE_SKAZ = ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'geosaitebi', 'rhsprem', 'zetflixdb', 'zagonka', 'xvideocdnultra', 'filmixtv'];
 
 // rch-reserved (WebSocket-only, Maniya REST не играет): НЕ в дефолтном списке.
 // TASK-SOURCES-005: kinotochka остаётся здесь — live-probe 2026-08-17 показал
@@ -63,7 +65,8 @@ test('TASK-SOURCES-005: 3 новых источника — правильные
   const expected = {
     'skaz-zetflixdb': 'Maniya · ZetflixDB',
     'skaz-zagonka': 'Maniya · Zagonka',
-    'skaz-xvideocdnultra': 'Maniya · XVideoCDN (Ultra)'
+    'skaz-xvideocdnultra': 'Maniya · XVideoCDN (Ultra)',
+    'skaz-filmixtv': 'Maniya · FilmixTV'
   };
   for (const [id, title] of Object.entries(expected)) {
     const provider = providerById(id);

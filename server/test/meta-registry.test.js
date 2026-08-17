@@ -48,7 +48,7 @@ test('meta: покрытие — все slags, которые реально в�
   // тест фиксирует, что основные рынки всё же описаны.
   const expected = [
     'alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse',
-    'filmix', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka',
+    'filmix', 'filmixtv', 'rezka', 'hdvb', 'rutubemovie', 'kodik', 'zagonka',
     'geosaitebi', 'videohub',
     'cdnvideohub', 'collaps', 'kinoteatrkg', 'vkmovie',
     'xvideocdn', 'vk', 'rutube', 'kinobase', 'turboserial', 'fancdn', 'mirage',

@@ -512,6 +512,34 @@ test('movie: kinopub (Lime) — link-карточки с postid → follow че�
   assert.ok(result.items.every((item) => item.voice_name), 'перевод не пуст');
 });
 
+test('movie: PidTor — magnet-карточки НЕ отдаются как play (HTTP-прокси их не стримит)', async () => {
+  const pidtorHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://online3.skaz.tv/lite/pidtor/s61065ea115b7cc3e8db9fb5ab1f6f327f08bd1c9?tr=http%3A%2F%2Fretracker.local%2Fannounce&tr=udp%3A%2F%2Ftorrent.by%3A2710","translate":"Дубляж","maxquality":"2160","title":"Матрица (Дубляж)"}\'>x</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://online3.skaz.tv/proxy/c356b5a5a2ef81bd63d4e058b6d3f05f.mp4","translate":"Дубляж","title":"Матрица"}\'>y</div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: pidtorHtml });
+  const provider = makeProvider(client, 'pidtor');
+
+  const result = await provider.videos(context({ title: 'Матрица', serial: '0' }));
+
+  // magnet-дескриптор (`/lite/pidtor/s<hex>?tr=…`) фильтруется, обычный play — остаётся.
+  assert.equal(result.items.length, 1, `magnet-карточка исключена, play остался: ${result.items.length}`);
+  assert.equal(result.items[0].method, 'play');
+  assert.ok(!String(result.items[0].url).includes('pidtor'), 'нет pidtor-magnet URL в items');
+});
+
+test('movie: PidTor — только magnet → items пуст (нет мусорного play-502)', async () => {
+  const pidtorHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://online3.skaz.tv/lite/pidtor/s61065ea115b7cc3e8db9fb5ab1f6f327f08bd1c9?tr=udp%3A%2F%2Ftorrent.by%3A2710","translate":"Дубляж","title":"Матрица"}\'>x</div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: pidtorHtml });
+  const provider = makeProvider(client, 'pidtor');
+
+  const result = await provider.videos(context({ title: 'Матрица', serial: '0' }));
+
+  assert.equal(result.items.length, 0, 'магнеты не светятся как play');
+});
+
 test('movie: сразу play-карточки — follow НЕ вызывается', async () => {
   const playHtml = [
     '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v.m3u8","quality":{"1080p":"http://h/1080.m3u8"},"title":"Х"}\'>Дубляж</div>'
