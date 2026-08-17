@@ -36,13 +36,26 @@ export class RutubeProvider extends Provider {
   async search(queryOrContext = {}, context = null) {
     if (!this.enabled()) return [];
 
-    const { title, year } = this.parseQuery(queryOrContext, context);
-    const searchTitle = searchNameTo(title);
-    if (!searchTitle || !year) return [];
+    const { title, year, originalTitle } = this.parseQuery(queryOrContext, context);
+    const searchKeys = dedupeKeys(title, originalTitle);
+    if (!searchKeys.length) return [];
 
     try {
-      const raw = await this.client.search({ title, year });
-      return this.normalizer.with({ searchTitle, year }).searchResults(raw);
+      // Multi-query: русское + оригинальное название. Сначала — с годом; если в
+      // yearful-выдаче НЕТ НИ ОДНОЙ сильной записи (bestScore < STRONG_SCORE) —
+      // повтор без года. Год в полях API отсутствует, полная копия может лежать
+      // под запросом без него: «Зелёная Миля» 6460с находится по «Зеленая миля»,
+      // а не по «Зеленая миля 1999» (там top-2 страниц дают пересказ/реакшн-шоу).
+      // Каждый вариант ограничен 2 страницами (RutubeClient.MAX_PAGES).
+      const normalizer = this.normalizer.with({ searchKeys, year });
+      const yearful = await this.client.searchAll(buildQueries(title, originalTitle, year));
+      let records = normalizer.searchResults(yearful);
+      if (year > 0 && normalizer.bestScore(yearful) < RutubeNormalizer.STRONG_SCORE) {
+        const yearless = await this.client.searchAll(buildQueries(title, originalTitle, 0));
+        const relaxed = normalizer.searchResults(yearless);
+        if (relaxed.length) records = relaxed;
+      }
+      return records;
     } catch {
       return [];
     }
@@ -126,9 +139,35 @@ export class RutubeProvider extends Provider {
     const requestContext = context || (queryOrContext?.query ? queryOrContext : undefined);
     const query = requestContext?.query || queryOrContext || {};
     const title = String(query.title || '');
+    const originalTitle = String(query.original_title || '');
     const year = Number(query.year || query.year) || 0;
-    return { title, year };
+    return { title, year, originalTitle };
   }
+}
+
+/** Уникальные нормализованные ключи сопоставления (рус. + оригинальное название). */
+function dedupeKeys(title, originalTitle) {
+  const keys = [];
+  for (const value of [title, originalTitle]) {
+    const key = searchNameTo(value);
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
+/** Варианты поискового запроса: рус.+ориг., с годом или без (максимум 2 строки). */
+function buildQueries(title, originalTitle, year) {
+  const queries = [];
+  const candidates = [];
+  for (const value of [title, originalTitle]) {
+    const text = String(value || '').trim();
+    if (text && !candidates.includes(text)) candidates.push(text);
+  }
+  for (const text of candidates) {
+    const query = year > 0 ? `${text} ${year}` : text;
+    if (!queries.includes(query)) queries.push(query);
+  }
+  return queries;
 }
 
 export default RutubeProvider;
