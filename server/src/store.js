@@ -125,25 +125,24 @@ export async function getVideosForRequest(context) {
   if (providers.length === 1 && videoProviders.length === 1) {
     const primaryProvider = videoProviders[0];
 
-    // Для сериалов native первым, skaz-близнец — фоллбэк. Близнец в serialVideos
-    // хардкодит quality:{} и теряет реальные названия серий (episode.title живёт
-    // только в native video-links) → «07 N серия» вместо «07 Название реальной
-    // серии» (FILMIX-004). Фильмы оставляем близнец-первым: мультиязычный контур
-    // skaz-кластера, качества 2160/1440/1080/720/480. Никогда не объединяем —
-    // либо twin, либо native (без дублей).
+    // Native первым (и для сериалов, и для фильмов), skaz-близнец — фоллбэк.
+    // FILMIX-004 (сериалы): близнец в serialVideos хардкодит quality:{} и теряет
+    // реальные названия серий (episode.title живёт только в native video-links)
+    // → «07 N серия» вместо «07 Название реальной серии».
+    // RUTUBE-HD-FIX-001 (фильмы): близнец-первая ветка отдавала `method:"call"`
+    // карточки skaz-<balancer> раньше рабочего native, а резолв call на кластере
+    // возвращал JSON `quality.auto:null` → клиент видел «не удалось получить
+    // ссылку» (rutubemovie: lite/rutubemovie почти везде 503/`disable`). Native
+    // для фильмов тоже играбелен (link-страницы play с реальными потоками);
+    // близнец остаётся фоллбэком, если native не дал items. Никогда не
+    // объединяем — либо twin, либо native (без дублей).
     const serialRequest = isSerialRequest(context.query);
     let chosen = null;
-    if (serialRequest) {
-      const native = await payloadOrNull(primaryProvider, context);
-      if (native?.items?.length) chosen = native;
-      else if (selected) chosen = await twinForPayload(selected, context);
-    } else {
-      const twin = selected ? await twinForPayload(selected, context) : null;
-      chosen = (twin?.items?.length)
-        ? twin
-        : (await payloadOrNull(primaryProvider, context))
-          || twin
-          || null;
+    const native = await payloadOrNull(primaryProvider, context);
+    if (native?.items?.length) {
+      chosen = native;
+    } else if (selected) {
+      chosen = await twinForPayload(selected, context);
     }
     if (chosen?.items?.length) {
       const body = { items: chosen.items, seasons: chosen.seasons || [], voices: chosen.voices || [] };

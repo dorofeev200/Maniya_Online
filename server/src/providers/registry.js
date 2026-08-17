@@ -118,8 +118,9 @@ const allSkazProviders = buildSkazProviders();
 const skazProviders = allSkazProviders.filter((provider) => provider.show);
 const providers = [...nativeProviders, ...skazProviders];
 // ВСЕ провайдеры, включая скрытые skaz-близнецы native-источников: они производят
-// `method:"call"` items (twin-first в store.js) и ОБЯЗАНЫ резолвиться через
-// `/api/lampa/video`, даже если не светятся в /sources (иначе Play → 404).
+// `method:"call"` items (native-first в store.js, близнец — фоллбэк при пустом native)
+// и ОБЯЗАНЫ резолвиться через `/api/lampa/video`, даже если не светятся в /sources
+// (иначе Play → 404).
 const allProviderInstances = [...nativeProviders, ...allSkazProviders];
 
 /** Скрытый skaz-близнец native-провайдера (id совпадает) или null. */

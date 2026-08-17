@@ -1,7 +1,8 @@
 // FILMIX-004 РЕГРЕССИЯ: сериал `provider=filmix&serial=1` обязан отдавать NATIVE
 // payload (реальные названия серий episode.title + voice_name + quality-карта),
 // а НЕ skaz-близнец, который в serialVideos хардкодит quality:{} и теряет
-// названия («07 N серия»). Фильмы остаются близнец-первыми — movie flow не меняем.
+// названия («07 N серия»). Фильмы так же native-first (RUTUBE-HD-FIX-001):
+// близнец — только фоллбэк при пустом native (см. store-movie-native-first.test.js).
 //
 // Каждый файл теста — отдельный процесс, поэтому env задаём до import'ов
 // (динамические import'ы после установки env, как в registry-twin.test.js).
@@ -92,14 +93,15 @@ test('FILMIX-004: сериал serial=1 → native первым, реальны�
   } finally { restore(); }
 });
 
-test('фильм (без serial) → близнец первым, как раньше (movie flow не меняем)', async () => {
+test('фильм (без serial) → native первым (RUTUBE-HD-FIX-001), близнец — только фоллбэк', async () => {
   const { calls, restore } = setup({ native: movieNative, twin: movieTwin });
   try {
     const body = await getVideosForRequest({
       query: { provider: 'filmix', id: '1567', title: 'Форрест Гамп', original_title: 'Forrest Gump', serial: '0', year: '1994' }
     });
-    assert.equal(body.items[0].title, 'movie twin 2160p', 'фильм берётся из skaz-близнеца (как до фикса)');
-    assert.ok(calls.twin >= 1, 'близнец вызван для фильма');
+    assert.equal(body.items[0].title, 'Дубляж [4K, SDR, ru, Movie Dubbing]',
+      'фильм берётся из native (native-first, RUTUBE-HD-FIX-001)');
+    assert.ok(calls.twin === 0, 'при живом native близнец для фильма не вызывается');
   } finally { restore(); }
 });
 
