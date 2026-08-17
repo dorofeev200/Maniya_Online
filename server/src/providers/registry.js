@@ -19,7 +19,6 @@ import { KinotochkaProvider } from './kinotochka/KinotochkaProvider.js';
 // fans-сериалы …) заведены в конфиге как зарезервированные (см. §10.5) и не светятся.
 const EO_TITLES = {
   filmix: 'Maniya · Filmix',
-  filmixtv: 'Maniya · FilmixTV',
   rezka: 'Maniya · Rezka',
   videoseed: 'Maniya · VideoSeed',
   hdvb: 'Maniya · HDVB',

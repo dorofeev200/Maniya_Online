@@ -21,9 +21,9 @@ const { SkazProvider } = await import('../src/providers/skaz/SkazProvider.js');
 // Видимые skaz-балансеры (без native-дублей): реестр Maniya.
 // TASK-SOURCES-005 (2026-08-17): +zetflixdb/zagonka/xvideocdnultra — show:true в
 // live-deck withsearch И REST-контент (live-probe: карточки по 2 фильмам).
-// TASK-SOURCES-007 (2026-08-17): +filmixtv — live-probe: movie=4/serial=7 play
-// (CDN cdnsqu.com) через skaz-REST, в дефолтный список добавлен.
-const VISIBLE_SKAZ = ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'geosaitebi', 'rhsprem', 'zetflixdb', 'zagonka', 'xvideocdnultra', 'filmixtv'];
+// TASK-SOURCES-FIX-008: filmixtv УДАЛЁН (дубликат Filmix) — не в дефолтном списке,
+// /api/lampa/sources не отдаёт отдельный Filmixtv.
+const VISIBLE_SKAZ = ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'geosaitebi', 'rhsprem', 'zetflixdb', 'zagonka', 'xvideocdnultra'];
 
 // rch-reserved (WebSocket-only, Maniya REST не играет): НЕ в дефолтном списке.
 // TASK-SOURCES-005: kinotochka остаётся здесь — live-probe 2026-08-17 показал
@@ -65,8 +65,7 @@ test('TASK-SOURCES-005: 3 новых источника — правильные
   const expected = {
     'skaz-zetflixdb': 'Maniya · ZetflixDB',
     'skaz-zagonka': 'Maniya · Zagonka',
-    'skaz-xvideocdnultra': 'Maniya · XVideoCDN (Ultra)',
-    'skaz-filmixtv': 'Maniya · FilmixTV'
+    'skaz-xvideocdnultra': 'Maniya · XVideoCDN (Ultra)'
   };
   for (const [id, title] of Object.entries(expected)) {
     const provider = providerById(id);
@@ -74,6 +73,12 @@ test('TASK-SOURCES-005: 3 новых источника — правильные
     assert.equal(provider.title, title, `${id} — display name`);
     assert.ok(provider instanceof SkazProvider, `${id} — SkazProvider`);
   }
+});
+
+test('TASK-SOURCES-FIX-008: filmixtv УДАЛЁН — дубликат Filmix, не регистрируется', () => {
+  assert.ok(!config.skaz.balancers.includes('filmixtv'), 'filmixtv не в дефолтном списке балансеров');
+  assert.equal(providerById('skaz-filmixtv'), null, 'skaz-filmixtv — НЕ зарегистрирован');
+  assert.ok(!allProviders().some((p) => p.id === 'skaz-filmixtv'), 'skaz-filmixtv — нет даже среди скрытых');
 });
 
 test('TASK-SOURCES-005: kinotochka НЕ регистрируется (live-probe: rch-only на кластере)', () => {

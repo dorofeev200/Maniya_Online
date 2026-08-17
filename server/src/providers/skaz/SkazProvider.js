@@ -85,22 +85,28 @@ export class SkazProvider extends Provider {
 
     const requestContext = context || (queryOrContext?.request || queryOrContext?.query ? queryOrContext : undefined);
     const query = requestContext?.query || queryOrContext || {};
+    // PARITY-009: canonical identity — та же, что уйдёт в /videos (buildPageParams).
+    // Поисковая запись и последующая навигация кластера обязаны сойтись на одном
+    // id (KP → числовой id → TMDB → imdb), иначе карточка/список и /videos
+    // разойдутся по источнику/роуту.
     const id = String(query.id || query.tmdb_id || '').trim();
     const imdbId = String(query.imdb_id || '').trim();
     const kinopoiskId = String(query.kinopoisk_id || '').trim();
+    const canon = canonicalId(query);
 
-    if (!id && !imdbId && !kinopoiskId) return [];
+    if (!id && !imdbId && !kinopoiskId && !canon) return [];
 
     const record = {
       provider: this.name(),
-      id: id || imdbId || kinopoiskId,
+      id: canon || id || imdbId || kinopoiskId,
       title: String(query.title || this.title),
       original_title: String(query.original_title || ''),
       year: query.year ? Number(query.year) : 0,
       type: this.serialQuery(query) ? 'serial' : 'movie',
-      poster: '',
+      poster: String(query.poster_path || query.poster || '').trim(),
+      backdrop: String(query.backdrop_path || query.backdrop || '').trim(),
       metadata: {
-        id,
+        id: canon || id,
         imdb_id: imdbId,
         kinopoisk_id: kinopoiskId
       }
@@ -126,7 +132,7 @@ export class SkazProvider extends Provider {
   buildPageParams(query = {}) {
     const serial = this.serialQuery(query);
     const params = {
-      id: String(query.id ?? ''),
+      id: canonicalId(query),
       imdb_id: String(query.imdb_id ?? ''),
       kinopoisk_id: String(query.kinopoisk_id ?? ''),
       title: String(query.title ?? ''),
@@ -710,6 +716,27 @@ function paramValueOf(url, key) {
   } catch {
     return null;
   }
+}
+
+/**
+ * PARITY-009: каноничный числовой id для кластера (единая identity во всей цепочке
+ * search → card → /videos → /video). Клиент шлёт `id` своего каталога (TMDB/KP/imdb),
+ * а балансеры кластера 503-ят на нечисловом id (`id=tt…`: zetflixdb/zagonka/solntse,
+ * live-probe 17.08) или матчатся только по KP-иду (solntse). Сводим к канону:
+ * KP (числовой) → числовой query.id → TMDB (числовой) → imdb (последний резерв —
+ * кластер может дать 503, но это единственная доступная идентичность). Реальный
+ * Lampac: у KP-синхронизированных юзеров movie.id = kinopoisk_id, поэтому канон
+ * совпадает с тем, что E-Online/Skaz видят в норме.
+ */
+function canonicalId(query = {}) {
+  const n = (v) => /^\d+$/.test(String(v || '').trim());
+  const kp = String(query.kinopoisk_id || query.kp || '').trim();
+  if (n(kp)) return kp;
+  const rawId = String(query.id || '').trim();
+  if (n(rawId)) return rawId;
+  const tmdb = String(query.tmdb_id || '').trim();
+  if (n(tmdb)) return tmdb;
+  return String(query.imdb_id || query.id || '').trim();
 }
 
 /** Внутренний `href=<slug>.html` из URL link-карточки (geosaitebi/animelib) или ''. */

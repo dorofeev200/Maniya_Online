@@ -629,6 +629,84 @@ test('поиск с id/imdb_id — запись контракта', async () =>
   assert.equal(records[0].metadata.imdb_id, 'tt0944947');
 });
 
+// ===== PARITY-009: canonical identity search → card → videos → video =====
+// Кластер 503-ит на нечисловом `id` (imdb-as-id: zetflixdb/zagonka/solntse) или
+// матчится только по KP-иду (solntse). Единый канон в buildPageParams/search()
+// гарантирует: какая бы идентичность ни пришла от карточки (TMDB/KP/imdb), в
+// кластер уходит один и тот же числовой id, и /videos→/video не перевыбирает
+// источник/роут.
+
+test('PARITY-009: buildPageParams — imdb-as-id → KP предпочитается', async () => {
+  const client = new FakeSkazClient({ lite: '<html/>' });
+  const provider = makeProvider(client, 'zetflixdb');
+  await provider.videos(context({ id: 'tt1375666', imdb_id: 'tt1375666', kinopoisk_id: '300', title: 'Inception', serial: '0' }));
+  const getLite = client.calls.find(([name]) => name === 'getLite');
+  assert.ok(getLite, 'getLite вызван');
+  assert.equal(getLite[1].id, '300', 'канон: KP вместо imdb-as-id (иначе кластер 503)');
+  assert.equal(getLite[1].kinopoisk_id, '300');
+  assert.equal(getLite[1].imdb_id, 'tt1375666');
+});
+
+test('PARITY-009: buildPageParams — числовой id сохраняется как есть (без KP)', async () => {
+  const client = new FakeSkazClient({ lite: '<html/>' });
+  const provider = makeProvider(client, 'kinoflix');
+  await provider.videos(context({ id: '27205', imdb_id: 'tt1375666', title: 'Inception', serial: '0' }));
+  const getLite = client.calls.find(([name]) => name === 'getLite');
+  assert.equal(getLite[1].id, '27205', 'числовой id без изменений');
+});
+
+test('PARITY-009: buildPageParams — KP предпочитается над числовым TMDB (solntse-кейс)', async () => {
+  const client = new FakeSkazClient({ lite: '<html/>' });
+  const provider = makeProvider(client, 'solntse');
+  // Реальный Lampa TMDB-каталога шлёт id=tmdb (27205); кластер solntse матчится
+  // только по KP-иду → канон подставляет 300.
+  await provider.videos(context({ id: '27205', tmdb_id: '27205', kinopoisk_id: '300', title: 'Inception', serial: '0' }));
+  const getLite = client.calls.find(([name]) => name === 'getLite');
+  assert.equal(getLite[1].id, '300', 'канон: KP над числовым TMDB');
+});
+
+test('PARITY-009: buildPageParams — без KP, imdb-as-id → числовой TMDB', async () => {
+  const client = new FakeSkazClient({ lite: '<html/>' });
+  const provider = makeProvider(client, 'zagonka');
+  await provider.videos(context({ id: 'tt1375666', imdb_id: 'tt1375666', tmdb_id: '27205', title: 'Inception', serial: '0' }));
+  const getLite = client.calls.find(([name]) => name === 'getLite');
+  assert.equal(getLite[1].id, '27205', 'канон: TMDB вместо imdb-as-id');
+});
+
+test('PARITY-009: search — canonical id в record и metadata', async () => {
+  const provider = makeProvider(new FakeSkazClient(), 'zetflixdb');
+  // Карточка с imdb-идентичностью (id=tt…) → запись обязана нести тот же канон,
+  // который уйдёт в /videos (300), а не сырой imdb.
+  const records = await provider.search({ id: 'tt1375666', imdb_id: 'tt1375666', kinopoisk_id: '300', title: 'Inception', serial: '0' });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].id, '300', 'record.id = канон');
+  assert.equal(records[0].metadata.id, '300', 'metadata.id = канон');
+  assert.equal(records[0].metadata.imdb_id, 'tt1375666');
+});
+
+test('PARITY-009: identity-цепочка — resolve-URL несёт тот же канон, что videos', async () => {
+  const client = new FakeSkazClient({ lite: '<html/>' });
+  const provider = makeProvider(client, 'zetflixdb');
+  const reqContext = context({ id: 'tt1375666', imdb_id: 'tt1375666', kinopoisk_id: '300', title: 'Inception', serial: '0', token: 'abc' });
+  const url = provider.buildResolveUrl(reqContext, { voice: '0' });
+  const parsed = new URL(url);
+  assert.equal(parsed.searchParams.get('provider'), 'skaz-zetflixdb');
+  assert.equal(parsed.searchParams.get('id'), '300', 'resolve-URL унаследовал канон от buildPageParams');
+  assert.equal(parsed.searchParams.get('kinopoisk_id'), '300');
+  assert.equal(parsed.searchParams.get('imdb_id'), 'tt1375666');
+  // /videos шёл в кластер с тем же id — перевыбора источника/identity нет.
+});
+
+test('PARITY-009: search — poster/backdrop проходят из запроса карточки', async () => {
+  const provider = makeProvider(new FakeSkazClient(), 'zetflixdb');
+  const records = await provider.search({
+    id: '300', kinopoisk_id: '300', title: 'Inception', serial: '0',
+    poster_path: '/posters/inception.jpg', backdrop_path: '/backdrops/inception.jpg'
+  });
+  assert.equal(records[0].poster, '/posters/inception.jpg');
+  assert.equal(records[0].backdrop, '/backdrops/inception.jpg');
+});
+
 // ===== cleanedQualityMap: P1-B — reserve «URL1 or URL2» в качествах =====
 // Каждая метка качества из JSON может нести `URL1 or URL2`. Проксируем каждую
 // часть отдельно и склеиваем обратно ` or ` (как item.url в resolveCardItem),

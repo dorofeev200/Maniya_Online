@@ -19,7 +19,6 @@ export const PROVIDER_META = {
   // ── E-Online слаги (skaz-кластер / Lampac) ──────────────────────────────
   alloha: { name: 'Allo-XA', icon: '🎬', qualityLabel: '4K' },
   filmix: { name: 'Filmix', icon: '🔥', qualityLabel: '2160p' },
-  filmixtv: { name: 'FilmixTV', icon: '🔥', qualityLabel: '2160p' },
   kodik: { name: 'Kodik', icon: '🔗', qualityLabel: '1080p' },
   rezka: { name: 'For Serial', icon: '😉', qualityLabel: 'Full HD' },
   videoseed: { name: 'VideoS', icon: '💠', qualityLabel: 'Full HD' },
