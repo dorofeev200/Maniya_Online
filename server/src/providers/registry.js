@@ -8,14 +8,15 @@ import { RutubeProvider } from './rutube/RutubeProvider.js';
 import { CollapsProvider } from './collaps/CollapsProvider.js';
 import { HDVBProvider } from './hdvb/HDVBProvider.js';
 import { SkazProvider } from './skaz/SkazProvider.js';
+import { KinotochkaProvider } from './kinotochka/KinotochkaProvider.js';
 
 // Названия балансеров E-Online под брендом «Maniya» (для источников).
 // Полная карта из исходного JS (`_0x39b522`, AUDIT 2026-08-09, E-ONLINE-REPORT §10.1):
 // kinobase/veoveo/alloha/filmix/videoseed/videohub/turboserial/vk/rutube/zagonka/
 // kinopub/hdvb/fancdn/mirage/kodik/fanserials/rezka/mirkino/xvideocdn/hdrezka/aniliberty/…
-// Здесь — только slug, использованные в EO_BALANCERS (конфиг); имена-нарисованные
-// для источников, не отдающихся по lite-REST (vk RUS-1, rutube RUS-2, fans-сериалы …)
-// заведены в конфиге как зарезервированные (см. §10.5) и пока не светятся.
+// Здесь — только slug, использованные в SKAZ_BALANCERS/EO_BALANCERS (конфиг); имена-
+// нарисованные для источников, не отдающихся по lite-REST (vk RUS-1, rutube RUS-2,
+// fans-сериалы …) заведены в конфиге как зарезервированные (см. §10.5) и не светятся.
 const EO_TITLES = {
   filmix: 'Maniya · Filmix',
   filmixtv: 'Maniya · FilmixTV',
@@ -34,7 +35,13 @@ const EO_TITLES = {
   geosaitebi: 'Maniya · GeoVideo',
   aniliberty: 'Maniya · AniLiberty',
   // BALANCER-002: rhsprem — live probe 2026-08-13: data-json=true на online3 (REST).
-  rhsprem: 'Maniya · HDRezka 4K'
+  rhsprem: 'Maniya · HDRezka 4K',
+  // TASK-SOURCES-005 (2026-08-17, live-deck кластера + live-probe): 3 REST-workable.
+  // kinotochka вписан для справки, НО не регистрируется (rch-only на кластере).
+  zetflixdb: 'Maniya · ZetflixDB',
+  zagonka: 'Maniya · Zagonka',
+  xvideocdnultra: 'Maniya · XVideoCDN (Ultra)',
+  kinotochka: 'Maniya · Kinotochka'
 };
 
 const nativeProviders = [
@@ -82,6 +89,13 @@ const nativeProviders = [
     frameHost: config.hdvb.frameHost,
     referer: config.hdvb.referer,
     token: config.hdvb.token
+  }),
+  // TASK-KINOTOCHKA-001 (2026-08-17): NATIVE (не skaz!) — live-probe 17.08 показал,
+  // что кластерный kinotochka — rch/WS-only (REST не играет), а native на
+  // kinovibe.vip даёт прямые MP4 (Range-206). kp-ключ, см. docs/kinotochka.
+  new KinotochkaProvider({
+    enabled: config.kinotochka.enabled,
+    host: config.kinotochka.host
   })
 ];
 

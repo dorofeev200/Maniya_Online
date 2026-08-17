@@ -59,7 +59,11 @@ export const PROVIDER_META = {
   cdnvideohub: { name: 'CDNVideo', icon: '☁️', qualityLabel: '4K' },
   collaps: { name: 'Collaps', icon: '🧩', qualityLabel: 'Full HD' },
   kinoteatrkg: { name: 'KinoteatrKG', icon: '🎭', qualityLabel: 'Full HD' },
-  vkmovie: { name: 'RUmovie-1', icon: '▶️', qualityLabel: 'Full HD' }
+  vkmovie: { name: 'RUmovie-1', icon: '▶️', qualityLabel: 'Full HD' },
+  // TASK-KINOTOCHKA-001: Lampac onlineApiQuality добавляет « ~ 720p» к имени;
+  // в Maniya качество — отдельное поле qualityLabel (клиент клеит «Name - Quality»,
+  // как «Allo-XA - 4K»; meta-registry.test.js требует name без спецсимволов).
+  kinotochka: { name: 'Kinotochka', icon: '🍿', qualityLabel: '720p' }
 };
 
 /** Нейтральный fallback-значок для неизвестного источника (требование 8). */

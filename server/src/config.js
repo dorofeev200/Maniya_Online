@@ -154,6 +154,14 @@ export const config = {
     // Плеерное API (host по умолчанию — как Lampac ModInit).
     host: (process.env.CDNVIDEOHUB_HOST || 'https://plapi.cdnvideohub.com').replace(/\/+$/, '')
   },
+  // TASK-KINOTOCHKA-001 (2026-08-17): Kinotochka — NATIVE (не skaz!) по Lampac
+  // OnlineRUS/Kinotochka. Кластерный kinotochka — rch/WS-only (live-probe 17.08),
+  // native жёвет на kinovibe.vip (cloudflare-refirect на kinovibe.cc): find-by-
+  // kinopoisk.php → страница фильма/сезона → прямой MP4 на *.kvb.cool (Range-206).
+  kinotochka: {
+    enabled: bool('KINOTOCHKA_ENABLED', true),
+    host: (process.env.KINOTOCHKA_HOST || 'https://kinovibe.vip').replace(/\/+$/, '')
+  },
   // Collaps — HTML+JSON (как Lampac OnlineRUS/Collaps).
   collaps: {
     enabled: bool('COLLAPS_ENABLED', true),
@@ -192,18 +200,23 @@ export const config = {
     // kinopub — 200, карточки-ссылки (Lime, двухшаговая follow-схема postid);
     // videoseed/solntse — 3/3 по матрице 08.08.
     // BALANCER-002 (2026-08-13): добавлен rhsprem (live probe: data-json=true на
-    // online3, REST-играемый); исключены zagonka/videocdn/lumex/kinobase — их НЕТ в
-    // live-универсуме lite/events, светились мёртвыми. rch/WS-источники — зарезервированы
-    // (§10.5): vk RUS-1, rutube RUS-2, videohub, turboserial, fanserials, fancdn, mirage,
-    // а также ashdi/kinoukr/eneyida (BALANCER-002: `{"rch":true}` — WebSocket-only, Maniya
-    // REST-клиент играть их не может) — в дефолт НЕ входят.
-    // ПОСЛЕ отчёта (2026-08-13, решение юзера): remux/kinotochka тоже rch-reserved
-    // (`{"rch":true}` стабильно на каждой карточке; REST-клиент их не воспроизводит —
-    // OLD videos()=0, на Play «видео не найдено»). Из видимого списка убраны.
+    // online3, REST-играемый). rch/WS-источники — зарезервированы (§10.5): vk RUS-1,
+    // rutube RUS-2, videohub, turboserial, fanserials, fancdn, mirage, а также
+    // ashdi/kinoukr/eneyida и remux (`{"rch":true}` — WebSocket-only, Maniya REST-клиент
+    // играть их не может) — в дефолт НЕ входят.
+    // TASK-SOURCES-005 (2026-08-17, live-deck кластера lite/withsearch ready:true):
+    // zagonka (oleg6.skaz.tv, «Zagonka - 1080p»), xvideocdnultra (online8, «xVideoCDN
+    // (Ultra) ~ 4K»), zetflixdb (online8, «ZetflixDB - 1080p») — show:true И REST-
+    // контент (live-probe 2026-08-17: карточки по Интерстеллару/Матрице) →
+    // восстановлены как видимые источники.
+    // НЕ добавляем: kinotochka (live-probe: `{"rch":true}` на ВСЕХ нодах кластера —
+    // WebSocket-only, Maniya REST не играет), xvideocdn (Fanserials, show:false),
+    // xvideocdn60fps (show:false), cdnvideohub (VideoHUB 4k уже есть native-источник),
+    // videocdn/lumex/kinobase (мёртвые, BALANCER-002).
     // Видимые источники «Maniya · …» + СКРЫТЫЕ фоллбэки native-дублей
     // (filmix/rezka/hdvb/rutubemovie регистрируются, но в UI их отдаёт native;
     // eonline-близнец выигрывает где native вернул 0 items).
-    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'vkmovie', 'kodik', 'geosaitebi', 'rhsprem']),
+    balancers: list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'vkmovie', 'kodik', 'geosaitebi', 'rhsprem', 'zetflixdb', 'zagonka', 'xvideocdnultra']),
     // Аккаунт E-Online. Не коммитить — только server/.env.
     accountEmail: (process.env.EO_ACCOUNT_EMAIL || '').trim(),
     uid: (process.env.EO_UID || '').trim(),
@@ -217,7 +230,7 @@ export const config = {
   skaz: {
     enabled: bool('SKAZ_ENABLED', true),
     hosts: list('SKAZ_HOSTS', list('EO_HOSTS', ['http://online3.skaz.tv', 'http://online8.skaz.tv', 'http://94.249.239.63', 'http://94.249.239.37', 'http://94.249.239.11', 'http://77.90.33.109'])),
-    balancers: list('SKAZ_BALANCERS', list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'vkmovie', 'kodik', 'geosaitebi', 'rhsprem'])),
+    balancers: list('SKAZ_BALANCERS', list('EO_BALANCERS', ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'filmix', 'rezka', 'hdvb', 'rutubemovie', 'vkmovie', 'kodik', 'geosaitebi', 'rhsprem', 'zetflixdb', 'zagonka', 'xvideocdnultra'])),
     // BALANCER-002: per-card availability (/api/lampa/sources/card).
     // checkEnabled=false → эндпоинт возвращает статический список (все show:true),
     // без походов в кластер (rollback-переключатель, менять без деплоя нельзя).
@@ -236,7 +249,9 @@ export const config = {
     origin: (process.env.SKAZ_ORIGIN || process.env.EO_ORIGIN || 'http://lampa.mx').trim()
   },
   proxy: {
-    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'solodcdn.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com', 'sevstar933krop.com', 'entouaedon.com', 'vkvideo.cloud', 'cdntogo.net', 'rstprgapipt.com', 'mvapspdmpg.com']),
+    // TASK-KINOTOCHKA-001: kvb.cool — CDN прямых MP4 Kinotochka (svd*.kvb.cool);
+    // суффиксное сопоставление покрывает все ноды.
+    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'solodcdn.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com', 'sevstar933krop.com', 'entouaedon.com', 'vkvideo.cloud', 'cdntogo.net', 'rstprgapipt.com', 'mvapspdmpg.com', 'kvb.cool']),
     // E-Online-хосты и CDN-манифест voidboost — http:// (validateProxyTarget по
     // умолчанию разрешает http только для loopback). Явный узкий список.
     httpAllowHosts: list('PROXY_HTTP_ALLOW_HOSTS', ['94.249.239.63', '94.249.239.37', '94.249.239.11', '77.90.33.109', 'skaz.tv', 'voidboost.one', 'voidboost.com', 'scts.tv']),

@@ -15,6 +15,7 @@ process.env.KODIK_ENABLED = '0';
 process.env.ALLOHA_ENABLED = '0';
 process.env.COLLAPS_ENABLED = '0';
 process.env.HDVB_ENABLED = '0';
+process.env.KINOTOCHKA_ENABLED = '0'; // TASK-KINOTOCHKA-001: native без сети в route-тестах
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';

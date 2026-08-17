@@ -13,10 +13,13 @@ const PLAYER_REFERER = 'https://player.cdnvideohub.com';
  * названию в API нет). Фильм: по одной play-записи на озвучку (adaptive HLS
  * `{auto}`). Сериал: по серии × озвучка выбранного сезона. Потоки — видео из
  * `video/{vkId}` (`hlsUrl`), через наш прокси.
+ *
+ * TASK-SOURCES-005: display-имя = «VideoHUB 4k» (как кластер and Lampac display),
+ * а не внутреннее «CDNvideohub».
  */
 export class CDNvideohubProvider extends Provider {
   static id = 'cdnvideohub';
-  static title = 'CDNvideohub';
+  static title = 'VideoHUB 4k';
 
   constructor({ enabled = true, host, client = null, normalizer = null, ...options } = {}) {
     super(options);

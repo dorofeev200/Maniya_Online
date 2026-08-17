@@ -19,12 +19,18 @@ const { registeredProviders, providerById, allProviders } = await import('../src
 const { SkazProvider } = await import('../src/providers/skaz/SkazProvider.js');
 
 // Видимые skaz-балансеры (без native-дублей): реестр Maniya.
-const VISIBLE_SKAZ = ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'geosaitebi', 'rhsprem'];
+// TASK-SOURCES-005 (2026-08-17): +zetflixdb/zagonka/xvideocdnultra — show:true в
+// live-deck withsearch И REST-контент (live-probe: карточки по 2 фильмам).
+const VISIBLE_SKAZ = ['alloha', 'videoseed', 'kinopub', 'kinoflix', 'veoveo', 'pidtor', 'solntse', 'geosaitebi', 'rhsprem', 'zetflixdb', 'zagonka', 'xvideocdnultra'];
 
 // rch-reserved (WebSocket-only, Maniya REST не играет): НЕ в дефолтном списке.
+// TASK-SOURCES-005: kinotochka остаётся здесь — live-probe 2026-08-17 показал
+// `{"rch":true}` на ВСЕХ нодах кластера (online5/3/8), REST не играет.
 const RCH_RESERVED = ['remux', 'kinotochka', 'ashdi', 'kinoukr', 'eneyida'];
-// Мёртвые в live-универсуме lite/events (BALANCER-002 аудит): НЕ в дефолтном списке.
-const DEAD_BALANCERS = ['kinobase', 'videocdn', 'lumex', 'zagonka'];
+// Мёртвые / не-источники в live-универсуме lite/events (BALANCER-002 + TASK-SOURCES-005):
+// НЕ в дефолтном списке. xvideocdn — это Fanserials (show:false), xvideocdn60fps тоже
+// show:false; videocdn/lumex/kinobase — мёртвые (BALANCER-002).
+const DEAD_BALANCERS = ['kinobase', 'videocdn', 'lumex', 'xvideocdn', 'xvideocdn60fps'];
 
 test('BALANCER-002: rch-reserved и мёртвые слаги НЕ в дефолтном списке балансеров', () => {
   const balancers = config.skaz.balancers;
@@ -47,10 +53,29 @@ test('BALANCER-002: каждый видимый skaz-балансер зарег
   }
 });
 
-test('BALANCER-002: remux/kinotochka не регистрируются (rch-reserved — не светятся в UI)', () => {
+test('BALANCER-002: remux/ashdi/kinoukr/eneyida не регистрируются (rch-reserved — не светятся в UI)', () => {
   for (const slug of RCH_RESERVED) {
     assert.equal(providerById(`skaz-${slug}`), null, `skaz-${slug} — НЕ зарегистрирован (rch-reserved)`);
   }
+});
+
+test('TASK-SOURCES-005: 3 новых источника — правильные id/title, видимые', () => {
+  const expected = {
+    'skaz-zetflixdb': 'Maniya · ZetflixDB',
+    'skaz-zagonka': 'Maniya · Zagonka',
+    'skaz-xvideocdnultra': 'Maniya · XVideoCDN (Ultra)'
+  };
+  for (const [id, title] of Object.entries(expected)) {
+    const provider = providerById(id);
+    assert.ok(provider, `${id} — зарегистрирован и видим`);
+    assert.equal(provider.title, title, `${id} — display name`);
+    assert.ok(provider instanceof SkazProvider, `${id} — SkazProvider`);
+  }
+});
+
+test('TASK-SOURCES-005: kinotochka НЕ регистрируется (live-probe: rch-only на кластере)', () => {
+  assert.ok(!config.skaz.balancers.includes('kinotochka'), 'kinotochka не в дефолтном списке');
+  assert.equal(providerById('skaz-kinotochka'), null, 'skaz-kinotochka — НЕ зарегистрирован');
 });
 
 test('BALANCER-002: native-дубли скрыты (twin) — skaz-filmix/skaz-rezka только в allProviders', () => {
