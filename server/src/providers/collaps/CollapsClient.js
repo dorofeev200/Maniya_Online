@@ -51,13 +51,15 @@ export class CollapsClient {
   }
 
   /**
-   * Достаёт HTML-страницу плеера. id — по приоритету: kinopoisk_id → imdb_id → orid.
-   * Возвращает embedHost из коллекции (для записи) + текст.
+   * Достаёт HTML-страницу плеера. Канонические ключи (COLLAPS-FIX-001):
+   * kinopoiskId → imdbId → orid. `options.id` НЕ читается как orid — у Maniya это
+   * TMDB id, а не collaps-identity (арх-аудит §7.3.2: `/embed/movie/{tmdb}` → 404).
+   * Провайдер передаёт только канонические поля (resolveIdentity).
    */
   async embed(options = {}) {
     const kinopoiskId = Number(options.kinopoiskId || options.kp || 0) || 0;
     const imdbId = String(options.imdbId || options.imdb || '').trim();
-    const orid = Number(options.orid || options.id || 0) || 0;
+    const orid = Number(options.orid ?? options.orId ?? 0) || 0;
 
     const host = options.embedHost || this.embedHost;
     let path;
@@ -73,7 +75,7 @@ export class CollapsClient {
   async getJson(url) {
     const response = await this.fetchImpl(url, { headers: this.headers });
     if (response.status === 204) return null;
-    if (!response.ok) throw new HttpError(response.status, 'collaps_http_error', `Collaps HTTP ${response.status}`);
+    if (!response.ok) throw this.httpError(response.status);
     try {
       return await response.json();
     } catch {
@@ -84,8 +86,24 @@ export class CollapsClient {
   async getText(url) {
     const response = await this.fetchImpl(url, { headers: this.headers });
     if (response.status === 204) return '';
-    if (!response.ok) throw new HttpError(response.status, 'collaps_http_error', `Collaps HTTP ${response.status}`);
+    if (!response.ok) throw this.httpError(response.status);
     return response.text();
+  }
+
+  /**
+   * HttpError с классификацией (COLLAPS-FIX-001 D):
+   *  - 404/400/405 → invalid-route (неверная identity/маршрут);
+   *  - 403/422/451 → upstream-refusal (host-гейт/rate-limit: контент может быть);
+   *  - 5xx → upstream (транзиентный); прочее 4xx → http.
+   * Это диагностика для provider_error /videos; глобальная availability-семантика
+   * (HARD_REFUSAL_STATUSES) НЕ меняется.
+   */
+  httpError(status) {
+    const kind =
+      status === 404 || status === 400 || status === 405 ? 'invalid-route'
+      : status === 403 || status === 422 || status === 451 ? 'upstream-refusal'
+      : status >= 500 ? 'upstream' : 'http';
+    return new HttpError(status, 'collaps_http_error', `Collaps HTTP ${status}`, { kind });
   }
 }
 

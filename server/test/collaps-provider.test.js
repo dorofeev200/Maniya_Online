@@ -1,16 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { HttpError } from '../src/errors.js';
+import { config } from '../src/config.js';
+import { twinFor } from '../src/providers/registry.js';
 import { CollapsProvider } from '../src/providers/collaps/CollapsProvider.js';
 import { CollapsNormalizer, isMovieType } from '../src/providers/collaps/CollapsNormalizer.js';
 
 /** Fake CollapsClient: методы, которые зовёт провайдер. */
 class FakeCollapsClient {
-  constructor({ searchData = null, embedByText = '', embedByKey = {}, enabled = true } = {}) {
+  constructor({ searchData = null, embedByText = '', embedByKey = {}, enabled = true, embedError = null } = {}) {
     this.calls = [];
     this.searchData = searchData;
     this.embedByKey = embedByKey;
     this.enabledFlag = enabled;
+    this.embedError = embedError;
     this.apihost = 'https://api.bhcesh.me';
     this.embedHost = 'https://api.ortified.ws';
   }
@@ -26,7 +30,8 @@ class FakeCollapsClient {
 
   async embed(options = {}) {
     this.calls.push(['embed', options]);
-    const key = options.kinopoiskId || options.imdbId || options.orId || '';
+    if (this.embedError) throw this.embedError;
+    const key = options.kinopoiskId || options.imdbId || options.orid || options.orId || '';
     const text = this.embedByKey[key] || '';
     return { text, embedHost: this.embedHost };
   }
@@ -181,14 +186,17 @@ test('CollapsProvider.search: по названию → записи, клиен
   assert.deepEqual(client.calls, [['search', 'Дюна']]);
 });
 
-test('CollapsProvider.search: без названия → запись по ключу (embed)', async () => {
+test('CollapsProvider.search: без названия → запись по каноническому orid (embed)', async () => {
   const client = new FakeCollapsClient({ embedByKey: { 101: MOVIE_EMBED } });
   const provider = new CollapsProvider({ client });
-  const records = await provider.search({ id: 101 });
+  const records = await provider.search({ orid: 101 });
   assert.equal(records.length, 1);
   assert.equal(records[0].provider, 'collaps');
   assert.equal(records[0].type, 'movie');
   assert.ok(records[0].parsed);
+  // Канон identity: client получил orid, а не TMDB id.
+  assert.equal(client.calls[0][1].orid, 101);
+  assert.equal(Number(client.calls[0][1].kinopoiskId || 0), 0);
 });
 
 test('CollapsProvider.movie/serial: фильтр по типу из поиска', async () => {
@@ -223,7 +231,7 @@ test('CollapsProvider.videos: сериал → play-items по сериям вы
   const client = new FakeCollapsClient({ embedByKey: { 102: SERIAL_EMBED } });
   const provider = new CollapsProvider({ client });
 
-  const payload = await provider.videos({ query: { id: 102, season: 1 } });
+  const payload = await provider.videos({ query: { orid: 102, season: 1 } });
 
   assert.deepEqual(payload.seasons, [
     { number: 1, title: '1 сезон' },
@@ -276,4 +284,92 @@ test('CollapsProvider: client/normalizer инъекции', () => {
   const provider = new CollapsProvider({ client, normalizer });
   assert.equal(provider.client, client);
   assert.equal(provider.normalizer, normalizer);
+});
+
+// --- COLLAPS-FIX-001: единая identity / shape-консистентность / 422 ≠ EMPTY / Skaz не затронут ---
+// Root causes (docs/balancer-architecture-audit-001-report.md §7.3):
+//  SHAPE — show через title-only search, /videos заново угадывает фильм → пусто/422;
+//  ID-ROUTE — query.id = TMDB id использовался как collaps-orid (`/embed/movie/{tmdb}` → 404),
+//  + поле orId передавалось, а клиент читал orid → маршрут карточки ≠ маршруту videos.
+
+test('COL-1 title-only карточка → search identity → playable item (COLLAPS-SHAPE)', async () => {
+  // Карточка БЕЗ kp/imdb/orid: show:true обеспечен title-search; videos обязан
+  // использовать ТУ ЖЕ запись (bestMatch) — /videos не пуст.
+  const client = new FakeCollapsClient({ searchData: SEARCH_ROOT, embedByKey: { 999: MOVIE_EMBED } });
+  const provider = new CollapsProvider({ client });
+
+  const payload = await provider.videos({ query: { title: 'Дюна' } });
+
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0].method, 'play');
+  assert.equal(payload.items[0].type, 'movie');
+  // identity единая: клиент ушёл по kp 999 (найденной записи), а не пустым маршрутом.
+  const embedCall = client.calls.find(([name]) => name === 'embed')[1];
+  assert.equal(embedCall.kinopoiskId, 999);
+  assert.equal(embedCall.orid, 101);
+});
+
+test('COL-2 query.id (TMDB) НЕ используется как collaps-orid — маршрут через search (COLLAPS-ID-ROUTE)', async () => {
+  // id=101 в query — это TMDB id, не collaps-orid: прямой /embed/movie/101 был бы 404.
+  // Провайдер игнорирует id как identity и находит запись по titre-поиску.
+  const client = new FakeCollapsClient({ searchData: SEARCH_ROOT, embedByKey: { 999: MOVIE_EMBED } });
+  const provider = new CollapsProvider({ client });
+
+  const payload = await provider.videos({ query: { id: 101, title: 'Дюна' } });
+
+  assert.equal(payload.items.length, 1);
+  const embedCall = client.calls.find(([name]) => name === 'embed')[1];
+  assert.equal(embedCall.kinopoiskId, 999); // найденный kp, НЕ id-маршрут
+});
+
+test('COL-3 канонический orid → прямой embed-маршрут (та же identity, что у карточки)', async () => {
+  const client = new FakeCollapsClient({ embedByKey: { 101: MOVIE_EMBED } });
+  const provider = new CollapsProvider({ client });
+
+  const payload = await provider.videos({ query: { orid: 101, title: 'Дюна' } });
+
+  assert.equal(payload.items.length, 1);
+  const embedCall = client.calls.find(([name]) => name === 'embed')[1];
+  assert.equal(embedCall.orid, 101);
+  assert.equal(Number(embedCall.kinopoiskId || 0), 0); // orid — самостоятельный маршрут
+});
+
+test('COL-4 422 на рабочую identity — provider_error upstream-refusal, НЕ молчаливый EMPTY', async () => {
+  const client = new FakeCollapsClient({
+    embedByKey: { 101: MOVIE_EMBED },
+    embedError: new HttpError(422, 'collaps_http_error', 'Collaps HTTP 422', { kind: 'upstream-refusal' })
+  });
+  const provider = new CollapsProvider({ client });
+
+  const payload = await provider.videos({ query: { orid: 101, title: 'Дюна' } });
+
+  assert.deepEqual(payload.items, []);
+  assert.equal(payload.provider_error.status, 422);
+  assert.equal(payload.provider_error.kind, 'upstream-refusal');
+});
+
+test('COL-5 404 — invalid-route (identity/маршрут неверный), тоже НЕ EMPTY', async () => {
+  const client = new FakeCollapsClient({ embedError: new HttpError(404, 'collaps_http_error', 'Collaps HTTP 404', { kind: 'invalid-route' }) });
+  const provider = new CollapsProvider({ client });
+
+  const payload = await provider.videos({ query: { orid: 999999, title: 'Дюна' } });
+
+  assert.deepEqual(payload.items, []);
+  assert.equal(payload.provider_error.kind, 'invalid-route');
+});
+
+test('COL-6 подтверждённое отсутствие контента — EMPTY БЕЗ provider_error', async () => {
+  const client = new FakeCollapsClient({ embedByKey: {} }); // embed 200, но нет source
+  const provider = new CollapsProvider({ client });
+
+  const payload = await provider.videos({ query: { orid: 101, title: 'Дюна' } });
+
+  assert.deepEqual(payload, { items: [], seasons: [], voices: [] });
+});
+
+test('COL-7 Collaps НЕ входит в Skaz: ни балансером, ни twin (архитектурный инвариант)', () => {
+  assert.equal(config.skaz.balancers.includes('collaps'), false);
+  assert.equal(twinFor('collaps'), null);
+  const provider = new CollapsProvider({ client: new FakeCollapsClient() });
+  assert.equal(provider.id, 'collaps');
 });
