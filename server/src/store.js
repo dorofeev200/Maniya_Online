@@ -142,7 +142,12 @@ export async function getVideosForRequest(context) {
     if (native?.items?.length) {
       chosen = native;
     } else if (selected) {
-      chosen = await twinForPayload(selected, context);
+      // Близнец — фоллбэк при пустом native. Если близнеца НЕТ (Collaps,
+      // COL-7: не Skaz-source), сохраняем native: он может нести
+      // provider_error (классификация 422/404 → upstream-refusal/invalid-route),
+      // которую нельзя выбрасывать — иначе клиент/availability видит глухое
+      // «нет контента» вместо диагностики (collaps-flap, GAP-002).
+      chosen = (await twinForPayload(selected, context)) || native || null;
     }
     if (chosen?.items?.length) {
       const body = { items: chosen.items, seasons: chosen.seasons || [], voices: chosen.voices || [] };
