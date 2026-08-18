@@ -2,7 +2,7 @@
 
 Дата: 2026-08-15. Режим: **READ-ONLY**. Код не менялся, коммит/деплой НЕ выполнялись.
 Воспроизведено на PRODUCTION (публичный `https://plugin.maniya-kvn.online`, токены userA/userB/userC,
-кластер skaz online3/online8, креды `dorofeevigor20` / uid `7974327d37`).
+кластер skaz online3/online8, креды `dorofe…` / uid `7974…`).
 
 ---
 

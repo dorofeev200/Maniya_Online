@@ -38,7 +38,7 @@ AVAILABLE/UNAVAILABLE → VIDEO ITEMS → PLAYBACK), а НЕ внутрення�
 | Maniya ходит в кластер напрямую | `SkazClient.js:1-49`: «работает чистым REST GET… авторизация = account_email+uid в URL», hosts = SKAZ_HOSTS; `config.js:219` |
 | EO_* — только фолбэк-переменные | `config.js:217-237`: `SKAZ_HOSTS`/`SKAZ_BALANCERS`/`SKAZ_ACCOUNT_EMAIL`/`SKAZ_UID` — primary, `EO_*` — fallback |
 | Канон E-Online — reference | `config.js:226`: `checkTimeoutMs 10с = паритет с E-Online (OnlineApi.cs checkSearch timeoutSeconds:10)` |
-| Никакого E-Online-аккаунта | uid/email — СВОИ creds кластера (`dorofeevigor20@gmail.com`/`7974327d37`), не чужие |
+| Никакого E-Online-аккаунта | uid/email — СВОИ creds кластера (`dorofe…@gmail.com`/`7974…`), не чужие |
 
 ### 0.3 Прошлые аудиты = PROVEN INPUT (не пере-прогонялись)
 BALANCER-ARCHITECTURE-AUDIT-001, STABILITY-004, BALANCER-SEMANTICS-005, W1 (impl), post-W1

@@ -111,7 +111,7 @@ Legacy-контроль (hide-путь, §5): несуществующий id / 
 
 ## 5. Maniya vs E-Online (для тех же карточек)
 
-E-Online = Lampac-референс на том же skaz-кластере; его доступ фильтрует источники по карточке серверным `checksearch`. Сравнение выполнялось **тем же механизмом**, которым E-Online принимает решение — `lite/veoveo?checksearch=true` на кластер с granted-аккаунтом (`dorofeevigor20@…`/`7974327d37`, те же creds, что у Maniya).
+E-Online = Lampac-референс на том же skaz-кластере; его доступ фильтрует источники по карточке серверным `checksearch`. Сравнение выполнялось **тем же механизмом**, которым E-Online принимает решение — `lite/veoveo?checksearch=true` на кластер с granted-аккаунтом (`dorofe…@gmail.com`/`7974…`, те же creds, что у Maniya).
 
 | Карточка | Clúster для E-Online (raw checksearch) | Maniya card(veoveo) | Расхождение |
 |---|---|---|---|

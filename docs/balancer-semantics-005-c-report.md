@@ -12,7 +12,7 @@ E-Online/Lampac = КАНОНИЧЕСКИЙ ЭТАЛОН. Не проектиро
 `Modules\OnlinePaid\KinoPub\Controller.cs`+`ModInit.cs`, `Shared\Controllers\BaseOnlineController.cs`; перечитка Maniya
 `server/src/availability.js` (probe, confirmWithBackoff, computeCard OLD∩NEW, HIDE_TTL) и `public/maniya-online.js`
 (applyCardAvailability/updateFilter/changeSource); **свежие live-пробы** (4 независимых последовательных прогона ×
-5 пар, cs+plain, primary+резервная нода, реальные параметры карточек, креды `dorofeevigor20@gmail.com`/`7974327d37`).
+5 пар, cs+plain, primary+резервная нода, реальные параметры карточек, креды `dorofe…@gmail.com`/`7974…`).
 
 ---
 

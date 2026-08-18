@@ -129,3 +129,48 @@ PS: display-name («Collaps») — только presentation. Identity — `{kin
 - Playable из текущего деплоя упирается в гео-гейт embed-хоста (инфраструктура, задокументирована GAP-002) — это НЕ кодовая регрессия и не un-done часть фикса. Кодовая часть (единая identity, shape, классификация ошибок) — завершена и покрыта тестами.
 - **COLLAPS-FIX-002 не создаётся** (по решению задачи).
 - Следующее действие (если потребует пользователь) — вне кода: восстановить RU-egress к `api.ortified.ws` и повторить live-playback-пробу.
+---
+
+## §PRODUCTION (2026-08-17)
+
+commit/push/deploy выполнены при восстановлении сессии после обрыва питания.
+- Commits: **`5625223`** (FIX-001) + **`04fa1dc`** (прод-финдинг store.js, см. ниже). Push `backup` только.
+- Деплой 2026-08-17, рестарт maniya-online, health 200 local+public, хэши кода совпадают.
+
+### Прод-финдинг (найден при live-verify, исправлен в этом же релизе)
+store.js (single-provider ветка) при `selected` + пустом native делал `chosen = twinForPayload(selected)`;
+у Collaps близнеца нет (COL-7) → twin=null → **provider_error (классификация 422) выбрасывалась** —
+клиент/availability видели глухое «нет контента» (коллапс-flap, GAP-002). Фикс `04fa1dc`:
+`chosen = (await twinForPayload(selected, context)) || native || null`; регрессия `store-provider-error.test.js`
+(2 теста) + граница COL-6 (200-EMPTY без error). Приоритет близнеца-фоллбэка не менялся
+(store-movie-native-first.test.js зелёный).
+
+### PROD-VERIFIED (live после обоих коммитов)
+`/api/lampa/videos?provider=collaps&imdb=tt0133093` → `provider_error: {kind:'upstream-refusal', status:422,
+code:'collaps_http_error'}` — классификация реально доходит до клиента. Playback с текущего egress
+по-прежнему гео-гейтит embed-хост (вне кода; 422 = честный upstream-refusal, не 404-маршрут).
+Попутно убит висящий temp `/tmp/mo-normfix` (вторая инстанция бота) — прекратился telegram getUpdates 409-спам.
+Suite финальный **647/641 pass / 0 fail / 6 skip**.
+
+---
+
+## §COLLAPS-EGRESS-001 (2026-08-18) — перепроверка статуса 422
+
+**Вопрос:** HTTP 422 на Collaps — внешний запрет/egress-гейт ИЛИ конкретная ошибка запроса Maniya?
+
+**Метод:** прямое сравнение на той же кодовой линии — (1) прямой upstream-запрос embed-хоста, (2) запрос ровно через текущий `CollapsClient.embed()` (endpoint/headers/query без изменений), статус + тип/классификация тела; с прод-egress (VPS через shadow `http://95.85.241.121:3210`, тот же код/creds) и с локального egress. Скрипты `scripts/_collaps_egress_probe.mjs`, `_collaps_embed_inspect.mjs`, `_collaps_tryplay.mjs`, `_collaps_seg_probe.mjs`, `_collaps_seg2.mjs`.
+
+### Результаты
+
+| Egress | embed `api.luxembd.ws/embed/*` | Тело | Классификация Maniya |
+|---|---|---|---|
+| **VPS (95.85.241.121, прод-код через shadow, 4/4 routes kp/imdb/orid, прямо сейчас)** | **422 стабильно** | пусто (0B), nginx | `provider_error {kind:'upstream-refusal', status:422, code:'collaps_http_error'}` (4/4) |
+| **локальный (VPN-egress, 12/12: 4 identity × bare/браузерный/client-заголовки)** | **200 стабильно** | `text/html` ~17–18KB, **реальная страница плеера** (title фильма, маркеры `.m3u8`/`dasha`) | клиент ок → `parseEmbed` извлекает **playable HLS** `https://*.interkh.com/.../master.m3u8` (4/4) |
+
+**Детали 200-пути (текущий клиент, без правок):** master 200 `application/vnd.apple.mpegurl` 16KB → variant 200 **213KB** → **сегмент 400(0B) без заголовков / 410 с `Origin: kinokrad.my`** — у CDN-слоя `interkh.com` свой гейт (подпись `fckz2/ha/hc` + регион). Это НЕ вопрос 422 и отдельно от данного решения: мастер+вариант отдаются с незагейтнутого egress.
+
+**Вывод:**
+- **Root cause 422:** embed-хост `api.luxembd.ws` (и `api.ortified.ws`, GAP-013) гейтит `/embed/*` по IP/региону egress. Прод-egress VPS (SE) стабильно получает 422; на регионах без гейта тот же запрос отдаёт реальный плеер. Гейт **не абсолютный** (в отличие от формулировки GAP-013 «закрыт серверно») — с 2026-08-18 для части egress embed снова отдаёт 200.
+- **Запрос Maniya корректен:** один и тот же endpoint/headers/query даёт 200+playable на незагейтнутой egress и 422 на гейтнутой → дефекта параметров/header/URL/egress-выбора в Maniya **нет**. Играбельный путь строится текущим кодом без правок, когда embed доступен.
+- **Классификация: UPSTREAM/EGRESS LIMITATION.** Код не менялся, тесты не добавлялись. Изменение egress = запрещённая без доказанной необходимости proxy-цепочка.
+- **Remaining:** Collaps играется только с незагейтнутого (RU-подобного) egress; для текущего деплоя VPS-условие вне кода (RU-egress). INS-вопрос «segment 400/410» — CDN-слой `interkh.com` (подписи/регион), отдельный кейс, НЕ связан с 422; не открывался. UI/реестр/availability/store не тронуты. Suite базис 735/729/0/6.

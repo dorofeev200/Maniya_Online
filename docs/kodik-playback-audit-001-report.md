@@ -65,7 +65,7 @@ SSRF-риск — **низкий и ограниченный**: разрешае
 | Доп. 4 тайтла (сериал ko, аниме ja×2, контроль ko) | `kodik-cdn-extra.mjs/.json` | 13:14 | сер. + аниме → набор нод редиректов |
 
 API: `https://plugin.maniya-kvn.online`, token `dorofeev200` (mo-6d7c0…dce4), UA `lampa`.
-Кластер (для twin): `http://online3.skaz.tv`, account `dorofeevigor20@gmail.com`, uid `7974327d37`.
+Кластер (для twin): `http://online3.skaz.tv`, account `dorofe…@gmail.com`, uid `7974…`.
 
 ---
 

@@ -113,3 +113,16 @@
 | Не в scope | улучшение Rutube-поиска/нормалайзера (отдельная волна), прокси/allowHosts/W1/мета — не тронуты |
 
 **RUTUBE-HD-FIX-001 — реализация завершена, готова к ревью; commit/push/deploy — НЕ выполнены.**
+---
+
+## §PRODUCTION (2026-08-17)
+
+По продолжению сессии после обрыва питания commit/push/deploy выполнены:
+- Commit **`2d704fc`** (store.js native-first + registry-комментарий + store-тесты), push **только** `backup`
+  (`fb15b21..04fa1dc`; origin не тронут). Входной аудит `rutube-hd-playback-audit-001-report.md` включён в коммит.
+- Деплой `scripts/deploy.sh` 2026-08-17 16:29 (certbot/nginx ok), рестарт maniya-online, health 200 local+public,
+  хэши кода совпадают.
+- **PROD-VERIFIED (live):** Интерстеллар → native «Интерстеллар (2014)» play, HLS master 200 → variant 200;
+  **Аватар → native «Avatar 1 FULL MOVIE 2009» playable 200/200** (до фикса twin call→404); Матрица → native top
+  (сиквел устранён следующей волной); vkmovie Range-206 MP4 — регрессий нет.
+- Suite: 623/617 на момент волны; финальный слой с последующими волнами 647/641 pass / 0 fail / 6 skip.

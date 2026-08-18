@@ -6,7 +6,7 @@
 B (CONTENT но /videos=0, method:link, 4 FP), C (FN/FLAP, 4 kinopub-пары). Проверить каждый класс
 отдельно, доказать/опровергнуть, ответить на 8 вопросов, предложить ≤3 волны БЕЗ реализации.
 **Метод:** live-пробы кластера skaz С РЕАЛЬНЫМИ кредами (`SKAZ_ACCOUNT_EMAIL`/`SKAZ_UID`,
-`dorofeevigor20@gmail.com`/`7974327d37`) с локальной Windows-машины + перечиткой канона Lampac
+`dorofe…@gmail.com`/`7974…`) с локальной Windows-машины + перечиткой канона Lampac
 (`OnlineApi.cs`, `plugin.js`) + повторный разбор прод-матрицы `matrix-api-result-r2.json` и
 ground-truth `aggregate-probe.json`. Ничего на VPS не запускалось (урок ребута 06:50: тяжёлые
 пробы только с лимитом памяти; здесь все пробы лёгкие, последовательные, 1 title за раз).

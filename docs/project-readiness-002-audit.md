@@ -271,7 +271,7 @@ Root cause: в `card()` нет **single-flight** — при одновремен
 
 ## 12. Security (masked-сканирование, Agent C)
 
-- **Ни одного живого секрета в tracked/untracked файлах репо.** Текущий токен `mo-6d7c…e4`, `PLUGIN_CODE_SECRET` `6497…cb`, SKAZ_UID `7974327d37`, KODIK/COLLAPS/HDVB/TELEGRAM токены — только в gitignored `backup/snapshots/` и `%TEMP%`. `.gitignore` покрывает `.env`, `server/data/`, `backup/`, `*.log`.
+- **Ни одного живого секрета в tracked/untracked файлах репо.** Текущий токен `mo-6d7c…e4`, `PLUGIN_CODE_SECRET` `6497…cb`, SKAZ_UID `7974…`, KODIK/COLLAPS/HDVB/TELEGRAM токены — только в gitignored `backup/snapshots/` и `%TEMP%`. `.gitignore` покрывает `.env`, `server/data/`, `backup/`, `*.log`.
 - **Остаточный риск (P1):** 3 ротированных, но реальных креда в git history **и в HEAD** (не закоммичен рабочий scrub): старый VPS-пароль `789z…89` (docs/action-plan.md:542), старый токен `mo-54f4…27` (scripts/auto-confirm-config.mjs:5, scripts/p1b-live-test.mjs:5), старый skaz-uid `dg4xu2tj` (4 файла). История НЕ переписывалась (по ТЗ не трогать). Ротация выполнена (SECURITY-002), креды мёртвые.
 - **Untracked доки** (`security-001/002-rotation-report.md`, `project-readiness-001-report.md`) содержат masked-фингерпринты, включая **новый** VPS-пароль — риск случайного коммита. Плюс мусорный пустой файл `x.install_token)`.
 - FILMIX_TV creds в репо/бэкапах отсутствуют (лежат в env на VPS).

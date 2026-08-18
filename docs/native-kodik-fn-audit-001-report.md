@@ -138,7 +138,7 @@
 
 - Код, тесты, config, деплой **не менялись** (READ-ONLY). W1/STABILITY-004/GAP-002/GAP-005/VEO-015/коллапс/кластер-ротация/hostOrder/pinMap/display-имена/provider-IDs/E-Online runtime-зависимость — не затронуты.
 - Native kodik /videos в чистом виде (без twin-first) через публичный API не изолируется (movie = twin-first); вывод о native=0 опирается на каталог-гейт по коду + 0 items в store-пути.
-- Учётная запись кластера = dorofeevigor20/7974327d37 (та же, что в parity). Прод-проб — токен dorofeev200.
+- Учётная запись кластера = dorofe…/7974… (та же, что в parity). Прод-проб — токен dorofeev200.
 - Данные проб: `kodik-checksearch-predicates.json`, `kodik-e2e-live.json`, `kodik-raw-lite.json`, `kodik-pick-playback.json` (в `C:\Users\Admin\AppData\Local\Temp\post-w1-audit\`).
 
 ---

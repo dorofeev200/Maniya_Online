@@ -116,6 +116,27 @@ RAW-тела кластера (Матрица): xvideocdnultra — online3/.11=5
 kinotochka — online3/.11=200 len≈78 (нет карточек), online8=403; native-вход kinovibe для этих 5
 фильмов absent → HIDE корректен.
 
+### E-2. Production verification (после деплоя `ea67ec7`, 2026-08-19, с vantage-точки сервера И публичного URL)
+
+`/api/lampa/sources/card` (не только /videos) + `/api/lampa/videos` на `plugin.maniya-kvn.online`:
+
+| фильм | xvideocdnultra | zetflixdb | zagonka | kinoflix | hdvb | kinotochka |
+|---|---|---|---|---|---|---|
+| Матрица (контент) | SHOW items=4 | SHOW items=8 | SHOW 8 | HIDE* | HIDE* | SHOW items=1 |
+| Интерстеллар (контент) | SHOW items=1 | SHOW items=11 | SHOW 11 | SHOW 3 | HIDE* | SHOW items=1 |
+| Паразиты (пустой) | HIDE (503-окно) / SHOW (accsdb-окно)* | HIDE / SHOW* | HIDE | HIDE | HIDE | HIDE |
+| Одиссея (пустой) | HIDE | HIDE | HIDE | HIDE | HIDE | HIDE |
+
+\* **Кластерный device-гейт (НЕ дефект кода):** для xvc/zetflixdb на Паразитах кластер флапает между
+чистым `503` и `{"accsdb":true,"msg":"Устройству **1f2 нужно предоставить доступ в @skaztv_bot или из
+Email"}`. В 503-окне наш strict-confirm делает полный скан без контента → **авторитетный HIDE**
+(проверено напрямую серверным `defaultChecker.card()`: `show:false authoritative confirmed status=503`).
+В accsdb-окне скан видит отказ учётки устройства → по W1-safe правилу «accsdb-отказ → вердикта нет»
+источник сохраняется видимым (items=0). Это upstream/account-зависимая классификация (аналогично
+историческому `dg4xu2tj`/dev-гейту — лечение = грант устройства в @skaztv_bot, не код).
+Kinotochka (native) на пустых фильмах HIDE всегда и для любых uid. Прочие HIDE* (kinoflix/hdvb на
+Матрице) — транзиентный флап кластера (в соседних прогонах SHOW items=3), HIDE_TTL 60с self-heal.
+
 ## F. Регрессия W1 (BALANCER-ONLINE8-002)
 
 W1-инвариант «контент на ЛЮБОЙ ноде → SHOW, ни одно решение не прячет рабочий источник» сохранён:
@@ -141,7 +162,7 @@ W1-инвариант «контент на ЛЮБОЙ ноде → SHOW, ни �
 
 ## H. Финальный вердикт
 
-**Maniya-баг исправлен.** Криктерии закрытия (спека §12):
+**Maniya-баг исправлен; релиз подтверждён на проде.** Криктерии закрытия (спека §12):
 
 1. ✅ Пустой-по-фильму кейс: XVideoCDN/ultra, ZetflixDB, Kinotochka (+zagonka/kinoflix/hdvb на
    Паразитах и Одиссее) — **HIDE** с авторитетной классификацией `absent` (полный волновой скан
@@ -152,9 +173,16 @@ W1-инвариант «контент на ЛЮБОЙ ноде → SHOW, ни �
    HDVB/Collaps не тронуты (filmix/rezka/pidtor/geosaitebi — документированные не-баги, незатронуты).
 5. ✅ Suite 742/736/0/6 зелёный.
 
-Изменённые файлы: `server/src/availability.js` (+`strictConfirmAllHosts`, +`confirmDeadline`),
-`server/test/availability-online8.test.js` (+6 тестов), `server/test/availability.test.js` (счётчики).
+5. ✅ Prod SHA == release commit (нормализованный по LF: `94cd428f…` == blob `ea67ec7`).
 
-**Commit: НЕТ · Push: НЕТ · Deploy: НЕТ** (отдельное разрешение не запрашивалось и не получено).
-Временные probe-скрипты удалены; аккаунтная пара в репо/доках не появлялась (замаскирована).
-Следующая волна MANIYA-E2E-ACCEPTANCE-001 НЕ запускается без отдельного подтверждения.
+Реализация: NO (2026-08-19) — код/тесты/отчёт. Релиз: `ea67ec7`, push backup/master +
+backup/gap-012-veoveo (origin не тронут), деплой `scripts/deploy.sh` → `/opt/maniya-online`,
+health/HTTPS 200.
+
+**Остаточный класс (НЕ дефект кода):** xvc/zetflixdb на Паразитах показываются (items=0) ТОЛЬКО в
+accsdb-окне кластера (устройство-uid не предоставлено в @skaztv_bot аккаунта `dorofe…`) — лечение =
+грант устройства, не код (см. §E-2). В 503-окне строгий скан прячет их авторитетно.
+
+**Commit: НЕТ · Push: НЕТ · Deploy: НЕТ** для ЭТОЙ итерации НЕ требуется (релиз уже проведён по
+отдельному разрешению). Временные probe-скрипты удалены; аккаунтная пара в репо/доках не появлялась
+(замаскирована). Следующая волна MANIYA-E2E-ACCEPTANCE-001 НЕ запускается без отдельного подтверждения.
