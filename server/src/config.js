@@ -246,12 +246,34 @@ export const config = {
     accountEmail: (process.env.SKAZ_ACCOUNT_EMAIL || process.env.EO_ACCOUNT_EMAIL || '').trim(),
     uid: (process.env.SKAZ_UID || process.env.EO_UID || '').trim(),
     // Обязательный Origin для потоков skaz/voidboost.
-    origin: (process.env.SKAZ_ORIGIN || process.env.EO_ORIGIN || 'http://lampa.mx').trim()
+    origin: (process.env.SKAZ_ORIGIN || process.env.EO_ORIGIN || 'http://lampa.mx').trim(),
+    // SKAZ-RCH-001: RCH-слой для rhub-балансеров кластера (`{"rch":true}`).
+    // enabled=false → прежнее поведение: rch-ответ = 2xx-non-usable (rollback,
+    // менять без деплоя нельзя); enabled=true → серверный RCH-клиент (Variant A).
+    rch: {
+      enabled: bool('SKAZ_RCH_ENABLED', true),
+      // Дедлайн одного RCH-цикла (registry-ack + repeat-запрос).
+      timeoutMs: integer('SKAZ_RCH_TIMEOUT_MS', 12_000),
+      // Максимум одновременных RCH-подключений (убер-гид по памяти/фд).
+      maxSessions: integer('SKAZ_RCH_MAX_SESSIONS', 24),
+      // Сессия живёт с последнего использования; close+drop после (cleanup).
+      sessionTtlMs: integer('SKAZ_RCH_SESSION_TTL_MS', 600_000),
+      // Стойкий `{rch:true}` → максимум раундов повтора (защита от loop).
+      maxRounds: integer('SKAZ_RCH_MAX_ROUNDS', 3),
+      // Тип клиентского подключения в RchRegistry. Дефолт 'apk' (пара с Lampa);
+      // live-probe на shadow-сервере подтверждает/уточняет (rchtype должен
+      // соответствовать серверному коннекту, не произвольная константа).
+      rchtype: (process.env.SKAZ_RCH_RCHTYPE || 'apk').trim(),
+      // Keep-alive: кластер рвёт молчащие WS через ~110с (NativeWebSocket).
+      keepaliveMs: integer('SKAZ_RCH_KEEPALIVE_MS', 50_000),
+      // Отладка RCH: только host/balancer/round/ok-длительность (никогда секреты).
+      debug: bool('SKAZ_RCH_DEBUG', false)
+    }
   },
   proxy: {
     // TASK-KINOTOCHKA-001: kvb.cool — CDN прямых MP4 Kinotochka (svd*.kvb.cool);
     // суффиксное сопоставление покрывает все ноды.
-    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'solodcdn.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com', 'sevstar933krop.com', 'entouaedon.com', 'vkvideo.cloud', 'cdntogo.net', 'rstprgapipt.com', 'mvapspdmpg.com', 'kvb.cool']),
+    allowHosts: list('PROXY_ALLOW_HOSTS', ['filmix.my', 'filmix.gg', 'filmix.tv', 'filmix.pub', 'filmix.fm', 'filmix.ac', 'werkecdn.me', 'cdnsqu.com', 'kodikres.com', 'solodcdn.com', 'stloadi.live', 'rutube.ru', 'rtbcdn.ru', 'vkuser.net', 'okcdn.ru', 'interkh.com', 'sevstar933krop.com', 'entouaedon.com', 'vkvideo.cloud', 'cdntogo.net', 'rstprgapipt.com', 'mvapspdmpg.com', 'kvb.cool', 'ashdi.vip', 'tortuga.tw']),
     // E-Online-хосты и CDN-манифест voidboost — http:// (validateProxyTarget по
     // умолчанию разрешает http только для loopback). Явный узкий список.
     httpAllowHosts: list('PROXY_HTTP_ALLOW_HOSTS', ['94.249.239.63', '94.249.239.37', '94.249.239.11', '77.90.33.109', 'skaz.tv', 'voidboost.one', 'voidboost.com', 'scts.tv']),

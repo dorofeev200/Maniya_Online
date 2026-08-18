@@ -3,6 +3,7 @@ import { buildProxyUrl, tokenFromRequest } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { SkazClient } from './SkazClient.js';
 import { SkazNormalizer } from './SkazNormalizer.js';
+import { SkazRchRegistry } from './SkazRchRegistry.js';
 
 /**
  * Кэш навигации кластера (videos → video): финальные карточки, которые videos()
@@ -61,13 +62,25 @@ export class SkazProvider extends Provider {
     this.show = options.show !== false;
     this.hiddenTwinNative = options.hiddenTwinNative || null;
     this.balancer = String(options.balancer || '').trim();
+    // SKAZ-RCH-001: per-provider RCH-реестр (сессии изолированы по user+host+
+    // providerId, см. SkazRchRegistry). Тесты инжектят свой (DI); прод строит
+    // из config.skaz.rch. Клиенты балансеров делят реестр — подключения
+    // переиспользуются между запросами, лимит maxSessions соблюдается.
+    const rchRegistry = options.rchRegistry || (config.skaz?.rch?.enabled ? new SkazRchRegistry(config.skaz.rch) : null);
     this.client = options.client || new SkazClient({
       balancer: this.balancer,
       hosts: options.hosts,
       accountEmail: options.accountEmail,
       uid: options.uid,
-      origin: options.origin
+      origin: options.origin,
+      rch: {
+        enabled: Boolean(rchRegistry),
+        registry: rchRegistry,
+        maxRounds: Number(config.skaz?.rch?.maxRounds || 3),
+        debug: Boolean(config.skaz?.rch?.debug)
+      }
     });
+    this.rchRegistry = rchRegistry;
     this.normalizer = options.normalizer || new SkazNormalizer();
     this._navCache = new Map();
   }
@@ -154,8 +167,20 @@ export class SkazProvider extends Provider {
     return host || undefined;
   }
 
+  /**
+   * RCH-контекст прокси-клиента: userUid (сессии изолированы по пользователю,
+   * § «host/identity» SKAZ-RCH-001) + пин карточки. Без userUid — клиент
+   * просто не сможет открыть RCH-сессию (rch_no_user), REST не затрагивается.
+   */
+  _rchOptions(requestContext = {}, pinnedHost) {
+    const options = { pinnedHost };
+    const userUid = String(requestContext?.userUid || '').trim();
+    if (userUid) options.userUid = userUid;
+    return options;
+  }
+
   async movieVideos(query, requestContext, streamProxy, pinnedHost) {
-    const { cards } = await this._cachedCollectMovieCards(query, pinnedHost);
+    const { cards } = await this._cachedCollectMovieCards(query, requestContext, pinnedHost);
     const items = [];
     let callIndex = 0;
 
@@ -200,16 +225,17 @@ export class SkazProvider extends Provider {
    * voice-индекс ленивого резолва не совпадёт с items в списке.
    * Возвращает финальные карточки (фильтр-предикат `hasMovieItems`).
    */
-  async collectMovieCards(query, pinnedHost) {
+  async collectMovieCards(query, requestContext = {}, pinnedHost) {
     const pageParams = this.buildPageParams(query);
-    const firstHtml = await this.client.getLite(pageParams, { pinnedHost });
+    const options = this._rchOptions(requestContext, pinnedHost);
+    const firstHtml = await this.client.getLite(pageParams, options);
     let cards = this.normalizer.cards(firstHtml || '');
     if (hasMovieItems(cards)) return { cards };
 
     // 1) follow-карточка (посительный title-скоринг; rezka/lumina).
     const href = this.movieHref(cards, query);
     if (href) {
-      const followed = this.normalizer.cards((await this.client.getLite({ ...pageParams, href }, { pinnedHost })) || '');
+      const followed = this.normalizer.cards((await this.client.getLite({ ...pageParams, href }, options)) || '');
       if (hasMovieItems(followed)) return { cards: followed };
     }
 
@@ -218,7 +244,7 @@ export class SkazProvider extends Provider {
     //    нет подходящей → null → возвращаем пусто, НЕ чужой фильм по similar.
     const postid = this.postidFromCards(cards, query);
     if (postid != null) {
-      const postCards = this.normalizer.cards((await this.client.getLite({ ...pageParams, postid: String(postid) }, { pinnedHost })) || '');
+      const postCards = this.normalizer.cards((await this.client.getLite({ ...pageParams, postid: String(postid) }, options)) || '');
       if (hasMovieItems(postCards)) return { cards: postCards };
     }
 
@@ -239,11 +265,11 @@ export class SkazProvider extends Provider {
    * балансера идентичен (риск §8.2 безопасен); пин лишь выбирает, КУДА идти при
    * cache-miss.
    */
-  async _cachedCollectMovieCards(query = {}, pinnedHost) {
+  async _cachedCollectMovieCards(query = {}, requestContext = {}, pinnedHost) {
     const key = this._movieNavKey(query);
     const hit = this._navCache.get(key);
     if (hit && Date.now() - hit.ts < NAV_CACHE_TTL_MS) return { cards: hit.cards };
-    const result = await this.collectMovieCards(query, pinnedHost);
+    const result = await this.collectMovieCards(query, requestContext, pinnedHost);
     if (result.cards && result.cards.length) {
       this._navCache.set(key, { ts: Date.now(), cards: result.cards });
       this._sweepNavCache();
@@ -257,11 +283,11 @@ export class SkazProvider extends Provider {
   }
 
   /** openSeasonPage с тем же кэшем (сериал: videos → resolveSerialVideo). */
-  async _cachedOpenSeasonPage(query = {}, pinnedHost) {
+  async _cachedOpenSeasonPage(query = {}, requestContext = {}, pinnedHost) {
     const key = this._serialNavKey(query);
     const hit = this._navCache.get(key);
     if (hit && Date.now() - hit.ts < NAV_CACHE_TTL_MS) return hit.nav;
-    const nav = await this.openSeasonPage(query, pinnedHost);
+    const nav = await this.openSeasonPage(query, requestContext, pinnedHost);
     if (nav) {
       this._navCache.set(key, { ts: Date.now(), nav });
       this._sweepNavCache();
@@ -277,27 +303,62 @@ export class SkazProvider extends Provider {
     }
   }
 
+  /**
+   * provider_error из lastRchError (SKAZ-RCH-001 §errors): RCH-отказ выносится
+   * в диагностику с узнаваемым кодом — НЕ маскируется под «контент отсутствует».
+   */
+  _rchProviderError() {
+    const err = this.client?.lastRchError;
+    if (!err || !err.code) return null;
+    const messages = {
+      rch_timeout: 'Кластер не ответил по RCH-каналу (таймаут)',
+      rch_unavailable: 'RCH-подключение к кластеру недоступно',
+      rch_repeated: 'Кластер не принял RCH-подключение (повторные rch)',
+      rch_no_user: 'Отсутствует RCH-контекст пользователя',
+      rch_unconfigured: 'RCH-слой не настроен',
+      rch_eval_unsupported: 'Кластер запросил eval-контекст (недоступен серверно)',
+      rch_fetch_denied: 'RCH-запрос отклонён защитой от SSRF',
+      rch_fetch_failed: 'RCH-запрос не выполнен',
+      rch_result_post_failed: 'Не удалось передать результат RCH кластеру'
+    };
+    return { code: err.code, message: messages[err.code] || 'Ошибка RCH-канала' };
+  }
+
   /** Прямой резолв `method:"call"` item'а (выбранный голос/серия) → дескриптор. */
   async resolveVideo(context = {}) {
     const requestContext = context || {};
     const query = requestContext.query || {};
     if (!this.enabled()) return null;
+    if (this.client) this.client.lastRchError = null;
     const pinnedHost = this.pinFromContext(requestContext);
     const streamProxy = (url) => buildProxyUrl(requestContext, url, {
       origin: this.client.origin,
       ref: this.client.origin
     });
     try {
-      return this.serialQuery(query)
+      const item = this.serialQuery(query)
         ? await this.resolveSerialVideo(query, requestContext, streamProxy, pinnedHost)
         : await this.resolveMovieVideo(query, requestContext, streamProxy, pinnedHost);
+      // RCH-отказ, помешавший получить дескриптор, — явная диагностика вместо
+      // голого null (null на /video = 'Поток не найден', что маскирует RCH).
+      if (!item && this.client?.lastRchError) {
+        return {
+          method: 'play',
+          title: '',
+          url: '',
+          type: this.serialQuery(query) ? 'serial' : 'movie',
+          subtitles: [],
+          provider_error: this._rchProviderError()
+        };
+      }
+      return item;
     } catch {
       return null;
     }
   }
 
   async resolveMovieVideo(query, requestContext, streamProxy, pinnedHost) {
-    const { cards } = await this._cachedCollectMovieCards(query, pinnedHost);
+    const { cards } = await this._cachedCollectMovieCards(query, requestContext, pinnedHost);
     const index = Number(query.voice) || 0;
     const videoCards = cards.filter((card) => card.method === 'call' && card.s == null && card.e == null);
     // Один и тот же предикат/порядок, что и в movieVideos (callIndex).
@@ -370,7 +431,7 @@ export class SkazProvider extends Provider {
   }
 
   async serialVideos(query, requestContext, streamProxy, pinnedHost) {
-    const nav = await this._cachedOpenSeasonPage(query, pinnedHost);
+    const nav = await this._cachedOpenSeasonPage(query, requestContext, pinnedHost);
     if (!nav) return { items: [], seasons: [], voices: [] };
     const { seasons, voices, seasonNumber, pageCards, voice } = nav;
 
@@ -425,8 +486,14 @@ export class SkazProvider extends Provider {
    * W1: базовый getLite и follow openLiteUrl — тот же сканирующий обход с
    * пином (preferred-first), что и фильм-путь.
    */
-  async openSeasonPage(query, pinnedHost) {
-    const html = await this.client.getLite(this.buildPageParams(query), { pinnedHost });
+  async openSeasonPage(query, requestContext = {}, pinnedHost) {
+    // Совместимость со старым вызовом openSeasonPage(query, pinnedHost).
+    if (typeof requestContext === 'string') {
+      pinnedHost = requestContext;
+      requestContext = {};
+    }
+    const options = this._rchOptions(requestContext, pinnedHost);
+    const html = await this.client.getLite(this.buildPageParams(query), options);
     if (!html) return null;
 
     const cards = this.normalizer.cards(html);
@@ -449,7 +516,7 @@ export class SkazProvider extends Provider {
     }
 
     const targetHref = this.seasonLinkHref(cards, voice, seasonNumber);
-    const pageHtml = targetHref ? await this.client.openLiteUrl(targetHref, { pinnedHost }) : html;
+    const pageHtml = targetHref ? await this.client.openLiteUrl(targetHref, options) : html;
     if (!pageHtml) return null;
     const pageCards = targetHref ? this.normalizer.cards(pageHtml) : cards;
 
@@ -462,7 +529,7 @@ export class SkazProvider extends Provider {
 
   /** Ленивый резолв `call`-серии: (voice, season, episode) from query → дескриптор. */
   async resolveSerialVideo(query, requestContext, streamProxy, pinnedHost) {
-    const nav = await this._cachedOpenSeasonPage(query, pinnedHost);
+    const nav = await this._cachedOpenSeasonPage(query, requestContext, pinnedHost);
     if (!nav) return null;
     const { pageCards, seasonNumber } = nav;
     const season = Number(query.season) || seasonNumber || 0;
@@ -503,6 +570,8 @@ export class SkazProvider extends Provider {
 
     if (!this.enabled()) return { items: [], seasons: [], voices: [] };
 
+    // Ошибки RCH/accsdb — по запросу (кэш-хит навигации не тащит чужую ошибку).
+    if (this.client) this.client.lastRchError = null;
     const pinnedHost = this.pinFromContext(requestContext);
     let result;
     try {
@@ -525,13 +594,20 @@ export class SkazProvider extends Provider {
       };
     }
 
+    // SKAZ-RCH-001 §errors: RCH-отказ — ОШИБКА канала, не «контента нет».
+    // Никогда не превращаем rch_timeout/unavailable/repeated/… в пустой список
+    // (иначе availability трактует источник как несуществующий).
+    if (this.client?.lastRchError) {
+      result.provider_error = result.provider_error || this._rchProviderError();
+    }
+
     return result;
   }
 
   async resolveCardStream(card, requestContext) {
     const raw = String(card.stream || card.url || '').trim();
     if (!raw) return null;
-    const final = await this.client.resolveStream(raw);
+    const final = await this.client.resolveStream(raw, this._rchOptions(requestContext));
     return final || null;
   }
 
@@ -545,8 +621,9 @@ export class SkazProvider extends Provider {
   async resolveCardItem(card, requestContext, streamProxy, overrides = {}) {
     const voice = String(overrides.voice || card.translate || card.voice_translate || '').trim() || 'Оригінал';
     const title = String(overrides.title || this.normalizerCardTitle(card) || voice).trim();
+    const rchOptions = this._rchOptions(requestContext);
 
-    const json = await this.client.resolveVideoJson?.(card.stream);
+    const json = await this.client.resolveVideoJson?.(card.stream, rchOptions);
     if (json) {
       const pair = splitOrUrl(json.url);
       const primary = pair[0];
@@ -570,7 +647,7 @@ export class SkazProvider extends Provider {
 
     const raw = String(card.stream || card.url || '').trim();
     if (!raw || isTorrentDescriptor(raw)) return null;
-    const streamUrl = await this.client.resolveStream(raw);
+    const streamUrl = await this.client.resolveStream(raw, rchOptions);
     if (!streamUrl || isTorrentDescriptor(streamUrl)) return null;
     return {
       method: 'play',
@@ -587,7 +664,7 @@ export class SkazProvider extends Provider {
   async resolveStream(card, requestContext) {
     const url = String(card.stream || card.url || '').trim();
     if (!url || isTorrentDescriptor(url)) return null;
-    const final = await this.client.resolveStream(url);
+    const final = await this.client.resolveStream(url, this._rchOptions(requestContext));
     if (!final || isTorrentDescriptor(final)) return null;
     return final;
   }

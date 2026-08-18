@@ -60,6 +60,25 @@ export class SkazClient {
     this._hostIndex = 0;
     /** @type {{message: string}|null} последний accsdb-ответ (учётная запись не grant). */
     this.lastAccsdb = null;
+    // SKAZ-RCH-001: RCH-слой (регистр сессий + политика). rch=false (дефолт) →
+    // поведение ровно прежнее: `{"rch":true}` обрабатывается как 2xx-non-usable.
+    this._rch = {
+      enabled: Boolean(options.rch?.enabled),
+      registry: options.rch?.registry || null,
+      maxRounds: Math.max(1, Number(options.rch?.maxRounds || 3)),
+      // Отладка RCH: только host/balancer/round/ok-длительность (SKAZ-RCH-DEBUG).
+      debug: Boolean(options.rch?.debug),
+      startMs: Date.now(),
+      _rounds: 0
+    };
+    /**
+     * Последняя категория RCH-отказа (SKAZ-RCH-001 §errors): timeout | unavailable
+     * | repeated (rch снова после подключённой сессии) | eval_unsupported |
+     * fetch_denied (SSRF-гард) | no_user. Провайдер отдаёт её как provider_error —
+     * ОШИБКА RCH никогда не маскируется под «контента нет».
+     * @type {{code: string, host?: string}|null}
+     */
+    this.lastRchError = null;
     /**
      * Классификация последнего скана getLite/openLiteUrl
      * (BALANCER-SEMANTICS-005-W1 §2.3): { nonContent, noResponse, total }.
@@ -95,7 +114,7 @@ export class SkazClient {
     const pinnedHost = String(options.pinnedHost || '').trim() || undefined;
     const url = this.buildLiteUrl(params, { pinnedHost });
     if (!url) return null;
-    return this._scanLite(this._liteTargets(url, pinnedHost));
+    return this._scanLite(this._liteTargets(url, pinnedHost), options);
   }
 
   /**
@@ -108,7 +127,7 @@ export class SkazClient {
     if (!url) return null;
     const pinnedHost = String(options.pinnedHost || '').trim() || undefined;
     const target = withAuth(url, this.accountEmail, this.uid);
-    return this._scanLite(this._liteTargets(target, pinnedHost));
+    return this._scanLite(this._liteTargets(target, pinnedHost), options);
   }
 
   /**
@@ -123,11 +142,13 @@ export class SkazClient {
    * (nonContent == total && noResponse == 0); иначе UNABLE (транзиент, НЕ EMPTY).
    * Классификация — в this.lastScan.
    */
-  async _scanLite(targets) {
+  async _scanLite(targets, options = {}) {
     this.lastAccsdb = null;
+    this.lastRchError = null;
     let nonContent = 0;
     let noResponse = 0;
     const total = targets.length;
+    const rchCandidates = [];
     for (const target of targets) {
       const response = await this.fetch(target);
       if (!response) {
@@ -151,14 +172,156 @@ export class SkazClient {
         this.lastScan = { nonContent, noResponse, total };
         return null;
       }
+      // RCH-кандидат: `{"rch":true,"nws":"ws(s)://…/nws"}` — контент на ноде ЕСТЬ,
+      // но отдаётся только через RCH-подключение (SKAZ-RCH-001). Для REST это
+      // 2xx-non-usable (сканирование продолжается), а в конце — RCH-повтор.
+      const rchInfo = parseRchPayload(text);
+      if (rchInfo) {
+        rchCandidates.push({ target, nws: rchInfo.nws, host: rchInfo.host || safeOrigin(target) });
+        nonContent += 1;
+        continue;
+      }
       if (isUsablePage(text)) {
         this.lastScan = { nonContent, noResponse, total };
         return text;
       }
       nonContent += 1;
     }
+
+    // Ни одна нода не дала usable-контента, но какая-то гейтнулась RCH →
+    // выполняем RCH-последовательность (Variant A): сессия → повтор с nws_id.
+    if (rchCandidates.length && this._rch.enabled) {
+      const rchText = await this._rchRetryPage(rchCandidates[0], options);
+      if (rchText) {
+        this.lastScan = { nonContent, noResponse, total, rch: true, rounds: this._rch._rounds };
+        return rchText;
+      }
+      // lastRchError уже установлен _rchRetryPage — провайдер отдаст ошибку,
+      // а не «пусто» (никогда не маскируем RCH-отказ под отсутствие источника).
+    }
+
     this.lastScan = { nonContent, noResponse, total };
     return null;
+  }
+
+  /**
+   * RCH-повтор страницы (SKAZ-RCH-001 §protocol): подключить сессию на хост,
+   * вернувший nws, и повторить ИСХОДНЫЙ запрос с `nws_id` (тот же хост —
+   * контекст найден только там, где живёт WS-соединение). Loop-защита:
+   * максимум maxRounds раундов; снова `{rch:true}` после живой сессии →
+   * новый UUID-цикл (release → fresh), в конце — rch_repeated.
+   */
+  async _rchRetryPage(candidate, options = {}) {
+    const userUid = String(options.userUid || '').trim();
+    if (!userUid) {
+      this.lastRchError = { code: 'rch_no_user' };
+      return null;
+    }
+    const registry = this._rch.registry;
+    if (!registry) {
+      this.lastRchError = { code: 'rch_unconfigured' };
+      return null;
+    }
+    const providerId = `skaz-${this.balancer}`;
+    this._rch._rounds = 0;
+
+    let currentNws = candidate.nws;
+    let currentHost = candidate.host;
+    let target = candidate.target;
+
+    for (let round = 0; round < this._rch.maxRounds; round += 1) {
+      this._rch._rounds = round + 1;
+      const roundStart = Date.now();
+      const session = await registry.acquire(userUid, currentHost, providerId, currentNws);
+      if (!session) {
+        this.lastRchError = { code: 'rch_unavailable', host: currentHost };
+        return null;
+      }
+      this.lastRchError = null;
+
+      const text = await this._rchFetchWithSession(target, session, currentHost);
+      if (text == null) {
+        this.lastRchError = { code: 'rch_timeout', host: currentHost };
+        if (this._rch.debug) this._debugRound(round + 1, currentHost, 'timeout', Date.now() - roundStart);
+        return null;
+      }
+
+      const accsdb = extractAccsdbMessage(text);
+      if (accsdb) {
+        if (isAwaitingFilmAccsdb(accsdb)) {
+          this.lastRchError = null; // контента реально нет (не отказ RCH)
+          if (this._rch.debug) this._debugRound(round + 1, currentHost, 'empty', Date.now() - roundStart);
+          return null;
+        }
+        this.lastAccsdb = accsdb;
+        this.lastRchError = null;
+        return null;
+      }
+
+      if (isUsablePage(text)) {
+        if (this._rch.debug) this._debugRound(round + 1, currentHost, 'content', Date.now() - roundStart);
+        return text;
+      }
+
+      const again = parseRchPayload(text);
+      if (again) {
+        // Снова `{rch:true}` при живой сессии: кластер не увидел подключение —
+        // свежий UUID-цикл (release → новая связка id→connectionId). Цель
+        // остаётся исходной (host задаётся currentHost на каждом fetch).
+        if (this._rch.debug) this._debugRound(round + 1, currentHost, 'rch-again', Date.now() - roundStart);
+        registry.release(userUid, currentHost, providerId);
+        currentNws = again.nws || currentNws;
+        currentHost = again.host || currentHost;
+        continue;
+      }
+
+      // Не-rch, не-usable, не-accsdb (например `disable`) — повтор бесполезен.
+      this.lastRchError = null;
+      return null;
+    }
+
+    // Раунды исчерпаны, контента так и нет — кластер упорно просит RCH.
+    this.lastRchError = { code: 'rch_repeated', host: currentHost };
+    return null;
+  }
+
+  /**
+   * Повтор запроса с nws_id, зафиксированный на хост сессии (никакой ротации).
+   * Читаем тело на ЛЮБОМ status (в отличие от this.fetch — STATUS_REST-only):
+   * кластер после разблокировки сессии отвечает своими стандартными кодами,
+   * и `503` + тело `null` — это его обычный «контента нет» (EMPTY), а НЕ отказ
+   * RCH. Классификация тела остаётся за _rchRetryPage.
+   */
+  async _rchFetchWithSession(target, session, host) {
+    const pinned = swapHost(target, host);
+    const url = withParam(pinned, 'nws_id', session.nwsId);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(this.timeoutMs), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(url, { headers: { accept: '*/*' }, signal: controller.signal });
+      if (!response) return null;
+      const text = await response.text().catch(() => null);
+      if (text == null) return null;
+      // Только «null»-тело 503 — нормальный EMPTY кластера. Иной 4xx/5xx —
+      // настоящий отказ upstream (5xx-HTML, 401, …) → rch_timeout в _rchRetryPage.
+      if (response.status >= 400) {
+        const trimmed = text.trim();
+        if (trimmed === '' || trimmed === 'null') return text;
+        return null;
+      }
+      return text;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  _debugRound(round, host, outcome, durationMs) {
+    // Разрешено к логированию (SKAZ-RCH-001 §logging): host/balancer/round/ok-длительность.
+    // НИКОГДА: nws_id, токены, opaque-URL, тело ответа.
+    // eslint-disable-next-line no-console
+    console.error(`[skaz-rch] ${this.balancer} host=${host} round=${round} outcome=${outcome} ${durationMs}ms`);
   }
 
   /**
@@ -192,11 +355,27 @@ export class SkazClient {
    * GET с `Origin` → финальный манифест/mp4 (redirects). Auth-параметры
    * наружу не уходят.
    */
-  async resolveStream(streamUrl) {
+  async resolveStream(streamUrl, options = {}) {
     if (!streamUrl) throw new HttpError(400, 'skaz_no_stream', 'skaz: пустая ссылка потока');
     const target = withAuth(streamUrl, this.accountEmail, this.uid);
     const { response, finalUrl } = await this.fetchResolved(target, { Origin: this.origin });
     if (!response) return null;
+    // RCH-гейт на video-конце (rhub): JSON `{rch:true,nws}` вместо редиректа →
+    // RCH-последовательность, иначе финальный CDN-URL берём как раньше.
+    const ctype = String(response.headers?.get?.('content-type') || '').toLowerCase();
+    if (ctype.includes('json')) {
+      const text = await response.text().catch(() => null);
+      const rchInfo = parseRchPayload(text);
+      if (rchInfo) {
+        const resolved = await this._rchFetchResolved(target, rchInfo, { Origin: this.origin }, options);
+        if (resolved == null) return null;
+        const parsed = tryJson(resolved);
+        if (parsed && parsed.method === 'play' && String(parsed.url || '').trim()) {
+          return String(parsed.url).split(/\s+or\s+|\s*%20or%20\s*/gi)[0].trim() || null;
+        }
+        return String(resolved).trim() || null;
+      }
+    }
     return finalUrl || String(target).trim();
   }
 
@@ -211,7 +390,7 @@ export class SkazClient {
    * Возвращает распарсенный объект или null (не JSON/method!=play/url пуст/
    * сеть) — провайдер в этом случае уйдёт в resolveStream-фолбэк.
    */
-  async resolveVideoJson(streamUrl) {
+  async resolveVideoJson(streamUrl, options = {}) {
     const raw = String(streamUrl || '').trim();
     if (!raw) return null;
     let target;
@@ -227,6 +406,16 @@ export class SkazClient {
     if (!response) return null;
     const text = await response.text().catch(() => null);
     if (!text) return null;
+    // RCH-гейт на JSON-конце (rhub): `{rch:true,nws}` → RCH-повтор и парсим
+    // JSON из результата (никакого дублирования парсинга — тот же check ниже).
+    const rchInfo = parseRchPayload(text);
+    if (rchInfo) {
+      const resolved = await this._rchFetchResolved(target, rchInfo, { Origin: this.origin }, options);
+      if (resolved == null) return null;
+      const reparsed = tryJson(resolved);
+      if (!reparsed || typeof reparsed !== 'object' || reparsed.method !== 'play' || !String(reparsed.url || '').trim()) return null;
+      return reparsed;
+    }
     let parsed = null;
     try {
       parsed = JSON.parse(text);
@@ -235,6 +424,55 @@ export class SkazClient {
     }
     if (!parsed || typeof parsed !== 'object' || parsed.method !== 'play' || !String(parsed.url || '').trim()) return null;
     return parsed;
+  }
+
+  /**
+   * RCH-последовательность для «video»-запросов (resolveStream/resolveVideoJson):
+   * сессия на хосте из nws → повтор с `nws_id` (с Origin) → текст результата.
+   * Loop-защита как в _rchRetryPage (maxRounds; снова rch → fresh-цикл).
+   */
+  async _rchFetchResolved(target, rchInfo, headers = {}, options = {}) {
+    const userUid = String(options.userUid || '').trim();
+    if (!userUid) {
+      this.lastRchError = { code: 'rch_no_user' };
+      return null;
+    }
+    const registry = this._rch.registry;
+    if (!registry) {
+      this.lastRchError = { code: 'rch_unconfigured' };
+      return null;
+    }
+    const providerId = `skaz-${this.balancer}`;
+    let currentNws = rchInfo.nws;
+    let currentHost = rchInfo.host || safeOrigin(target);
+
+    for (let round = 0; round < this._rch.maxRounds; round += 1) {
+      const session = await registry.acquire(userUid, currentHost, providerId, currentNws);
+      if (!session) {
+        this.lastRchError = { code: 'rch_unavailable', host: currentHost };
+        return null;
+      }
+      this.lastRchError = null;
+      const url = withParam(swapHost(target, currentHost), 'nws_id', session.nwsId);
+      const { response } = await this.fetchResolved(url, headers);
+      if (!response) {
+        this.lastRchError = { code: 'rch_timeout', host: currentHost };
+        return null;
+      }
+      const text = await response.text().catch(() => null);
+      if (text == null) {
+        this.lastRchError = { code: 'rch_timeout', host: currentHost };
+        return null;
+      }
+      const again = parseRchPayload(text);
+      if (!again) return text;
+      // Снова `{rch:true}` — свежий цикл (новая связка id→connectionId).
+      registry.release(userUid, currentHost, providerId);
+      currentNws = again.nws || currentNws;
+      currentHost = again.host || currentHost;
+    }
+    this.lastRchError = { code: 'rch_repeated', host: currentHost };
+    return null;
   }
 
   /**
@@ -385,6 +623,56 @@ export function isRchPayload(text) {
   return /"rch"\s*:\s*true/i.test(String(text || ''));
 }
 
+/**
+ * HTTP-origin WS-URL кластера: `ws://host:port/nws` → `http://host:port`,
+ * `wss://…` → `https://…`. Повторный RCH-запрос идёт на ЭТОТ хост (там живёт
+ * WS-соединение, RchClient.SocketClient проверяет ip+connection), но по HTTP.
+ */
+function rchHttpOrigin(nws) {
+  try {
+    const u = new URL(nws);
+    u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
+    u.pathname = '/';
+    u.search = '';
+    u.hash = '';
+    return u.origin; // например `http://online8.skaz.tv:8443`
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Разобрать RCH-ответ `{"rch":true,"nws":"ws(s)://<host>/nws"}`.
+ * Возвращает `{rch:true, nws, host}` (host = HTTP-origin хоста WS) или null
+ * (не rch, нет nws, корявый JSON). host/url НЕ содержат секретов.
+ */
+export function parseRchPayload(text) {
+  const raw = String(text || '').trim();
+  if (!raw.startsWith('{')) return null;
+  if (!isRchPayload(raw)) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || parsed.rch !== true) return null;
+  const nws = String(parsed.nws || '').trim();
+  if (!/^wss?:\/\//i.test(nws)) return null;
+  return { rch: true, nws, host: rchHttpOrigin(nws) };
+}
+
+/** JSON.parse без бросков (результат RCH-повтора может быть битым/не-JSON). */
+export function tryJson(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 /** Детект `{"accsdb":true}` — неверная пара email+uid (в JSON-теле). */
 export function isAccsdbPayload(text) {
   return /"accsdb"\s*:\s*true/i.test(String(text || ''));
@@ -498,5 +786,16 @@ function withAuth(url, accountEmail, uid) {
     return parsed.toString();
   } catch {
     return target;
+  }
+}
+
+/** Поставить query-параметр в URL (URL-безопасно, не дублируя). */
+function withParam(url, key, value) {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.searchParams.has(key)) parsed.searchParams.set(key, String(value));
+    return parsed.toString();
+  } catch {
+    return url;
   }
 }
