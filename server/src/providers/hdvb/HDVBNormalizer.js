@@ -85,6 +85,20 @@ export class HDVBNormalizer {
     return {};
   }
 
+  /**
+   * FINAL-PLAYBACK-GAP-001: свежие фильмы hdvb в POST playlist возвращают не m3u8,
+   * а JSON-массив озвучек `[{title, id, translator, file}]` (в отличие от сериальных
+   * Folder[] с `folder`). Берём file выбранной озвучки (Дубляж, иначе первой).
+   * Локаль для movie: сезонные элементы имеют `folder`, озвучки — `file`.
+   */
+  voiceFile(folders) {
+    if (!Array.isArray(folders) || !folders.length) return '';
+    const voices = folders.filter((v) => v && typeof v.file === 'string' && v.file && !v.folder);
+    if (!voices.length) return '';
+    const dub = voices.find((v) => /дубляж/i.test(String(v.title || '')));
+    return this.cleanFile((dub || voices[0]).file);
+  }
+
   /** Серия сериала: file по id сезона, episode и title перевода. */
   episodeFile(folders, seasonId, episode, translator) {
     if (!Array.isArray(folders) || !seasonId || episode === undefined || episode === null) return '';

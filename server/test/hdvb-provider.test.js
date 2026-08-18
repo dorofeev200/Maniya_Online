@@ -289,3 +289,92 @@ test('HDVBProvider: client/normalizer инъекции', () => {
   assert.equal(provider.client, client);
   assert.equal(provider.normalizer, normalizer);
 });
+
+// --- FINAL-PLAYBACK-GAP-001: kp=0 title-поиск выбирает правильный фильм по году ---
+// Свежие релизы: «Дэдпул и Росомаха» (2024) — целевой; в API первым идёт decoy «Дэдпул 2».
+// Копирует реальный кейс: hdvb по названию возвращает первые записи не по хронологии,
+// без учёта года из запроса плеер ставит не тот фильм.
+
+const TITLE_SEARCH_MATRIX = [
+  { type: 'movie', iframe_url: 'https://vid1.sevstar933krop.com/movie/dp2/iframe', title_ru: 'Дэдпул 2', title_en: 'Deadpool 2', year: 2018, kinopoisk_id: 1046126, translator: 'Дубляж' },
+  { type: 'movie', iframe_url: 'https://vid1.sevstar933krop.com/movie/dp/iframe', title_ru: 'Дэдпул', title_en: 'Deadpool', year: 2016, kinopoisk_id: 530064, translator: 'Дубляж' },
+  { type: 'movie', iframe_url: 'https://vid1.sevstar933krop.com/movie/dpr/iframe', title_ru: 'Дэдпул и Росомаха', title_en: 'Deadpool & Wolverine', year: 2024, kinopoisk_id: 1008444, translator: 'Дубляж' }
+];
+
+test('HDVBProvider.videos: kp=0 поиск по названию → год запроса выбирает нужный свежий фильм, а не первое совпадение', async () => {
+  const client = new FakeHDVBClient({
+    data: TITLE_SEARCH_MATRIX,
+    iframeHtml: MOVIE_IFRAME,
+    playlistByFile: { '/movie-file-xyz': MOVIE_M3U8 }
+  });
+  const provider = new HDVBProvider({ client });
+  // Первая запись API — «Дэдпул 2» (2018), год из запроса (2024) должен
+  // вывести вперёд «Дэдпул и Росомаха» kp=1008444.
+  const payload = await provider.videos({ query: { title: 'Дэдпул и Росомаха', year: '2024', serial: 0 } });
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0].voice_name, 'Дубляж');
+  const iframePath = client.calls.filter(([method]) => method === 'iframe').map(([, p]) => p);
+  assert.deepEqual(iframePath, ['/movie/dpr/iframe']); // правильный фильм, не /movie/dp2/
+});
+
+test('HDVBProvider.preferYear: без года — прежний порядок; с годом — совпадения вперёд, стабильный хвост', () => {
+  const provider = new HDVBProvider({ client: new FakeHDVBClient() });
+  const list = TITLE_SEARCH_MATRIX;
+  assert.deepEqual(provider.preferYear(list, {}).map((v) => v.kinopoisk_id), [1046126, 530064, 1008444]);
+  assert.deepEqual(provider.preferYear(list, { year: '0' }).map((v) => v.kinopoisk_id), [1046126, 530064, 1008444]);
+  assert.deepEqual(provider.preferYear(list, { year: '2024' }).map((v) => v.kinopoisk_id), [1008444, 1046126, 530064]);
+  assert.deepEqual(provider.preferYear(list, { year: '2018' }).map((v) => v.kinopoisk_id), [1046126, 530064, 1008444]);
+  assert.deepEqual(provider.preferYear(list, { year: '1970' }).map((v) => v.kinopoisk_id), [1046126, 530064, 1008444]); // нет совпадений — без изменений
+  assert.deepEqual(provider.preferYear([], { year: '2024' }), []);
+});
+
+// --- FINAL-PLAYBACK-GAP-001: свежие фильмы отдают voice-массив вместо m3u8 ---
+
+const VOICE_IFRAME = `
+<script>
+  var __ = {
+    "key": "csrf-voice",
+    "href": "sevstar933krop.com",
+    "file": "/playlist/gladiator2.txt"
+  };
+</script>`;
+
+const VOICE_LIST = JSON.stringify([
+  { title: 'Қазақша', id: 'kaz', translator: '213', file: '~kaz-file' },
+  { title: 'Дубляж [Чистый звук]', id: 'dub', translator: '109', file: '~dub-file' }
+]);
+
+const VOICE_M3U8 = 'https://b-401.sevstar933krop.com/stream2/b-401/gladiator2/index.m3u8?exp=1&ip=1.2.3.4';
+
+const VOICE_MOVIE_DATA = [
+  { type: 'movie', iframe_url: 'https://vid1.sevstar933krop.com/movie/gl2/iframe', translator: 'Дубляж [Чистый звук]', title_ru: 'Гладиатор 2', title_en: 'Gladiator II', year: 2024, kinopoisk_id: 1207839 }
+];
+
+test('HDVBNormalizer.voiceFile: выбирает Дубляж; фолбэк — первой; сериал — пусто', () => {
+  const n = new HDVBNormalizer();
+  assert.equal(n.voiceFile(JSON.parse(VOICE_LIST)), '~dub-file'); // Дубляж, не Қазақша
+  assert.equal(n.voiceFile([]), '');
+  assert.equal(n.voiceFile(null), '');
+  // Без Дубляжа — первая озвучка.
+  assert.equal(n.voiceFile([{ title: 'Оригинал', file: '~or' }, { title: 'Дубляж', file: '~du' }]), '~du');
+  // Сериальные Folder[] (элементы с `folder`, без `file`) — не voice-массив.
+  assert.equal(n.voiceFile([{ id: 1, title: 'Сезон 1', folder: [] }]), '');
+});
+
+test('HDVBProvider.videos: voice-массив → Дубляж → финальный POST → m3u8 (не items=0)', async () => {
+  const client = new FakeHDVBClient({
+    data: VOICE_MOVIE_DATA,
+    iframeHtml: VOICE_IFRAME,
+    playlistByFile: { '/gladiator2': VOICE_LIST, '~dub-file': VOICE_M3U8 }
+  });
+  const provider = new HDVBProvider({ client });
+  const payload = await provider.videos({ query: { title: 'Гладиатор 2', year: '2024', serial: 0 } });
+  assert.equal(payload.items.length, 1);
+  const item = payload.items[0];
+  assert.equal(item.method, 'play');
+  assert.match(item.url, /\/api\/lampa\/proxy\?url=/);
+  assert.equal(item.voice_name, 'Дубляж [Чистый звук]');
+  // Два POST: первый — vozмассив, второй — file озвучки Дубляж.
+  const posts = client.calls.filter(([method]) => method === 'post').map(([, file]) => file);
+  assert.deepEqual(posts, ['/gladiator2', '~dub-file']);
+});

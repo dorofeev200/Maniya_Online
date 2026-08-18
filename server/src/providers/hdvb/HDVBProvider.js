@@ -176,18 +176,30 @@ export class HDVBProvider extends Provider {
   /**
    * POST playlist → m3u8 (с 2-й итерацией для movie). episodeFile — необязательный
    * file конкретной серии (иначе file из iframe).
+   *
+   * FINAL-PLAYBACK-GAP-001: свежие фильмы возвращают JSON-массив озвучек
+   * `[{title,id,translator,file}]` вместо прямого m3u8. После nextFile-итерации
+   * при наличии voice-массива берём Дубляж (voiceFile) и делаем финальный POST.
    */
   async resolvePlaylist(embed, episodeFile) {
-    let text = await this.client.postPlaylist({
+    const post = (file) => this.client.postPlaylist({
       href: embed.href,
       key: embed.key,
-      file: this.normalizer.cleanFile(episodeFile || embed.file),
+      file: this.normalizer.cleanFile(file),
       origin: this.frameOrigin()
     });
+    let text = await post(episodeFile || embed.file);
     let parsed = this.normalizer.parsePlaylistResponse(text);
     if (parsed.nextFile) {
-      text = await this.client.postPlaylist({ href: embed.href, key: embed.key, file: parsed.nextFile, origin: this.frameOrigin() });
+      text = await post(parsed.nextFile);
       parsed = this.normalizer.parsePlaylistResponse(text);
+    }
+    if (!parsed.m3u8 && Array.isArray(parsed.folders)) {
+      const voiceFile = this.normalizer.voiceFile(parsed.folders);
+      if (voiceFile) {
+        text = await post(voiceFile);
+        parsed = this.normalizer.parsePlaylistResponse(text);
+      }
     }
     return parsed.m3u8 || '';
   }
@@ -215,7 +227,23 @@ export class HDVBProvider extends Provider {
     const kinopoiskId = Number(query.kinopoisk_id || query.kp || 0) || 0;
     const title = String(query.title || query.original_title || '').trim();
     const data = await this.client.videos({ kinopoiskId, title });
-    return Array.isArray(data) ? data : [];
+    const list = Array.isArray(data) ? data : [];
+    return kinopoiskId ? list : this.preferYear(list, query);
+  }
+
+  /**
+   * FINAL-PLAYBACK-GAP-001: title-поиск hdvb не фильтрует по году и часто отдаёт
+   * первым «севфильм» («Матрица» → «Матрица: Воскрешение» 2021, «Интерстеллар» →
+   * «блуждающие земляне» 2019). Lampac в kp=0-ветке показывает список кандидатов;
+   * здесь при наличии query.year делаем ближайший выбор — записи с совпадающим
+   * годом вперёд, прочие сохраняют порядок. Без года — прежнее поведение (первая).
+   */
+  preferYear(records, query) {
+    const year = Number(query.year) || 0;
+    if (!year || !records.length) return records;
+    const match = records.filter((v) => Number(v?.year) === year);
+    if (!match.length) return records;
+    return [...match, ...records.filter((v) => Number(v?.year) !== year)];
   }
 
   async recordsByType(queryOrContext, context, type) {
