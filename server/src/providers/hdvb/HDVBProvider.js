@@ -227,7 +227,18 @@ export class HDVBProvider extends Provider {
     const kinopoiskId = Number(query.kinopoisk_id || query.kp || 0) || 0;
     const title = String(query.title || query.original_title || '').trim();
     const data = await this.client.videos({ kinopoiskId, title });
-    const list = Array.isArray(data) ? data : [];
+    let list = Array.isArray(data) ? data : [];
+    // HDVB-TITLE-ONLY-001: title-only (kp=0) может вернуть пусто, хотя фильм есть
+    // в апстриме под оригинальным названием («Гладиатор II» → 0, «Gladiator II» → 3).
+    // Ретрай с original_title только при пустом первичном поиске — не ослабляет
+    // фильтры (не расширяет по подобию), год по-прежнему отбирает preferYear.
+    if (!kinopoiskId && !list.length) {
+      const originalTitle = String(query.original_title || '').trim();
+      if (originalTitle && originalTitle !== title) {
+        const retry = await this.client.videos({ kinopoiskId: 0, title: originalTitle });
+        if (Array.isArray(retry)) list = retry;
+      }
+    }
     return kinopoiskId ? list : this.preferYear(list, query);
   }
 

@@ -7,9 +7,10 @@ import { HDVBNormalizer } from '../src/providers/hdvb/HDVBNormalizer.js';
 
 /** Fake HDVBClient: методы, которые зовёт провайдер. */
 class FakeHDVBClient {
-  constructor({ data = null, iframeHtml = '', playlistByFile = {}, enabled = true } = {}) {
+  constructor({ data = null, dataByTitle = {}, iframeHtml = '', playlistByFile = {}, enabled = true } = {}) {
     this.calls = [];
     this.data = data;
+    this.dataByTitle = dataByTitle;
     this.iframeHtml = iframeHtml;
     this.playlistByFile = playlistByFile;
     this.enabledFlag = enabled;
@@ -24,6 +25,7 @@ class FakeHDVBClient {
 
   async videos(options) {
     this.calls.push(['videos', options]);
+    if (Object.prototype.hasOwnProperty.call(this.dataByTitle, options.title)) return this.dataByTitle[options.title];
     return this.data;
   }
 
@@ -359,6 +361,50 @@ test('HDVBNormalizer.voiceFile: выбирает Дубляж; фолбэк — 
   assert.equal(n.voiceFile([{ title: 'Оригинал', file: '~or' }, { title: 'Дубляж', file: '~du' }]), '~du');
   // Сериальные Folder[] (элементы с `folder`, без `file`) — не voice-массив.
   assert.equal(n.voiceFile([{ id: 1, title: 'Сезон 1', folder: [] }]), '');
+});
+
+// --- HDVB-TITLE-ONLY-001: title-only пусто → ретрай с original_title ---
+// «Гладиатор II» (2024, kp 1207839): upstream по title=«Гладиатор II» → [],
+// при этом тот же фильм есть под title=«Gladiator II». Реальный клиент шлёт
+// title + original_title + year (maniya-online.js addMovieParams).
+
+test('HDVBProvider.videos: title-only пуст → ретрай с original_title → обычная цепочка (Гладиатор II)', async () => {
+  const client = new FakeHDVBClient({
+    dataByTitle: {
+      'Гладиатор II': [],
+      'Gladiator II': VOICE_MOVIE_DATA
+    },
+    iframeHtml: VOICE_IFRAME,
+    playlistByFile: { '/gladiator2': VOICE_LIST, '~dub-file': VOICE_M3U8 }
+  });
+  const provider = new HDVBProvider({ client });
+  const payload = await provider.videos({
+    query: { title: 'Гладиатор II', original_title: 'Gladiator II', year: '2024', serial: 0 }
+  });
+
+  assert.equal(payload.items.length, 1);
+  const item = payload.items[0];
+  assert.equal(item.method, 'play');
+  assert.match(item.url, /\/api\/lampa\/proxy\?url=/);
+  assert.equal(item.voice_name, 'Дубляж [Чистый звук]');
+  // Два запроса videos: первичный title (пусто) + ретрай original_title (нужные записи).
+  const videoTitles = client.calls.filter(([method]) => method === 'videos').map(([, o]) => o.title);
+  assert.deepEqual(videoTitles, ['Гладиатор II', 'Gladiator II']);
+  const posts = client.calls.filter(([method]) => method === 'post').map(([, file]) => file);
+  assert.deepEqual(posts, ['/gladiator2', '~dub-file']);
+});
+
+test('HDVBProvider.fetchData: kp=0 title-only пуст И пуст empty original_title → без ретрая', async () => {
+  const client = new FakeHDVBClient({
+    dataByTitle: { 'Нечто': [] },
+    iframeHtml: MOVIE_IFRAME,
+    playlistByFile: { '/movie-file-xyz': MOVIE_M3U8 }
+  });
+  const provider = new HDVBProvider({ client });
+  const records = await provider.fetchData({ title: 'Нечто', original_title: '', year: '2024' });
+  assert.equal(records.length, 0);
+  const videoTitles = client.calls.filter(([method]) => method === 'videos').map(([, o]) => o.title);
+  assert.deepEqual(videoTitles, ['Нечто']); // ретрая не было
 });
 
 test('HDVBProvider.videos: voice-массив → Дубляж → финальный POST → m3u8 (не items=0)', async () => {
