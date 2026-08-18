@@ -457,7 +457,10 @@ test('card: inconclusive-ряд (таймаут) кэшируется — 2-й �
   assert.equal(byId(second, 'skaz-rezka').show, true);
   assert.equal(byId(second, 'skaz-rezka').inconclusive, true, 'hit сохраняет INCONCLUSIVE — фактический вердикт');
   assert.equal(second.hasInconclusive, true);
-  assert.equal(fetches, 4, 'второй вызов — hit без re-checksearch (первый: 2×1 контент-стоп + 2 таймаут = 4; filmix trusted не пробируется)');
+  // BALANCER-FINAL-AVAILABILITY-001: INCONCLUSIVE-ряд (rezka-таймаут) подтверждается
+  // строгой пробой (h1+h2 таймаут — вердикта нет → показ СОХРАНЁН) → +2 fetch на первом
+  // calc; второй вызов всё равно cache-hit.
+  assert.equal(fetches, 6, 'первый calc: 2×1 контент-стоп + (2+2) таймаут(первичный+строгий-confirm) = 6; второй — hit без re-checksearch; filmix trusted не пробируется');
 });
 
 test('card: параллельно — все НЕ-trusted балансеры запрошены одновременно', async () => {
@@ -743,7 +746,9 @@ test('card: single-flight — slow-flight (rezka таймаутит) разде�
   const results = await concurrentCards(checker, 5);
   const batchMs = Date.now() - t0;
 
-  assert.equal(fetches.filter((b) => b === 'rezka').length, 2, 'rezka пробована один раз (h1+h2), НЕ 5 раз');
+  // BALANCER-FINAL-AVAILABILITY-001: INCONCLUSIVE-show ряд (таймаут) подтверждается
+  // строгой пробой (ещё h1+h2); таймаут в подтверждении → inconclusive → показ сохранён.
+  assert.equal(fetches.filter((b) => b === 'rezka').length, 4, 'rezka: 2 первичных (h1+h2) + 2 строгого подтверждения, НЕ 5 раз (flight общий)');
   assert.ok(results.every((r) => r.sources === results[0].sources), 'все 5 разделяют один полёт');
   assert.equal(byId(results[0], 'skaz-rezka').inconclusive, true, 'таймаут → INCONCLUSIVE, не «нет»');
   assert.equal(results[0].hasInconclusive, true);

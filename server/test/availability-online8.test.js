@@ -186,7 +186,7 @@ test('abstain НЕ влияет на kinopub: online3=503 + online8=200 `null` �
 
 // ===== карточка (card): абстаин в связке с confirm-гейтом (checksearch + lite-page) =====
 
-test('card (abstain): ОБА сигнала = статусный шум primary + online8 abstain → show/inconclusive (hide невозможен)', async () => {
+test('card (abstain): ВСЕ хосты non-2xx (полный скан без контента) → strict-подтверждение → hide (BALANCER-FINAL-AVAILABILITY-001)', async () => {
   const checker = makeChecker((url) => {
     if (String(url).includes('online3')) return Promise.resolve(response(503, ''));
     return Promise.resolve(response(403, DISABLE));
@@ -195,6 +195,77 @@ test('card (abstain): ОБА сигнала = статусный шум primary 
   // skaz-alloha (НЕ в TRUSTED_ALWAYS_VISIBLE — проверка честно идёт через probe).
   const row = result.sources.find((s) => s.id === 'skaz-alloha');
   assert.ok(row, 'skaz-alloha виден в карточке');
-  assert.equal(row.show, true, 'статусный шум не прячет источник');
-  assert.equal(row.inconclusive, true, 'остаётся inconclusive — HIDE_TTL self-heal сохранён');
+  // Раньше (до фикса): optimistic-show (inconclusive) → source показан, но /videos=0
+  // (пустой источник из-за abstain-«статусный шум ≠ нет»). Теперь optimistic-show
+  // подтверждается СТРОГИМ прямым lite-page: полный скан без контента ни на одной
+  // ноде = «у этого источника этого фильма нет» → авторитетный hide.
+  assert.equal(row.show, false, 'нет контента ни на одной ноде (все хосты non-2xx) → source скрыт');
+  assert.equal(row.authoritative, true, 'строй вердикт авторитетен (не inconclusive)');
+  assert.equal(row.confirmed, true, 'подтверждён вторым (строгим) сигналом');
+});
+
+test('card (abstain): контент на ЛЮБОЙ ноде (online3=503 + online8=200 content) → hide невозможен (W1: контент не прячем)', async () => {
+  const checker = makeChecker((url) => {
+    if (String(url).includes('online3')) return Promise.resolve(response(503, ''));
+    return Promise.resolve(response(200, CONTENT));
+  }, { reservePolicy: 'abstain' });
+  const result = await checker.card(QUERY, 'uid-1');
+  const row = result.sources.find((s) => s.id === 'skaz-alloha');
+  assert.equal(row.show, true, 'content-ответ на любой ноде — авторитетный SHOW (W1 не сломан)');
+  assert.equal(row.authoritative, true);
+  assert.equal(row.host, 'http://online8.skaz.tv', 'показ с ноды с контентом');
+});
+
+test('strict-подтверждение: полный скан 2xx-EMPTY (`null` все хосты) → hide (EMPTY классификация)', async () => {
+  const checker = makeChecker((url) => Promise.resolve(response(200, NON_CONTENT)), { reservePolicy: 'abstain' });
+  const result = await checker.card(QUERY, 'uid-1');
+  const row = result.sources.find((s) => s.id === 'skaz-alloha');
+  assert.equal(row.show, false, '2xx-EMPTY на всех хостах = content-«нет» → hide');
+  assert.equal(row.confirmed, true);
+});
+
+test('strict-подтверждение: decoy-карточка чужого фильма (comparables-script, title не совпал) → hide (RULE-1)', async () => {
+  const DECOY = '<html>data-json={"method":"link","title":"Полтергейст","year":2010}</html>';
+  const checker = makeChecker((url) => Promise.resolve(response(200, DECOY)), { reservePolicy: 'abstain' });
+  const result = await checker.card(QUERY, 'uid-1');
+  const row = result.sources.find((s) => s.id === 'skaz-alloha');
+  assert.equal(row.show, false, 'карточка чужого фильма (по title/год) = «нет» для запрошенного (RULE-1)');
+  assert.equal(row.authoritative, true);
+});
+
+test('strict-подтверждение: волновая проба (2 хоста/волну) — кластер НЕ троттлится (live: параллельный скан всех хостов → no-response у части → неполный скан → show), полный скан завершается → hide', async () => {
+  // Регрессия live-случая BALANCER-FINAL-AVAILABILITY-001: у xvideocdnultra/Паразиты
+  // параллельная стрельба по ВСЕМ хостам кластера давала no-response (конкарренси-
+  // троттл кластера на аккаунт) → строгий скан никогда не завершался → источник
+  // оставался показанным пустым. Волны по 2 хоста обходят троттл и всё равно
+  // совершают ПОЛНЫЙ проход (гарантия «absent только от полного скана»).
+  // 3 хоста → волна1=[online3,online8], волна2=[.63]; пик конкарренси alloha = 2
+  // (первичный probe по одной ноде; confirm — волной по 2), не 3 и не 6.
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const checker = makeChecker(async (url) => {
+    const isAlloha = String(url).includes('/alloha?');
+    if (isAlloha) { inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight); }
+    const result = response(String(url).includes('online3') ? 503 : 403, '');
+    if (isAlloha) inFlight -= 1;
+    return result;
+  }, { reservePolicy: 'abstain', hosts: [...HOSTS, 'http://94.249.239.63'] });
+  const result = await checker.card(QUERY, 'uid-1');
+  const row = result.sources.find((s) => s.id === 'skaz-alloha');
+  assert.equal(row.show, false, 'все хосты ответили 503/403 (полный волновой скан) → absent → hide');
+  assert.equal(row.confirmed, true, 'подтверждён строгим сигналом');
+  assert.ok(maxInFlight <= 2, `пик конкарренси по alloha ≤ 2 (было ${maxInFlight}); больший пик = кластерный троттл → unverifiable`);
+});
+
+test('strict-подтверждение: таймаут на ноде при подтверждении → inconclusive (неполный скан не прячет рабочий источник)', async () => {
+  const checker = makeChecker((url) => {
+    if (String(url).includes('online3')) throw new Error('timeout');
+    return Promise.resolve(response(503, ''));
+  }, { reservePolicy: 'abstain' });
+  const result = await checker.card(QUERY, 'uid-1');
+  const row = result.sources.find((s) => s.id === 'skaz-alloha');
+  // primary: online3=таймаут (no-response) + online8=503 (abstain) → show/inconclusive.
+  // confirm: строгая проба тоже встречает no-response → вердикта нет → show СОХРАНЁН.
+  assert.equal(row.show, true, 'no-response при подтверждении → не прячем (транзиентный тормоз кластера)');
+  assert.equal(row.confirmInconclusive, true, 'подтверждение инконклюзивно — row помечен (как RULE-4)');
 });

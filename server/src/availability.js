@@ -58,6 +58,10 @@ import { orderedSkazHosts, isReserveHost } from './providers/skaz/hostOrder.js';
  * дополнительно перепроверяется с retry-with-backoff (confirmWithBackoff) — окно
  * насыщения успевает отойти; выживший «нет» = три независимых сигнала. Подтверждённые
  * ряды помечаются `confirmed` (и `retried` при повторе) и кэшируются на HIDE_TTL_MS.
+ * BALANCER-FINAL-AVAILABILITY-001: optimistic-show ряды (abstain не скрыл полный скан
+ * non-2xx без контента) тоже ПОДТВЕРЖДАЮТСЯ строгой пробой (probe(strict): не-2xx =
+ * «нет», absent только от полного прохода ВСЕХ хостов без таймаутов/accsdb) — источник,
+ * показанный без контента ни на одной ноде, скрывается (docs/balancer-final-availability-001-report.md).
  *
  * NATIVE-AVAILABILITY-002 (docs/native-availability-001-report.md — 4 доказанных false-positive):
  *   RULE-1  Предикат извлекает data-json-карточки и различает контент по method/type:
@@ -624,6 +628,13 @@ export function createAvailabilityChecker(options = {}) {
   /**
    * Проба одного балансера: хост-ротация (primary → online8-резерв), стоп-правила.
    * `checksearch=true` — поиск (предикат Lampac); `false` — прямой lite-page карточки.
+   * `strict` (BALANCER-FINAL-AVAILABILITY-001) — строгий режим ДЛЯ ПОДТВЕРЖДЕНИЯ
+   * INCONCLUSIVE-show рядов: не-2xx от ЛЮБОГО хоста = «нет»-голос (как legacy), online8
+   * НЕ воздерживается, а «absent» возвращается ТОЛЬКО когда скан прошёл ВСЕ хосты
+   * и каждый ответил не-контентом (без таймаутов/accsdb). Дедлайн-обрыв при неполном
+   * скане в strict НЕ даёт «нет» (непроверенные хосты могли бы иметь контент) →
+   * inconclusive-show. Применяется вторым независимым сигналом к источникам, чей
+   * первичный optimistic-show не подкреплён контентом ни на одной ноде.
    * Вердикты:
    *  - 2xx content-bearing → предикат (авторитетно, стоп);
    *  - 2xx «нет источника» (null/disable/false/not found) и не-2xx (403/404/503/5xx) —
@@ -633,7 +644,7 @@ export function createAvailabilityChecker(options = {}) {
    *    гейта в live-сверке: kinopub/27190 под 18-ю параллельными запросами).
    * Возвращает { show, rch, quality, status, host, authoritative, inconclusive? }.
    */
-  async function probe(balancer, query, deadline, checksearch) {
+  async function probe(balancer, query, deadline, checksearch, strict = false) {
     if (!hosts.length) return { show: false, rch: false, quality: '', status: 0, host: '', authoritative: false };
     const base = buildUrl(balancer, query, checksearch);
     let lastStatus = 0;
@@ -645,7 +656,9 @@ export function createAvailabilityChecker(options = {}) {
     // и balancer !== 'kinopub'). Резервная нода (online8) для не-kinopub ВОЗДЕРЖИВАЕТСЯ:
     // её быстрый 403 `disable`/503/2xx-non-content — политика ноды «модуль выключен», а
     // НЕ «контента нет» → не даёт «нет»-голос (док. BALANCER-ONLINE8-001 §9-б/г).
-    const newMode = reservePolicy === 'abstain' && balancer !== 'kinopub';
+    // strict (подтверждение INCONCLUSIVE-show) отключает абстаин: каждый не-2xx/не-контент
+    // = «нет»-голос (см. док. probe выше). Kinopub и вне strict абстаина — прежний legacy.
+    const newMode = !strict && reservePolicy === 'abstain' && balancer !== 'kinopub';
     let sawStatusNo = false;     // primary ответил не-2xx (403/503/5xx) — статусный шум, не вердикт
     let sawReserveAbstain = false; // online8 ответил (403/503/2xx-non-content/accsdb-ожидаем) — воздержался
     for (let index = 0; index < hosts.length; index += 1) {
@@ -654,7 +667,11 @@ export function createAvailabilityChecker(options = {}) {
         // дедлайна НЕ переворачиваем в показ. Смешанный вердикт / вовсе нет ответа →
         // действительно inconclusive → показываем (транзиентный тормоз не прячет
         // рабочий источник).
-        if (sawDefinitiveNo && !sawNoResponse) {
+        // strict (BALANCER-FINAL-AVAILABILITY-001): дедлайн-обрыв = НЕПОЛНЫЙ скан —
+        // непроверенные хосты могли бы иметь контент → «нет» из строгой пробы даёт
+        // ТОЛЬКО полный проход всех хостов (иначе подтверждение на неполном скане
+        // скрывало бы рабочий источник, чей контент живёт на непройденной ноде).
+        if (sawDefinitiveNo && !sawNoResponse && !strict) {
           return { show: false, rch: false, quality: '', status: lastStatus, host: lastHost, authoritative: true, verdict: 'absent', timedOut: true };
         }
         return { show: true, rch: false, quality: '', status: lastStatus, host: lastHost, authoritative: false, inconclusive: true, timedOut: true };
@@ -796,8 +813,8 @@ export function createAvailabilityChecker(options = {}) {
    * 302-туннель, и под 18-ю параллельными запросами online8 на миг отвечал 503/null,
    * хотя OLD videos() находил items (провал OLD∩NEW в live-сверке, Run 4).
    */
-  async function confirmAbsence(balancer, query, deadline) {
-    return probe(balancer, query, deadline, false);
+  async function confirmAbsence(balancer, query, deadline, strict = false) {
+    return probe(balancer, query, deadline, false, strict);
   }
 
   /**
@@ -810,14 +827,103 @@ export function createAvailabilityChecker(options = {}) {
    * независимых «нет» (search + 2× direct) — настоящий absent. `retried` — флаг
    * для диагностики (shadow-отчёт), в вердикт не входит.
    */
-  async function confirmWithBackoff(balancer, query, deadline, attempt = 1) {
-    const value = await confirmAbsence(balancer, query, deadline);
+  async function confirmWithBackoff(balancer, query, deadline, attempt = 1, strict = false) {
+    const value = await confirmAbsence(balancer, query, deadline, strict);
     const hide = value.show === false && value.authoritative && !value.inconclusive && !value.accsdb;
     if (!hide || attempt >= 2) return { value, retried: attempt > 1 };
     // До дедлайна осталось мало — пауза не уложится, оставляем первичный вердикт.
     if (deadline - Date.now() < backoffMs + 200) return { value, retried: false };
     await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    return confirmWithBackoff(balancer, query, deadline, attempt + 1);
+    return confirmWithBackoff(balancer, query, deadline, attempt + 1, strict);
+  }
+
+  /**
+   * BALANCER-FINAL-AVAILABILITY-001: СТРОГОЕ подтверждение для INCONCLUSIVE-show рядов
+   * (второй независимый сигнал). Параллельная проба ВСЕХ хостов прямым lite-page (без
+   * checksearch — тем же механизмом, что реально тянет OLD videos()).
+   *
+   * Зачем параллельно: полный скан — необходимое условие строгого «нет» (иначе
+   * непробованные хосты могли бы иметь контент). Последовательная ротация (probe) НЕ
+   * успевает за дедлайн карточки на медленном кластере (live: 503-ответы на части хостов
+   * 4-6с; Паразиты × 6 хостов последовательно ≫ остаток дедлайна после primary-фазы) →
+   * подтверждение умирало по дедлайну и пустой источник оставался показанным. Параллель
+   * делает скан полным гарантированно: каждый хост имеет свой бюджет = timeoutMs, все
+   * запускаются сразу, результат = slowest-хост (не Σ хостов).
+   *
+   * Вердикты (семантика probe(strict) — не-2xx/2xx-null/accsdb-«Ожидаем фильм» = «нет»):
+   *  - ЛЮБОЙ хост ответил content-bearing → предикат (авторитетно, стоп);
+   *  - ВСЕ хосты ответили формой «нет» И ни один не промолчал (таймаут/сеть) и не
+   *    отказал учётке (accsdb-отказ) → authoritative absent (hide);
+   *  - хоть один таймаут/сеть ИЛИ отказ учётки → inconclusive (показываем): неполный
+   *    скан/реквизиты не должны прятать рабочий источник (W1).
+   * Возвращает { show, rch, quality, status, host, authoritative, inconclusive? } —
+   * совместимо с результатом probe() (единый confirm-гейт).
+   */
+  async function strictConfirmAllHosts(balancer, query, deadline) {
+    const base = buildUrl(balancer, query, false);
+    const answers = [];
+    const WAVE = 2; // >2 параллельных на аккаунт кластер троттлит (no-response) — см. confirmDeadline
+    for (let start = 0; start < hosts.length; start += WAVE) {
+      const wave = hosts.slice(start, start + WAVE);
+      const waveAnswers = await Promise.all(wave.map((nextHost, j) => {
+        const index = start + j;
+        const url = index === 0 ? base : swapHost(base, nextHost);
+        const host = index === 0 ? hosts[0] : nextHost;
+        return fetchHost(url, deadline)
+          .then(async (response) => {
+            if (!response) return { kind: 'noResponse', host };
+            if (!(response.status >= 200 && response.status < 300)) {
+              return { kind: 'no', status: response.status, host };
+            }
+            const text = await response.text().catch(() => null);
+            if (text == null) return { kind: 'noResponse', host };
+            // accsdb: «Ожидаем фильм…» = content-«нет» (RULE-2), прочие отказы учётки —
+            // вердикта нет (как в probe).
+            if (String(text).trim().startsWith('{') && /"accsdb"\s*:\s*true/i.test(String(text))) {
+              let msg = String(text);
+              try {
+                const parsed = JSON.parse(String(text));
+                if (parsed && typeof parsed.msg === 'string' && parsed.msg) msg = parsed.msg;
+              } catch { /* остаёмся на сыром тексте */ }
+              if (/ожидаем\s+фильм\s+в\s+хорошем\s+качестве/i.test(msg)) {
+                return { kind: 'no', status: response.status, host };
+              }
+              return { kind: 'accsdb', status: response.status, host };
+            }
+            if (isNonContentAnswer(text)) return { kind: 'no', status: response.status, host };
+            return { kind: 'content', text, status: response.status, host };
+          })
+          .catch(() => ({ kind: 'noResponse', host }));
+      }));
+      answers.push(...waveAnswers);
+      // Контент на любом хосте волны — авторитетно: стоп, остальные волны не нужны.
+      const found = waveAnswers.find((answer) => answer.kind === 'content');
+      if (found) {
+        const predicate = checkSearchPredicate(found.text, query);
+        return {
+          show: predicate.work,
+          rch: predicate.rch,
+          quality: predicate.quality,
+          status: found.status,
+          host: found.host,
+          authoritative: predicate.verdict !== 'inconclusive',
+          ...(predicate.verdict === 'inconclusive' ? { inconclusive: true, reason: 'predicate-inconclusive' } : {})
+        };
+      }
+    }
+
+    if (answers.some((answer) => answer.kind === 'accsdb')) {
+      return { show: true, rch: false, quality: '', status: 0, host: '', authoritative: false, inconclusive: true, accsdb: true };
+    }
+    if (answers.some((answer) => answer.kind === 'noResponse')) {
+      // Неполный скан / сеть — вердикта нет: показываем (транзиентный тормоз не прячет,
+      // учётку кластер не отказывал — см. accsdb выше).
+      return { show: true, rch: false, quality: '', status: 0, host: '', authoritative: false, inconclusive: true, mixed: true };
+    }
+    // Каждый хост ответил формой «нет» (не-2xx / 2xx-null / accsdb-«Ожидаем фильм»)
+    // — полный скан без контента = «у источника этого фильма нет» → авторитетный hide.
+    const last = answers.find((answer) => answer.status) || {};
+    return { show: false, rch: false, quality: '', status: last.status || 0, host: last.host || '', authoritative: true, verdict: 'absent' };
   }
 
   /**
@@ -980,20 +1086,69 @@ export function createAvailabilityChecker(options = {}) {
     // сигнала ответили «нет»; если второй нашёл карточку (или таймаутнул —
     // вердикта нет), источник видим. Ряды, прошедшие подтверждение, помечаем
     // confirmed (диагностика в shadow).
+    //
+    // BALANCER-FINAL-AVAILABILITY-001 (вторая половина гейта): row-ы, которые
+    // первичный probe НЕ смог скрыть (abstain-оптимизм: полный скан без контента,
+    // но все ответы non-2xx = «статусный шум, не вердикт» → show:true inconclusive),
+    // тоже ПОДТВЕРЖДАЕМ — СТРОГОЙ пробой (probe(strict): не-2xx = «нет»-голос,
+    // absent только от полного прохода ВСЕХ хостов без таймаутов/accsdb). Если
+    // источник показан без контента НИ НА ОДНОЙ ноде (live: skaz-xvideocdnultra/
+    // zetflixdb/zagonka/kinoflix/hdvb на Паразитах/Одиссее — 3/3 хоста 503, /videos=0),
+    // то это не «транзиентный тормоз», а «у источника этого фильма нет» → прячем.
+    // W1 не ломается: контент на ЛЮБОЙ другой ноде = 2xx-content → строгая проба
+    // вернёт show:true (предикат, авторитетно). Таймаут/account-reject в строгой
+    // пробе → inconclusive → источник остаётся видимым (неполный скан не прячет).
     const eligible = rows
       .map((row, index) => ({ row, index }))
       // trusted (TRUSTED_ALWAYS_VISIBLE) исключён из гейта «нет» в явном виде:
       // show:true детерминирован политикой и не может быть перевернут
       // подтверждающим сигналом (defense-in-depth, инвариант «trusted → видим»).
-      .filter(({ row }) => row.show === false && row.authoritative && !row.accsdb && !row.trusted);
+      .filter(({ row, index }) => {
+        const source = sources[index];
+        const skazLike = !(source.native && source.provider && !source.twinBalancer);
+        return !row.trusted && !row.accsdb && (
+          // (a) «нет» от первичного сигнала — подтверждаем обычной пробой (как было);
+          (row.show === false && row.authoritative)
+          // (b) optimistic-show без контента на всём скане — подтверждаем СТРОГОЙ пробой
+          //     (BALANCER-FINAL-AVAILABILITY-001). native без твина исключён: его
+          //     inconclusive = сетевой сбой самого провайдера, прятать по lite-page кластера нельзя.
+          || (row.show === true && !row.authoritative && row.inconclusive && skazLike)
+        );
+      });
     if (eligible.length) {
+      // BALANCER-FINAL-AVAILABILITY-001: confirm-фаза получает СВЕЖИЙ дедлайн,
+      // независимый от primary-прохода. Общий card-дедлайн к этому моменту уже может
+      // быть исчерпан (медленный кластер: 503-ответы на части хостов 4-6с; Паразиты —
+      // сумма первичных проб съедает deadline 12с ещё до confirm). Иначе strict-проба
+      // на входе видела Date.now() >= deadline → inconclusive → пустой источник
+      // оставался показанным. Свежий дедлайн (deadlineMs вперёд ≥ timeoutMs+2000)
+      // даёт каждому хосту в параллельном скане полный per-host бюджет.
+      // Confirm-фаза выполняется батчами по 2 хоста (кластер троттлит >2 параллельных
+      // запросов на аккаунт: у xvideocdnultra/Паразиты параллельная стрельба всех 6 →
+      // часть хостов no-response → полный скан не завершался за любой дедлайн), поэтому
+      // полный строгий скан занимает ≤ ceil(hosts/2) × timeoutMs. Дедлайн confirm-фазы —
+      // столько, сколько нужно такому скану (не меньше обычного deadlineMs). Это
+      // добавляет латентности карточке ТОЛЬКО когда есть INCONCLUSIVE-show ряды (иначе
+      // confirm-фаза пуста); результат кэшируется (HIDE_TTL_MS/ttlMs) написан ниже.
+      const confirmDeadline = Date.now() + Math.max(deadlineMs, Math.ceil(hosts.length / 2) * timeoutMs + 2_000);
       const confirmations = await Promise.allSettled(eligible.map(({ row, index }) => {
         const source = sources[index];
         if (source.native && source.provider && !source.twinBalancer) {
           return confirmNativeAbsence(source.provider, query, { query, request: { headers: {} } }, deadline)
             .then(({ value, retried }) => ({ index, value, retried }));
         }
-        return confirmWithBackoff(row.balancer, query, deadline)
+        // (b)-ряды (show:true + inconclusive + skazLike) подтверждаем ПАРАЛЛЕЛЬНЫМ полным
+        // сканом ВСЕХ хостов (strictConfirmAllHosts): absent — только когда КАЖДЫЙ хост
+        // ответил формой «нет» и ни один не промолчал (таймаут/сеть)/не отказал учётке;
+        // контент на любой ноде → show (W1). Параллель гарантирует полный скан даже на
+        // медленном кластере (4-6с/хост × 6 хозяй выходило за любой последовательный
+        // дедлайн). (a)-ряды (show:false authoritative) — прежний sequential
+        // confirmWithBackoff на СВЕЖЕМ дедлайне (не исчерпанном первичным проходом).
+        if (row.show === true) {
+          return strictConfirmAllHosts(row.balancer, query, confirmDeadline)
+            .then((value) => ({ index, value, retried: false }));
+        }
+        return confirmWithBackoff(row.balancer, query, confirmDeadline, 1, false)
           .then(({ value, retried }) => ({ index, value, retried }));
       }));
       for (const settledConfirm of confirmations) {
@@ -1016,6 +1171,12 @@ export function createAvailabilityChecker(options = {}) {
         }
         row.show = Boolean(value.show);
         row.authoritative = Boolean(value.authoritative);
+        // Определённый (confirmed) вердикт подтверждения заменил первичный:
+        // (b)-ряд был optimistic-show (inconclusive) и теперь имеет настоящий
+        // вердикт (absent-строгая проба ИЛИ найденный контент) → флаг inconclusive
+        // снимаем, чтобы факт «скрыт/показан авторитетно» не противоречил ряду
+        // (BALANCER-FINAL-AVAILABILITY-001).
+        if (row.authoritative) row.inconclusive = false;
         if (value.rch !== undefined) row.rch = value.rch;
         if (value.quality) row.quality = value.quality;
         if (value.status !== undefined) row.status = value.status;
