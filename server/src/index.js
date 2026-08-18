@@ -11,6 +11,7 @@ import { providerById, registeredProviders } from './providers/registry.js';
 import { PROVIDER_FALLBACK_ICON, providerMeta } from './providers/meta.js';
 import { defaultChecker } from './availability.js';
 import { buildProxyUrl, proxyMedia } from './proxy.js';
+import { isTmdbApiPath, isTmdbImgPath, TMDB_API_ROUTE, TMDB_IMG_ROUTE, tmdbRelay } from './tmdbProxy.js';
 import { createTelegramRunner } from './telegram/runner.js';
 
 const startedAt = Date.now();
@@ -156,6 +157,22 @@ async function route(context, response) {
       referer: context.query.ref || null,
       origin: context.query.origin || null
     });
+  }
+
+  // TMDB-PROXY-FIX-001: типизированный TMDB relay — клиент без VPN может ходить
+  // в TMDB (api/image) через Maniya. Апстрим-хост жёстко задан константой в
+  // tmdbProxy.js (api.themoviedb.org / image.tmdb.org) и НЕ берётся из ввода —
+  // SSRF невозможен даже при битом пути/query. Подписка — как у /proxy (плагин
+  // добавляет token в query); rate-limit НЕ применяется: каталог постеров шлёт
+  // десятки картинок разом, как HLS-сегменты.
+  if (isTmdbApiPath(url.pathname)) {
+    await requireSubscription(context);
+    return tmdbRelay(TMDB_API_ROUTE, context, response);
+  }
+
+  if (isTmdbImgPath(url.pathname)) {
+    await requireSubscription(context);
+    return tmdbRelay(TMDB_IMG_ROUTE, context, response);
   }
 
   assertRateLimit(request);

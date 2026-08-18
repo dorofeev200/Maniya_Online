@@ -85,7 +85,12 @@ describe('Maniya Online API', () => {
     const utc = await fetch(`${base}/api/lampa/subscription/check?token=unit-test-token`).then((r) => r.json());
     const msk = await fetch(`${base}/api/lampa/subscription/check?token=unit-test-token&tz=-180`).then((r) => r.json());
     // expires_at = 2099-12-31T23:59:59Z: в UTC-календаре это 31.12, в MSK — уже 01.01.2100.
-    assert.equal(msk.days_left, utc.days_left + 1);
+    // Но разница дней зависит и от календарного «сегодня»: в 21:00–23:59Z (=00:00–02:59 MSK)
+    // календарный день MSK уже сдвинут на +1 относительно UTC — оба сдвига компенсируются,
+    // и эталонная разница становится 0 вместо +1 (date-drift-фикс в remainingDays корректен).
+    const nowMs = Date.now();
+    const calendarShiftNow = Math.floor((nowMs - (-180) * 60000) / 86_400_000) - Math.floor(nowMs / 86_400_000);
+    assert.equal(msk.days_left, utc.days_left + 1 - calendarShiftNow);
     assert.match(msk.subscription_text, /^Осталось \d+ (день|дня|дней)$/);
   });
 
@@ -152,5 +157,41 @@ describe('Maniya Online API', () => {
     assert.equal(response.status, 400);
     const body = await response.json();
     assert.equal(body.error, 'invalid_url');
+  });
+
+  // TMDB-PROXY-FIX-001: типизированные TMDB-маршруты требуют подписку (как /proxy).
+  // Без токена → 403 subscription_required, ДО какого-либо обращения к апстриму.
+  it('TMDB relay: api-маршрут требует подписку (403 без токена)', async () => {
+    for (const path of [
+      '/api/lampa/tmdb/api/3/configuration',
+      '/api/lampa/tmdb/api/3/search/movie?api_key=K&query=x',
+      '/api/lampa/tmdb/api/3//evil.com/x'
+    ]) {
+      const response = await fetch(`${base}${path}`);
+      assert.equal(response.status, 403, path);
+      const body = await response.json();
+      assert.equal(body.error, 'subscription_required');
+    }
+  });
+
+  it('TMDB relay: img-маршрут требует подписку (403 без токена)', async () => {
+    const response = await fetch(`${base}/api/lampa/tmdb/img/t/p/w92/ab.jpg`);
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.error, 'subscription_required');
+  });
+
+  it('serves tmdbproxy.js plugin to Lampa UA as JS (TMDB-PROXY-FIX-001)', async () => {
+    const response = await lampaFetch(`${base}/tmdbproxy.js`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /javascript/);
+    assert.match(await response.text(), /MANIYA_TMDB_PROXY/);
+  });
+
+  it('serves tmdbproxy.js as stub to browser (PLUGIN-INSTALL-002 gate)', async () => {
+    const response = await fetch(`${base}/tmdbproxy.js`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^text\/plain/);
+    assert.equal(await response.text(), 'Добавьте плагин в Расширения Lampa.');
   });
 });
