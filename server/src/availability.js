@@ -1000,6 +1000,23 @@ export function createAvailabilityChecker(options = {}) {
 
     const hit = force ? undefined : cache.get(key);
     if (hit && Date.now() - hit.ts < (hit.ttl || ttlMs)) {
+      // BALANCER-LAUNCH-FIX-001: cache-hit всё ещё должен сохранять/продлевать пины,
+      // иначе /videos после повторного открытия карточки идёт без preferred-host
+      // и устраивает полный последовательный скан 6 хостов. Переписываем FOUND-ряды
+      // теми же условиями, что и на cache-miss (см. computeCard), с основным TTL.
+      if (hit.sources && Array.isArray(hit.sources)) {
+        const now = Date.now();
+        for (const row of hit.sources) {
+          const pk = `${userUid}|${row.id}`;
+          const isFound = row.show === true && row.authoritative && Boolean(row.host)
+            && !row.trusted && !row.accsdb;
+          if (isFound) {
+            pinMap.set(pk, { host: row.host, ts: now, ttl: ttlMs });
+          } else {
+            pinMap.delete(pk);
+          }
+        }
+      }
       return {
         sources: hit.sources,
         count,
@@ -1209,15 +1226,16 @@ export function createAvailabilityChecker(options = {}) {
     // любой другой вердикт (dated ""/absent, show:false, na, inconclusive) → пин удаляем.
     // Ключ = userUid|providerId: разные юзеры (granted-устройства разных аккаунтов
     // skaz) — разные ноды; trusted-ряды (filmix) пина не имеют (host нетипично).
-    // TTL зеркалирует кэш (HIDE_TTL_MS при скрытии, ttlMs иначе) — устаревший пин
-    // сам истекает и не может вечно блокировать ротацию (§8.7).
-    const pinTtl = hasConfirmedHide ? HIDE_TTL_MS : ttlMs;
+    // BALANCER-LAUNCH-FIX-001: TTL пина опирается ТОЛЬКО на статус FOUND-ряда, а не на
+    // hasConfirmedHide всей карточки. Скрытие ЧУЖОГО источника больше не укорачивает
+    // жизнь рабочего пина до 60с. Устаревший пин сам истекает и очищается при чтении
+    // pinnedHost; не-FOUND ряды вычищают пин здесь и на cache-hit.
     for (const row of rows) {
       const pk = `${userUid}|${row.id}`;
       const isFound = row.show === true && row.authoritative && Boolean(row.host)
         && !row.trusted && !row.accsdb;
       if (isFound) {
-        pinMap.set(pk, { host: row.host, ts: Date.now(), ttl: pinTtl });
+        pinMap.set(pk, { host: row.host, ts: Date.now(), ttl: ttlMs });
       } else {
         pinMap.delete(pk);
       }
