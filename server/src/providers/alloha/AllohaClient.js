@@ -120,7 +120,7 @@ export class AllohaClient {
       translation: translationId || translation,
       season: Number(season) > 0 ? season : undefined,
       episode: Number(episode) > 0 ? episode : undefined,
-      directors_cut: directors ? 'true' : undefined
+      directors_cut: directorsCut ? 'true' : undefined
     });
 
     const path = this.linkPath('/direct', params);

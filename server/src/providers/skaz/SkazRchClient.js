@@ -376,7 +376,7 @@ export class SkazRchClient {
     const requestHeaders = {};
     if (!headers || typeof headers !== 'object') {
       // apk-клиент: кластер ждёт «дефолтные» заголовки устройства (UA).
-      if (this.rchtype === 'apk') requestHeaders['user-agent'] = defaultUserAgent;
+      if (this.rchtype === 'apk') requestHeaders['user-agent'] = defaultUserAgent();
     } else {
       // Кластер прислал own-заголовки (для не-apk отправка фильтруется).
       for (const [key, value] of Object.entries(headers)) {
