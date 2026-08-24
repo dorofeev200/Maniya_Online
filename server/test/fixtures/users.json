@@ -5,5 +5,12 @@
     "plan": "test-fixture",
     "active": true,
     "expires_at": "2099-12-31T23:59:59Z"
+  },
+  {
+    "token": "staging-test-4f3a9c21e7b64d08a5c2f1e9",
+    "email": "staging@maniya.local",
+    "plan": "staging-test",
+    "active": true,
+    "expires_at": "2099-12-31T23:59:59Z"
   }
 ]

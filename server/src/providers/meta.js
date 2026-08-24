@@ -31,6 +31,9 @@ export const PROVIDER_META = {
   zagonka: { name: "GET's TV", icon: '📡', qualityLabel: 'Full HD' },
   geosaitebi: { name: 'GeoVideo', icon: '🌍', qualityLabel: 'Full HD' },
   videohub: { name: 'VideoH', icon: '🗿', qualityLabel: '4K' },
+  // T054: фирменное имя xvideocdnultra (как EO_TITLES в registry.js) — чтобы
+  // skaz-экстра/мост назывался «Maniya · XVideoCDN (Ultra)», а не тех-слагом.
+  xvideocdnultra: { name: 'Maniya · XVideoCDN (Ultra)', icon: '⚡', qualityLabel: '4K' },
   // Зарезервированные/блокированные слаги (§10.1): мета готово, источник может
   // появиться позже (rch/аккаунтные). Не видимые — потому что их нет в balancers.
   xvideocdn: { name: 'VCDN', icon: '⚡', qualityLabel: '4K' },

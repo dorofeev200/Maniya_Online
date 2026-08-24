@@ -1,4 +1,4 @@
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { CDNvideohubClient } from './CDNvideohubClient.js';
 import { CDNvideohubNormalizer } from './CDNvideohubNormalizer.js';
@@ -71,7 +71,7 @@ export class CDNvideohubProvider extends Provider {
       if (!records.length) return { items: [], seasons: [], voices: [] };
 
       const record = records[0];
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       return record.isSerial
         ? await this.serialVideos(record, query, streamProxy)
         : await this.movieVideos(record, query, streamProxy);
@@ -155,7 +155,7 @@ export class CDNvideohubProvider extends Provider {
       const hls = await this.client.videoHls(vkId);
       if (!hls) return [];
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       const title = String(query.title || item?.title || this.title);
       const type = String(query.type || item?.type || query.videoType || 'movie');
       const voice = String(query.voice_name || item?.voice_name || item?.voice || 'Оригинал');

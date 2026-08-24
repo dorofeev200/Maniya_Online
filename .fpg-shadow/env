@@ -1,0 +1,7 @@
+NODE_ENV=development
+PORT=3999
+HOST=127.0.0.1
+PUBLIC_BASE_URL=http://127.0.0.1:3999
+USERS_FILE=C:\Users\Admin\Maniya_Online\.fpg-shadow\users.json
+CORS_ORIGINS=
+RATE_LIMIT_MAX=1000

@@ -1,0 +1,322 @@
+[
+  {
+    "name": "KinoPub",
+    "url": "http://online8.skaz.tv/lite/kinopub",
+    "index": 1,
+    "show": true,
+    "balanser": "kinopub",
+    "rch": false,
+    "voices": 9,
+    "seasons": 0
+  },
+  {
+    "name": "Filmix ~ 4K",
+    "url": "http://online3.skaz.tv/lite/filmix",
+    "index": 2,
+    "show": true,
+    "balanser": "filmix",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Alloha",
+    "url": "http://online3.skaz.tv/lite/alloha",
+    "index": 4,
+    "show": true,
+    "balanser": "alloha",
+    "rch": false,
+    "voices": 8,
+    "seasons": 0
+  },
+  {
+    "name": "Rezka",
+    "url": "http://online3.skaz.tv/lite/rezka",
+    "index": 5,
+    "show": true,
+    "balanser": "rezka",
+    "rch": false,
+    "voices": 10,
+    "seasons": 0
+  },
+  {
+    "name": "Zagonka",
+    "url": "http://oleg6.skaz.tv/lite/zagonka",
+    "index": 7,
+    "show": true,
+    "balanser": "zagonka",
+    "rch": false,
+    "voices": 9,
+    "seasons": 0
+  },
+  {
+    "name": "iRemux",
+    "url": "http://online3.skaz.tv/lite/remux",
+    "index": 7,
+    "show": true,
+    "balanser": "remux",
+    "rch": false,
+    "voices": 5,
+    "seasons": 0
+  },
+  {
+    "name": "SkazTV",
+    "url": "http://online3.skaz.tv/lite/pidtor",
+    "index": 8,
+    "show": true,
+    "balanser": "pidtor",
+    "rch": false,
+    "voices": 22,
+    "seasons": 0
+  },
+  {
+    "name": "xVideoCDN (Ultra)",
+    "url": "http://online8.skaz.tv/lite/xvideocdnultra",
+    "index": 10,
+    "show": true,
+    "balanser": "xvideocdnultra",
+    "rch": false,
+    "voices": 2,
+    "seasons": 0
+  },
+  {
+    "name": "xVideoCDN (60/120fps)",
+    "url": "http://online8.skaz.tv/lite/xvideocdn60fps",
+    "index": 11,
+    "show": true,
+    "balanser": "xvideocdn60fps",
+    "rch": false,
+    "voices": 1,
+    "seasons": 0
+  },
+  {
+    "name": "FilmGE",
+    "url": "http://online3.skaz.tv/lite/kinoflix",
+    "index": 12,
+    "show": true,
+    "balanser": "kinoflix",
+    "rch": false,
+    "voices": 3,
+    "seasons": 0
+  },
+  {
+    "name": "Ashdi",
+    "url": "http://online3.skaz.tv/lite/ashdi",
+    "index": 13,
+    "show": true,
+    "balanser": "ashdi",
+    "rch": true,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "UAkino",
+    "url": "http://online3.skaz.tv/lite/kinoukr",
+    "index": 14,
+    "show": true,
+    "balanser": "kinoukr",
+    "rch": true,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Eneyida",
+    "url": "http://online3.skaz.tv/lite/eneyida",
+    "index": 15,
+    "show": true,
+    "balanser": "eneyida",
+    "rch": true,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Rutube",
+    "url": "http://online3.skaz.tv/lite/rutubemovie",
+    "index": 16,
+    "show": true,
+    "balanser": "rutubemovie",
+    "rch": false,
+    "voices": 9,
+    "seasons": 0
+  },
+  {
+    "name": "VK Видео",
+    "url": "http://online3.skaz.tv/lite/vkmovie",
+    "index": 17,
+    "show": true,
+    "balanser": "vkmovie",
+    "rch": false,
+    "voices": 21,
+    "seasons": 0
+  },
+  {
+    "name": "VeoVeo",
+    "url": "http://online3.skaz.tv/lite/veoveo",
+    "index": 19,
+    "show": true,
+    "balanser": "veoveo",
+    "rch": false,
+    "voices": 1,
+    "seasons": 0
+  },
+  {
+    "name": "Солнце",
+    "url": "http://online3.skaz.tv/lite/solntse",
+    "index": 22,
+    "show": true,
+    "balanser": "solntse",
+    "rch": false,
+    "voices": 1,
+    "seasons": 0
+  },
+  {
+    "name": "HDVB",
+    "url": "http://online3.skaz.tv/lite/hdvb",
+    "index": 24,
+    "show": true,
+    "balanser": "hdvb",
+    "rch": false,
+    "voices": 3,
+    "seasons": 0
+  },
+  {
+    "name": "Kinotochka",
+    "url": "http://online3.skaz.tv/lite/kinotochka",
+    "index": 25,
+    "show": true,
+    "balanser": "kinotochka",
+    "rch": false,
+    "voices": 1,
+    "seasons": 0
+  },
+  {
+    "name": "Geosaitebi",
+    "url": "http://online3.skaz.tv/lite/geosaitebi",
+    "index": 27,
+    "show": true,
+    "balanser": "geosaitebi",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "VideoHUB 4k",
+    "url": "http://online3.skaz.tv/lite/cdnvideohub",
+    "index": 29,
+    "show": true,
+    "balanser": "cdnvideohub",
+    "rch": false,
+    "voices": 2,
+    "seasons": 0
+  },
+  {
+    "name": "LordFilm",
+    "url": "http://online3.skaz.tv/lite/lordfilm",
+    "index": 30,
+    "show": true,
+    "balanser": "lordfilm",
+    "rch": false,
+    "voices": 2,
+    "seasons": 0
+  },
+  {
+    "name": "Мир кино Z",
+    "url": "http://online3.skaz.tv/lite/mirkino",
+    "index": 31,
+    "show": true,
+    "balanser": "mirkino",
+    "rch": false,
+    "voices": 1,
+    "seasons": 0
+  },
+  {
+    "name": "ZetflixDB",
+    "url": "http://online8.skaz.tv/lite/zetflixdb",
+    "index": 515,
+    "show": true,
+    "balanser": "zetflixdb",
+    "rch": false,
+    "voices": 9,
+    "seasons": 0
+  },
+  {
+    "name": "Lumex",
+    "url": "http://online3.skaz.tv/lite/sakhtv",
+    "index": 2,
+    "show": false,
+    "balanser": "sakhtv",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Kinoteatr.kg",
+    "url": "http://online3.skaz.tv/lite/kinoteatrkg",
+    "index": 3,
+    "show": false,
+    "balanser": "kinoteatrkg",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Kinobase",
+    "url": "http://online8.skaz.tv/lite/kinobase",
+    "index": 6,
+    "show": false,
+    "balanser": "kinobase",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Fanserials",
+    "url": "http://online8.skaz.tv/lite/xvideocdn",
+    "index": 9,
+    "show": false,
+    "balanser": "xvideocdn",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Videoseed",
+    "url": "http://online3.skaz.tv/lite/videoseed",
+    "index": 18,
+    "show": false,
+    "balanser": "videoseed",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "Lumina - 720p",
+    "url": "http://oleg6.skaz.tv/lite/lumina",
+    "index": 23,
+    "show": false,
+    "balanser": "lumina",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "AsiaGe",
+    "url": "http://online3.skaz.tv/lite/asiage",
+    "index": 26,
+    "show": false,
+    "balanser": "asiage",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  },
+  {
+    "name": "UaKino",
+    "url": "http://online3.skaz.tv/lite/uakino",
+    "index": 825,
+    "show": false,
+    "balanser": "uakino",
+    "rch": false,
+    "voices": 0,
+    "seasons": 0
+  }
+]

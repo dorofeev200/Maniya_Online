@@ -1,4 +1,4 @@
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { RutubeClient } from './RutubeClient.js';
 import { RutubeNormalizer } from './RutubeNormalizer.js';
@@ -78,7 +78,7 @@ export class RutubeProvider extends Provider {
       const records = await this.search(query, requestContext);
       if (!records.length) return { items: [], seasons: [], voices: [] };
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       const items = [];
       for (const record of records) {
         const m3u8 = await this.client.playOptions(record.id);
@@ -102,7 +102,7 @@ export class RutubeProvider extends Provider {
       const m3u8 = await this.client.playOptions(linkid);
       if (!m3u8) return [];
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       return [this.streamItem({
         id: linkid,
         title: String(query.title || item?.title || this.title),

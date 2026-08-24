@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<video id="v" style="width:320px" muted></video>
+<script src="/hls.min.js"></script>
+<script>
+window.__P4_RESULT__ = null;
+window.onerror = function (msg, src, line) {
+  window.__P4_RESULT__ = { ok: false, reason: 'page-error', msg: String(msg).slice(0, 200), src, line };
+};
+const target = new URLSearchParams(location.search).get('url') || '';
+const v = document.getElementById('v');
+window.__P4_PULSE__ = { t: 0, parsed: false, fragLoaded: 0, fatal: null, readyState: 0, lastEvents: [] };
+const log = [];
+const snap = () => ({
+  readyState: v.readyState,
+  currentTime: Math.round(v.currentTime * 100) / 100,
+  bufferedEnd: v.buffered && v.buffered.length ? Math.round(v.buffered.end(v.buffered.length - 1) * 100) / 100 : null,
+  duration: isFinite(v.duration) ? Math.round(v.duration * 10) / 10 : null,
+  paused: v.paused, ended: v.ended
+});
+let parsed = false, fragLoaded = 0, fatal = null, done = false, t0 = Date.now(), hadFragBuffered = false;
+function finish(reason) {
+  if (done) return; done = true;
+  const decoded = v.readyState >= 2 || v.currentTime > 0.3 || hadFragBuffered;
+  const pipeline = !fatal && parsed && (fragLoaded >= 1 || v.currentTime > 0);
+  try { window.__P4_RESULT__ = {
+    ok: decoded && pipeline,
+    reason, events: log.slice(0, 100), parsed, fragLoaded,
+    decoded, pipeline, hadFragBuffered,
+    fatal: fatal ? (fatal.details || '') : null,
+    snap: snap(), ms: Date.now() - t0 }; }
+  catch (e) { window.__P4_RESULT__ = { ok: false, reason: 'finish-err', msg: String(e).slice(0, 120) }; }
+}
+try {
+  if (typeof Hls === 'undefined') { finish('no-Hls'); }
+  else if (!target) { finish('empty-url'); }
+  else {
+    const hls = new Hls({ debug: false, fragLoadingTimeOut: 30000, manifestLoadingTimeOut: 30000, levelLoadingTimeOut: 30000, startLevel: 0 });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => { parsed = true; log.push('MANIFEST_PARSED'); v.play().catch((e) => log.push('play-reject:' + String(e).slice(0, 40))); });
+    hls.on(Hls.Events.FRAG_LOADED, (e, d) => { fragLoaded++; if (fragLoaded <= 6 || fragLoaded % 10 === 0) log.push('FRAG_LOADED#' + fragLoaded); });
+    hls.on(Hls.Events.LEVEL_LOADED, (e, d) => log.push('LEVEL_LOADED total=' + (d.details && d.details.totalduration ? Math.round(d.details.totalduration) + 's' : '?') + ' frags=' + (d.details && d.details.fragments ? d.details.fragments.length : '?')));
+    hls.on(Hls.Events.ERROR, (e, data) => {
+      log.push('ERROR type=' + data.type + ' details=' + data.details + ' fatal=' + String(!!data.fatal) + (data.frag ? ' fragSn=' + data.frag.sn : ''));
+      if (data.fatal) { fatal = data; finish('fatal'); }
+    });
+    // успех: 3 фрагмента отбуферированы или автоплей дошёл до воспроизведения
+    hls.on(Hls.Events.FRAG_BUFFERED, (e, d) => { hadFragBuffered = true; log.push('FRAG_BUFFERED#' + fragLoaded); if (!done && fragLoaded >= 3) finish('buffered3'); });
+    v.addEventListener('canplay', () => log.push('canplay' + (v.currentTime >= 0 ? ' t=' + v.currentTime.toFixed(2) : '')));
+    v.addEventListener('playing', () => { if (!done && v.currentTime >= 0.3) finish('playing'); });
+    hls.loadSource(target);
+    hls.attachMedia(v);
+    // heartbeat — драйвер может прочитать состояние даже до финиша страницы
+    const beat = setInterval(() => {
+      window.__P4_PULSE__ = {
+        t: Math.round((Date.now() - t0) / 1000), parsed, fragLoaded,
+        fatal: fatal ? (fatal.details || '') : null,
+        readyState: v.readyState, currentTime: Math.round(v.currentTime * 100) / 100,
+        lastEvents: log.slice(-15)
+      };
+    }, 5000);
+    setTimeout(() => { clearInterval(beat); finish('timeout-180s'); }, 180000);
+  }
+} catch (e) {
+  finish('init-err:' + String(e).slice(0, 200));
+}
+</script>
+</body>
+</html>

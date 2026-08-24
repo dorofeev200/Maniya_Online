@@ -527,13 +527,13 @@ test('поведение: moviePoster резолвит backdrop/poster чере�
   assert.equal(lib.moviePoster(null), '', 'null movie → нет постера');
 });
 
-test('поведение: sourceLabel — «🎬 Allo-XA - 4K», fallback-иконка у неизвестного', async () => {
+test('поведение: sourceLabel — «4K 🎬 Allo-XA» (качество→иконка→имя, как чипы SKAZ), fallback-иконка у неизвестного', async () => {
   const { lib } = await loadSandbox();
 
-  // Иконка ПЕРЕД названием, качество — через « - ». (ВИЗУАЛЬНЫЕ ЗНАЧКИ)
+  // SKAZ-порядок (T040): качество → иконка → имя — «4K 🌐 Lime» в чипах SKAZ.
   assert.equal(
     lib.sourceLabel({ name: 'Allo-XA', icon: '🎬', quality_label: '4K' }),
-    '🎬 Allo-XA - 4K'
+    '4K 🎬 Allo-XA'
   );
   // Без качества подписи короче; без меты → fallback-иконка 🎬.
   assert.equal(lib.sourceLabel({ name: 'GeoVideo', icon: '🌍' }), '🌍 GeoVideo');
@@ -541,6 +541,61 @@ test('поведение: sourceLabel — «🎬 Allo-XA - 4K», fallback-ико
   assert.equal(lib.sourceLabel({}), '🎬 ');
   // fallbackName — уже отформатированное сервером имя (brand), не трогаем.
   assert.equal(lib.sourceLabel(null, 'Maniya · X'), '🎬 Maniya · X');
+});
+
+test('поведение: shortQuality и sourceChipParts — SKAZ-метки (2160p→4K, FHD, HD/SD, пусто)', async () => {
+  const { lib, lampa } = await loadSandbox();
+
+  // Короткие метки в стиле SKAZ Z01UI.shortQuality.
+  assert.equal(lib.shortQuality('2160p'), '4K');
+  assert.equal(lib.shortQuality('4k uhd'), '4K');
+  assert.equal(lib.shortQuality('1080'), 'FHD');
+  assert.equal(lib.shortQuality('FHD'), 'FHD');
+  assert.equal(lib.shortQuality('720p'), 'HD');
+  assert.equal(lib.shortQuality('480'), 'SD');
+  assert.equal(lib.shortQuality(''), '');
+  assert.equal(lib.shortQuality(null), '');
+
+  // Чип источника: бейдж качества + «иконка имя» — визуал «4K 🌐 Lime».
+  const parts = lib.sourceChipParts({ name: 'Lime', icon: '🌐', quality_label: '4K' });
+  assert.equal(parts.badge, '4K');
+  assert.equal(parts.label, '🌐 Lime');
+  assert.equal(parts.name, 'Lime');
+
+  // Нет quality_label → бейдж выводится из имени («KinoPUB 2160» → 4K).
+  const fallback = lib.sourceChipParts({ name: 'KinoPUB 2160', icon: '🎞' });
+  assert.equal(fallback.badge, '4K');
+  assert.equal(fallback.label, '🎞 KinoPUB 2160');
+
+  // Неизвестный → fallback-иконка 🎬, без бейджа.
+  const bare = lib.sourceChipParts({});
+  assert.equal(bare.badge, '');
+  assert.equal(bare.label, '🎬 ');
+
+  // escapeHtml экранирует HTML-опасные символы.
+  assert.equal(lib.escapeHtml('<img "x">'), '&lt;img &quot;x&quot;&gt;');
+});
+
+test('поведение: resolveVideosUrl не задваивает /api/lampa при api_url от корня (T041 фикс)', async () => {
+  const { lib } = await loadSandbox();
+  const base = 'https://plugin.maniya-kvn.online/api/lampa';
+
+  // api_url сервера УЖЕ содержит префикс /api/lampa — резолвим против ORIGIN
+  // (scheme://host), НЕ против MANIYA_API_BASE. Иначе двойной путь
+  // '…/api/lampa/api/lampa/videos?…' → 404 → «Видео не найдено».
+  assert.equal(
+    lib.resolveVideosUrl('/api/lampa/videos?provider=alloha'),
+    'https://plugin.maniya-kvn.online/api/lampa/videos?provider=alloha'
+  );
+  // Абсолютный URL — как есть.
+  assert.equal(
+    lib.resolveVideosUrl('https://cdn.example/x.m3u8'),
+    'https://cdn.example/x.m3u8'
+  );
+  // Относительный путь без ведущего / — против полной базы (reserve-путь).
+  assert.equal(lib.resolveVideosUrl('videos?provider=test'), base + '/videos?provider=test');
+  assert.equal(lib.resolveVideosUrl(''), '', 'пустой url → пусто');
+  assert.equal(lib.resolveVideosUrl(null), '', 'null url → пусто');
 });
 
 test('поведение: qualityEntries — строковое качество и пустые/отсутствующие мапы', async () => {
@@ -736,4 +791,110 @@ test('BALANCER-UI-001: меню открыто, карта НЕ меняет ф�
   cardOk({ sources: fixtureRegistry16().map((s) => ({ id: s.id, show: true })) });
   assert.equal(selectCalls.close, 0, 'Select не закрывался — флаги не менялись, переоткрытие не нужно');
   assert.equal(selectCalls.show.length, 1, 'меню не переоткрывалось (нет race, меню уже актуально)');
+});
+
+// ── SKAZ-MANIYA-019: per-title модель на клиенте (модель-форма /sources/card) ──
+// Ряд модели имеет поля index/balanser/voices/seasons/api_url (meta.model=true).
+// Дистринctизатор: `'index' in row`. Модель ЗАМЕНЯЕТ статический реестр целиком:
+// скрытые кластерные источники СОХРАНЯЮТСЯ в sort-списке как ghost («Ещё N» от
+// Lampa), порядок — серверный index ASC (KinoPub первым), активный = первый
+// ПОКАЗАННЫЙ (не первый в реестре), играбельный URL — наш /videos (api_url).
+
+// Модель карточки «Мятеж»-подобная: filmix отсутствует → активный (в реестре
+// filmix первый) переключается на первый ПОКАЗАННЫЙ = skaz-kinopub (index 1).
+function fixtureCardModel() {
+  return [
+    { id: 'skaz-kinopub', name: 'KinoPub', icon: '🎬', quality_label: '', url: 'http://online3.skaz.tv/lite/kinopub', api_url: '/api/lampa/videos?provider=skaz-kinopub', index: 1, show: true, ghost: false, balanser: 'kinopub', rch: false, voices: 4, seasons: 0 },
+    { id: 'skaz-zagonka', name: 'Zagonka', icon: '🎬', quality_label: '', url: 'http://oleg6.skaz.tv/lite/zagonka', api_url: '/api/lampa/videos?provider=skaz-zagonka', index: 2, show: true, ghost: false, balanser: 'zagonka', rch: false, voices: 2, seasons: 0 },
+    { id: 'skaz-lordfilm', name: 'Lordfilm', icon: '🎬', quality_label: '', url: 'http://online3.skaz.tv/lite/lordfilm', api_url: '/api/lampa/videos?provider=skaz-lordfilm', index: 6, show: false, ghost: true, balanser: 'lordfilm', rch: false, voices: 1, seasons: 0 },
+    { id: 'skaz-ashdi', name: 'Ashdi', icon: '🎬', quality_label: '', url: 'http://online3.skaz.tv/lite/ashdi', api_url: '/api/lampa/videos?provider=skaz-ashdi', index: 9, show: true, ghost: false, balanser: 'ashdi', rch: true, voices: 1, seasons: 0 }
+  ];
+}
+
+test('TASK-019: модель-карта заменяет реестр — sort с ghost, активный=первый SHOWN (KinoPub), /videos по api_url', async () => {
+  let cardOk = null;
+  const { filterCalls, network } = await loadComponentSandbox(
+    { items: [], seasons: [], voices: [] },
+    {
+      network: (url, ok) => {
+        if (url.includes('/api/lampa/sources/card')) return void (cardOk = ok);
+        if (url.includes('/api/lampa/sources')) return ok({ sources: fixtureRegistry16() });
+        return ok({});
+      }
+    }
+  );
+
+  const sortSets = () => filterCalls.set.filter((c) => c.type === 'sort');
+  assert.equal(sortSets().at(-1).items.length, 16, 'до карты: реестровый sort (16)');
+
+  // Модель приходит (meta.model:true, ряды с index) → полная замена реестра
+  cardOk({ sources: fixtureCardModel(), meta: { model: true } });
+
+  const sortLast = sortSets().at(-1);
+  assert.equal(sortLast.items.length, 4, 'sort = ВСЕ ключи модели (включая скрытый ghost)');
+  assert.deepEqual(sortLast.items.map((i) => i.source), ['skaz-kinopub', 'skaz-zagonka', 'skaz-lordfilm', 'skaz-ashdi'],
+    'порядок = серверный (index ASC: 1→2→6→9)');
+  assert.deepEqual(sortLast.items.map((i) => i.ghost), [false, false, true, false],
+    'ghost-ряд сохранён («Ещё N» у Lampa) — модель НЕ схлопывается');
+  assert.equal(sortLast.items.find((i) => i.source === 'skaz-lordfilm').title, '🎬 Lordfilm',
+    'имя ghost-ряда — серверное (кластерное)');
+
+  // activeChanged (filmix из реестра ушёл) → активный = ПЕРВЫЙ ПОКАЗАННЫЙ (index 1)
+  const chosenSort = filterCalls.chosen.filter((c) => c.type === 'sort').at(-1);
+  assert.deepEqual(Array.from(chosenSort.select), ['🎬 KinoPub'], 'активный источник = первый SHOWN (KinoPub)');
+
+  // loadVideos по api_url с правильным эфемерным provider
+  const videoUrls = network.filter((u) => u.includes('/api/lampa/videos'));
+  assert.ok(videoUrls.some((u) => u.includes('provider=skaz-kinopub')), '/videos грузит provider=skaz-kinopub');
+  assert.ok(!videoUrls.some((u) => u.includes('provider=skaz-lordfilm')), 'ghost-источник НЕ грузится');
+});
+
+test('TASK-019: legacy {id,show} — флаги только для существующих id, чужие игнорируются, ghost НЕ создаётся', async () => {
+  let cardOk = null;
+  const { filterCalls } = await loadComponentSandbox(
+    { items: [], seasons: [], voices: [] },
+    {
+      network: (url, ok) => {
+        if (url.includes('/api/lampa/sources/card')) return void (cardOk = ok);
+        if (url.includes('/api/lampa/sources')) return ok({ sources: fixtureRegistry16() });
+        return ok({});
+      }
+    }
+  );
+
+  // Старый probe-path: ряды БЕЗ index (и без name/api_url) → только флаги show.
+  // Чужой id (вне реестра) обязан игнорироваться: legacy НЕ создаёт источников.
+  cardOk({ sources: fixtureCardOdyssey().concat([{ id: 'skaz-mystery', show: false }]) });
+
+  const sortLast = filterCalls.set.filter((c) => c.type === 'sort').at(-1);
+  assert.equal(sortLast.items.length, 9, 'legacy: sort = показанные реестровые (9)');
+  assert.ok(sortLast.items.every((i) => i.ghost === false), 'legacy: скрытые просто уходят — ghost-рядов НЕТ');
+  assert.ok(!sortLast.items.some((i) => i.source === 'skaz-mystery'), 'чужие id не создают записей');
+  assert.ok(sortLast.items.every((i) => i.source !== 'skaz-kinopub' && i.source !== 'kodik'),
+    'скрытые кластером источники ушли из sort');
+});
+
+test('T047b: applyTimelineModel — модульная функция НЕ ссылается на глобальный `object` (ReferenceError на девайсе)', async () => {
+  // Регрессия: до фикса сигнатура была applyTimelineModel(item) и тело использовало
+  // `object.movie`. `object` — замыкание фабрики component(object), его НЕ видно из
+  // модульной функции → на реальной Lampa (Z01_UI_OK=true, девайс) каждая отрисовка
+  // ряда падала: «ReferenceError: object is not defined at applyTimelineModel».
+  // В vm-песочнице быть поймана не могло: там нет document.createElement → Z01_UI_OK
+  // false, гвард `if (!Z01_UI_OK …) return` срабатывал ДО обращения к object.movie.
+  const source = (await readFile(PLUGIN_PATH, 'utf8')).replace(/\r\n/g, '\n');
+  const fn = source.match(/function applyTimelineModel\([\s\S]*?\n  \}\n/);
+  assert.ok(fn, 'applyTimelineModel определена как модульная функция');
+  assert.match(fn[0], /function applyTimelineModel\(\s*item\s*,\s*movie\s*\)/,
+    'сигнатура (item, movie) — movie приходит аргументом, а не из глобального object');
+  assert.doesNotMatch(fn[0], /[A-Za-z$_][A-Za-z0-9$_]*\.object\./, 'тело функции не читает properties глобального object');
+  assert.doesNotMatch(fn[0], /\bobject\s*\.\s*movie\b/, 'тело не обращается к object.movie');
+  // Ключ-материал хэша: у сериала Lampa карточка имеет original_name (не
+  // original_title) → жёсткий гвард лишал сериалы timeline («Продолжить
+  // просмотр»/полоска/время никогда не появлялись). Канон Lampac (DLNA 328):
+  // сериал → original_name, фильм → original_title. Гвард на производный key.
+  assert.match(fn[0], /movie\.original_title\s*\|\|\s*movie\.original_name/, 'фолбэк original_name для сериалов в ключе хэша');
+  assert.match(fn[0], /key/, 'гвард и оба варианта хэша используют производный key');
+  // Call site живёт ВНУТРИ метода draw (скоуп компонента), там `object` виден.
+  assert.match(source, /applyTimelineModel\(\s*item\s*,\s*object\.movie\s*\)/,
+    'call site в draw передаёт object.movie из компонентного замыкания');
 });

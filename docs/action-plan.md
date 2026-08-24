@@ -1,5 +1,120 @@
 # Action Plan — Maniya Online (план возобновления)
 
+## 🔶 2026-08-25 (T054 балансер «у нас ≠ сказ»): skaz-экстрасы → ghost на КАЖДОЙ карточке (правило, не список) — STAGING ✅
+- **Жалоба**: у нас в панели источники ≠ у сказ-клиента («у нас больше, но много пустых»). Разбор:
+  (1) single-shot контракт VPS **качается** (T051): одинаковые card-параметры → разные `online[]`
+  (Интерстеллар: 21/2 → 35 → 8+15). Это НЕ «наш код», кластер просто отдаёт разный набор
+  (полный набор параметров от клиента `id+title+original+year` → узкий/точный ответ, бедный → «все возможные»).
+  (2) СТАБИЛЬНЫЙ мусор = **skaz-экстрасы**: visibleSkaz из static-реестра, которых кластер для карточки
+  НЕ вернул в `online[]`, добавлялись show:true ОПТИМИСТИЧНО (T019) → вечные «пустые» чипы.
+  (3) **xvideocdnultra** (Maniya · XVideoCDN (Ultra)): на мутини single-shot сам даёт show:false/не включает —
+  тот же async-gap → **кандидат thin-widen**, а не слаг-лист.
+- **Фикс (ПРАВИЛО, работает на всех фильмах)**: `buildModel` — skaz-экстраса (слог кластер не смоделировал
+  для ЭТОЙ карточки) → **ghost («Ещё N»), НЕ активный чип**; native-экстрасы (kodik/collaps/… — свой
+  серверный контент) НЕ тронуты; кластерные строки из `online[]` НЕ тронуты (show из кластера). `meta.js`
+  += `xvideocdnultra: {name:'Maniya · XVideoCDN (Ultra)', icon:'⚡', 4K}` — имя консистентно с EO_TITLES.
+- **Тесты**: 851/844/0/7 зелёные; обновлены счётчики фикстур (mutiny shown 12→+2 native extras, ghost +rhsprem;
+  toystory5 14+2/19; interst 24+2/9); route-тест «пустой online[] → extras-only» теперь ghost. PROD НЕ трогал.
+- **Проверка staging (25.08)**: skaz-rhsprem GHOST (был SHOW) ✓, natives (filmix/kodik/collaps/hdvb/…) показаны ✓;
+  ожидание на мутини: 14 показанных ≈ живая сессия юзера (14) — панель стоит как у сказа.
+- **ЗАВТРА (девайс)**: (1) ретест панели на мутини/интерстеллар — ровно как сказ? (2) **Widen thin по подписи:
+  videoseed/pidtor/vkmovie** (+xvideocdnultra кандидат) — у них контент в кластере, наш /videos сингл-шот пуст
+  (асинхронный gap, лечится thin с девайса); (3) Alloha тормоз = дефолт 2160p через relay → тест качества ниже /
+  дефолт 1080p; (4) rch:true-источники = v2 (отдельный шаг); (5) **PROD перенос = ТОЛЬКО по подписи**
+  (чек в [[skaz-maniya-052-thin-client-prod-transfer]]).
+
+## 🔶 2026-08-24 (T052 тонкий клиент, фазы A–C ✅ / D в A/B): staging готов, ждёт девайс
+- **Проблема**: alloha/lordfilm играют «долго» — сервер минтит SKAZ-токены с VPS → нода отдаёт
+  `skaz.tv/proxy/<token>`-wrapper (IP-bound) → девайс через наш `/proxy` egress 0.06–0.16 MB/s.
+  E-Online на девайсе минтит direct CDN (thin-client: WebView сам ходит lite-цепочкой с IP устройства).
+- **Фикс (решения юзера зафиксированы)**: гейтированный bootstrap отдаёт `account_email`+`uid`
+  (память, TTL 10 мин) → клиентский ThinSkaz ходит в кластер с IP девайса → direct CDN → «✈ direct»;
+  `/videos`+/proxy = фолбэк (Noty); kill-switch `maniya_thin_off`; снапшот-тесты off = байт-в-байт.
+- **Фаза A (сервер)** ✅: `config.skaz.thin` (`SKAZ_THIN_ENABLED` off по умолчанию), роут
+  `/api/lampa/thin/bootstrap` (403 без подписки, `{enabled:false}` при off, без секретов/URL),
+  `sourceModel buildModel` — `thin:true` только у `skaz-<slug>` из allowlist. 10 тестов зелёные.
+- **Фаза B (клиент)** ✅ в `public/maniya-online.js`: `ThinSkaz` (IIFE, ES5 zero-dep, экспорт
+  `MANIYA_LIB.thinApi`): парсеры-зеркала SkazNormalizer, `sessionManager` (ws `/nws?id=<32hex>`,
+  Connected→RchRegistry, пинг, `destroyAll` — STABILITY-004), `flow` (bootstrap→lite→mint) с бюджетом,
+  `resolveCall` (ленивые EP/голоса с кэшем по fingerprint), страж `isDirectThin`, fallback-гейт в
+  `loadVideos`/`applyCardAvailability`, `destroy` → `destroyAll`.
+- **Фаза C (тесты)** ✅: `thin-client.test.js` — 14 vm-тестов (статическая проверка без
+  eval/window.open/Lampa.Select.open-вызовов; off/allowlist/wants; фильм alloha; сериал lordfilm
+  `{items,seasons,voices}`; ws-сессия/ping/закрытие/reuse; бюджет-таймаут; wrapper→null; resolveCall;
+  парсеры; компонентные Z01: direct (без `/videos`!) и fallback-wrapper (Noty+legacy ровно раз)).
+  Suite **851/844/0/7** (было 837/830/0/7).
+- **Баг, найденный Phase C (реальный, исправлен)**: `built.url = resolveVideosUrl(api_url)` — для
+  skaz-строк legacy-игра шла бы на VPS `/videos` (правильно), НО у thinFlow `sourceUrl` брался из
+  `source.url` = VPS-путь → lite-цепочка 404. Фикс: отдельный `thinUrl` = кластерный `row.url`,
+  `sourceUrl: source.thinUrl || source.url`. Плюс первый баг: `liteHostsPairs` не цеплял pathname
+  `/lite/<slug>` → базовый запрос на корень → 404/пусто → вечный фолбэк.
+- **Фаза D (staging)** ✅ A/B подтверждён: бандл `t052-c` задеплоен (served 165361 B, md5 c8feee7c, 0 утечек prod-домена);
+  `.env` += `SKAZ_THIN_ENABLED=true` + `SKAZ_THIN_MODULES=alloha,lordfilm` (бэкап `.env.bak-t052`);
+  `/api/lampa/thin/bootstrap` → `{enabled:true}`, креды/uid замаскированы, без токенов//proxy, 403 без
+  подписки; новая сборка служит по `/staging/<short>.js` (staging-юзер, `?logged=1&reset=1` — Lampa-гейт);
+  версия `/version` всё ещё штампует `5fb2c9e8` (`MANIYA_STAGING_BUILD` не меняли — косметика).
+- **A/B на девайсе (Lampa-web/телефон)**: первый прогон упал — **кластер отказывал нашему uid `…3vv`
+  (`bsi2c3vv`) в lite-доступе** (`accsdb: "Устройству **3vv нужно предоставить доступ в @skaztv_bot или из Email"`)
+  → thin молча в legacy → `/proxy` вечерний upstream_timeout 500/403 → `manifestloaderror fatal true`.
+  **Лечение — грант uid в SKAZ-аккаунте** (юзер выдал доступ; после гранта lite-страницы отдают данные,
+  голые curl с VPS → 503 «data/empty» — нода нагружает неживых повторными, как всегда). Вердикт:
+  **«✈ direct» присутствует в чипе источника, запуск мгновенный** — тонкий путь подтверждён (alloha+lordfilm).
+  Курс прямой — `/proxy` фолбэк жив. PROD НЕ трогал.
+- **Widen-находки (2026-08-24, вечер)**: (1) **LordFilm-minт = cluster-wrapper**, НЕ direct CDN
+  (нода оборачивает всегда, любой контекст) — старый `isDirectThin` гнал wrapper в legacy (lordfilm «не
+  работает»). Фикс `t052-d`: wrapper `host/proxy/<token>` из thin-минта = device-bound (минт с девайса,
+  T049 same-IP 200) → direct; `url_reserve` для wrapper НЕ ставим (наш /proxy = cross-IP 404 «яд»).
+  На девайсе: ✈ есть, video воспроизводится (loadeddata/start playing) — wrapper играется, НО **тормозит**
+  (дефолт = 2160p через relay кластера; чек: переключить качество ниже на девайсе). (2) **race первого
+  play**: девайс минтил ДО `session: ack` → 1-й play умирал "interrupted" → повторный (после ack) заводился.
+  Фикс `t052-e`: `whenReady(session)` перед минтом (только для реально открытых ws; vm-тесты мгновенные).
+  Suite 851/844/0/7, staging md5 a85993194e, PROD НЕ трогал.
+- **Источники «у сказа другие, у нас много пустых» (анализ)**: кластер даёт VPS-single-shot контракт —
+  голый массив 30 с show:false-фильтром (14 live) либо 36 all-show:true при бедных параметрах; SKAZ-клиент
+  с устройства — async `{ready,tasks,online}` + `life`/`memkey` + ре-полл до ready:true → 17 live. Наш 14 vs
+  SKAZ-17: у нас нет mirkino/rezka/kinopub/pidtor/veoveo/kinogo (show:false по single-shot), зато есть
+  eneyida/collaps/rutubemovie — они и «пустые». Воспроизвести async-контракт с VPS нельзя (T051: живая
+  сессия) — расхождение системное. Пустые = lazy-резолв на клик.
+- **Перенос на PROD** = по отдельной подписи юзера после Widen-вердикта; список в памятке
+  [[skaz-maniya-052-thin-client-prod-transfer]]: код (config/thin-bootstrap/роут/sourceModel) + env
+  (проверить SKAZ_ACCOUNT_EMAIL/UID — и **что uid имеет lite-грант в SKAZ**, как bsi2c3vv после гранта) +
+  `public/maniya-online.js`; staging-артефакт не нужен. **PROD НЕ ТРОГАТЬ (HARD STOP).**
+  Widen modules / rch:true (v2) — только по подписи.
+
+## ⏳ 2026-08-24 (T049 Alloha/SKAZ-parity): STAGING ✅, ждёт девайс-ретеста
+- **Симптомы**: Alloha `manifestloaderror fatal true`; прочие `buffer load error`→`fragloaderror`.
+- **Корень (доказано probe19)**: skaz `/proxy/<токен>.m3u8` **IP-bound** — same-IP 200, cross-IP (VPS) 404.
+  SKAZ-токены минятся на IP клиента (thin-client), у нас — на VPS → девайс их напрямую играть не может.
+  Для IP-bound источников /proxy (VPS-IP=минтер) — единственный рабочий релей. Не чинится серверно.
+- **Фикс**: `buildPlayUrl` https→`allowHosts`, http→`httpAllowHosts` (узкий, пуст по умолчанию → PROD байт-в-байт);
+  staging `.env` FINAL: `DIRECT_PLAYBACK=true`,
+  `ALLOW_HOSTS=werkecdn.me,sevstar933krop.com,ashdi.vip,vkvideo.cloud,cdnsqu.com,cdntogo.net`,
+  `HTTP_ALLOW_HOSTS=scts.tv`. skaz.tv в httpAllowHosts давал 404 на девайсе → ОТКАЧЕНО.
+- **Матрица live**: DIRECT (быстро) — kinopub `cdntogo`, filmix `cdnsqu`, alloha `vkvideo` (403 «Матрица»=контент-гейт),
+  solntse `dl.yama.scts.tv`; /proxy (медленно) — videoseed/hdvb/rutubemovie/vkmovie/zetflixdb/zagonka (500 был транзит→200).
+- Deploy staging: config.js `93e1438b`, proxy.js `5ea64b8b` (local==staging), suite **829/822/0/7**, PROD НЕ тронут.
+- **Следующее (завтра)**: девайс-ретест на staging — Alloha (не «Матрица»: Интерстеллар/Дракона 3), kinopub/filmix/solntse
+  напрямую; сериал «Продолжить просмотр» (T047c ожидание); если fragLoadError на /proxy-источниках — вопрос VPS-канала, не кода.
+
+## ⏳ 2026-08-23 (T047 UI/UX-правки): STAGING ✅, ждёт девайс-приёмки
+- Жалоба: «нет продолжить просмотр, полоски, времени, качества справа (FHD/HD/4K); край слева;
+  постер узкий; источники моргают». Фиксы в `public/maniya-online.js` (Z01): `applyTimelineModel`
+  (hash_timeline+Lampa.Timeline.view+time — как SKAZ 2510-2517), `uiRefreshGhost` (late ghost НЕ
+  перерисовывает открытую панель), `.z01-card__side` виден на мобиле, отступ слева .75em,
+  постер 12em×6.75em, «Осталось N», «Продолжить просмотр».
+- **T047b (фикс юзер-репорта «ReferenceError: object is not defined at applyTimelineModel»):**
+  `object`=замыкание фабрики component(object), не глобал → сигнатура `applyTimelineModel(item, movie)`,
+  call site `applyTimelineModel(item, object.movie)` в draw(). Регрессионный тест T047b в
+  plugin-contract.test.js. Congruence: vm в песочнице не ловил (`document.createElement` нет →
+  Z01_UI_OK=false → гвард раньше обращения к object.movie).
+- **T047c (сериалы):** key = `original_title || original_name || name || title` — у сериальной
+  карточки Lampa original_name, жёсткий guard лишал сериалы timeline. Юзер живьём подтвердил
+  «Продолжить просмотр» на фильме. Деплой `351920dd`.
+- Bundle md5 `351920dd`, served 116 585 B, suite **827/820/0/7**, PROD НЕ тронут. Отчёт:
+  `server/docs/SKAZ-MANIYA-TASK-047-UX-FIXES.md`. Следующее: reload подписки на девайсе,
+  проверка «Продолжить просмотр» на фильме ✓ и сериале; Alloha — проверить после reload
+  (skaz-alloha: кластер accsdb → ghost; «крутил долго» = битый бандл 5747b8d3).
+
 ## ⏳ 2026-08-13 (BALANCER-002 POST-DEPLOY): TRUSTED_ALWAYS_VISIBLE — filmix всегда видим; SHADOW пройден, ждёт решения юзера (коммит/деплой НЕ делались)
 - **Задача**: POST-DEPLOY shadow (docs/balancer-002-postdeploy-shadow-report.md) остановил унификацию
   per-card availability (docs/balancer-002-postdeploy-report.md §7): `filmix`/Seven-Per-Cent — NEW=false при

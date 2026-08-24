@@ -1,0 +1,174 @@
+{
+  "status": 200,
+  "ms": 323,
+  "sources": [
+    {
+      "id": "filmix",
+      "name": "Filmix",
+      "icon": "🔥",
+      "quality_label": "2160p",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=filmix",
+      "show": true
+    },
+    {
+      "id": "kodik",
+      "name": "Kodik",
+      "icon": "🔗",
+      "quality_label": "1080p",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=kodik",
+      "show": true
+    },
+    {
+      "id": "rezka",
+      "name": "For Serial",
+      "icon": "😉",
+      "quality_label": "Full HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=rezka",
+      "show": true
+    },
+    {
+      "id": "rutubemovie",
+      "name": "Rutube",
+      "icon": "📹",
+      "quality_label": "HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=rutubemovie",
+      "show": true
+    },
+    {
+      "id": "cdnvideohub",
+      "name": "CDNVideo",
+      "icon": "☁️",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=cdnvideohub",
+      "show": true
+    },
+    {
+      "id": "collaps",
+      "name": "Collaps",
+      "icon": "🧩",
+      "quality_label": "Full HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=collaps",
+      "show": true
+    },
+    {
+      "id": "hdvb",
+      "name": "XDVB",
+      "icon": "📼",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=hdvb",
+      "show": true
+    },
+    {
+      "id": "kinotochka",
+      "name": "Kinotochka",
+      "icon": "🍿",
+      "quality_label": "720p",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=kinotochka",
+      "show": true
+    },
+    {
+      "id": "skaz-alloha",
+      "name": "Allo-XA",
+      "icon": "🎬",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-alloha",
+      "show": true
+    },
+    {
+      "id": "skaz-videoseed",
+      "name": "VideoS",
+      "icon": "💠",
+      "quality_label": "Full HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-videoseed",
+      "show": true
+    },
+    {
+      "id": "skaz-kinopub",
+      "name": "Lime",
+      "icon": "🌐",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-kinopub",
+      "show": true
+    },
+    {
+      "id": "skaz-kinoflix",
+      "name": "KinoFlix",
+      "icon": "🎥",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-kinoflix",
+      "show": true
+    },
+    {
+      "id": "skaz-veoveo",
+      "name": "Ozvuchky",
+      "icon": "🎧",
+      "quality_label": "Full HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-veoveo",
+      "show": true
+    },
+    {
+      "id": "skaz-pidtor",
+      "name": "PidTor",
+      "icon": "🌀",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-pidtor",
+      "show": true
+    },
+    {
+      "id": "skaz-solntse",
+      "name": "Solntse",
+      "icon": "☀️",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-solntse",
+      "show": true
+    },
+    {
+      "id": "skaz-vkmovie",
+      "name": "RUmovie-1",
+      "icon": "▶️",
+      "quality_label": "Full HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-vkmovie",
+      "show": true
+    },
+    {
+      "id": "skaz-geosaitebi",
+      "name": "GeoVideo",
+      "icon": "🌍",
+      "quality_label": "Full HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-geosaitebi",
+      "show": true
+    },
+    {
+      "id": "skaz-rhsprem",
+      "name": "HDRezka 4K",
+      "icon": "🎞️",
+      "quality_label": "4K",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-rhsprem",
+      "show": true
+    },
+    {
+      "id": "skaz-zetflixdb",
+      "name": "Maniya · ZetflixDB",
+      "icon": "🎬",
+      "quality_label": "",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-zetflixdb",
+      "show": true
+    },
+    {
+      "id": "skaz-zagonka",
+      "name": "GET's TV",
+      "icon": "📡",
+      "quality_label": "Full HD",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-zagonka",
+      "show": true
+    },
+    {
+      "id": "skaz-xvideocdnultra",
+      "name": "Maniya · XVideoCDN (Ultra)",
+      "icon": "🎬",
+      "quality_label": "",
+      "url": "https://plugin.maniya-kvn.online/api/lampa/videos?provider=skaz-xvideocdnultra",
+      "show": true
+    }
+  ]
+}

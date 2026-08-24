@@ -1,0 +1,130 @@
+{
+  "mutiny": [
+    {
+      "host": "online3.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "online8.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.63",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.37",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.11",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "77.90.33.109",
+      "http": 200,
+      "err": "no online[]"
+    }
+  ],
+  "toystory5": [
+    {
+      "host": "online3.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "online8.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.63",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.37",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.11",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "77.90.33.109",
+      "http": 200,
+      "err": "no online[]"
+    }
+  ],
+  "interst": [
+    {
+      "host": "online3.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "online8.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.63",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.37",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.11",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "77.90.33.109",
+      "http": 200,
+      "err": "no online[]"
+    }
+  ],
+  "drake": [
+    {
+      "host": "online3.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "online8.skaz.tv",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.63",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.37",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "94.249.239.11",
+      "http": 200,
+      "err": "no online[]"
+    },
+    {
+      "host": "77.90.33.109",
+      "http": 200,
+      "err": "no online[]"
+    }
+  ]
+}

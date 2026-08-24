@@ -1,4 +1,4 @@
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { HDVBClient } from './HDVBClient.js';
 import { HDVBNormalizer } from './HDVBNormalizer.js';
@@ -59,7 +59,7 @@ export class HDVBProvider extends Provider {
     if (!this.enabled()) return { items: [], seasons: [], voices: [] };
     const requestContext = context || {};
     const query = requestContext.query || {};
-    const streamProxy = (url) => buildProxyUrl(requestContext, url);
+    const streamProxy = (url) => buildPlayUrl(requestContext, url);
 
     try {
       const data = await this.fetchData(query);
@@ -270,7 +270,7 @@ export class HDVBProvider extends Provider {
     const mediaUrl = String(query.url || item.url || '').trim();
     if (!mediaUrl) return [];
 
-    const streamProxy = (url) => buildProxyUrl(requestContext, url);
+    const streamProxy = (url) => buildPlayUrl(requestContext, url);
     const title = String(query.title || item.title || this.title);
     const type = String(query.type || item.type || 'movie');
     const voice = String(query.voice_name || item.voice_name || item.voice || 'Оригинал');

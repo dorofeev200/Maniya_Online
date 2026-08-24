@@ -1,0 +1,17 @@
+{
+  "withsearch": {
+    "status": 200,
+    "ms": 347,
+    "len": 356,
+    "nws_got": false
+  },
+  "events": {
+    "status": 200,
+    "ms": 204,
+    "len": 2445,
+    "count": 28,
+    "first": "KinoPub",
+    "shown": 0,
+    "preview": "[{\"name\":\"KinoPub\",\"url\":\"http://online8.skaz.tv/lite/kinopub\",\"balanser\":\"kinopub\"},{\"name\":\"Filmix\",\"url\":\"http://online3.skaz.tv/lite/filmix\",\"balanser\":\"filmix\"},{\"name\":\"Lumex\",\"url\":\"http://online3.skaz.tv/lite/sakhtv\",\"balanser\":\"sakhtv\"},{\"name\":\"Kinot"
+  }
+}

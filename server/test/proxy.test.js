@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { PassThrough } from 'node:stream';
 import { HttpError } from '../src/errors.js';
-import { isHostAllowed, validateProxyTarget, proxyMedia, isManifestResponse } from '../src/proxy.js';
+import { config } from '../src/config.js';
+import { isHostAllowed, validateProxyTarget, proxyMedia, isManifestResponse, buildPlayUrl } from '../src/proxy.js';
 
 test('isHostAllowed: корень и поддомены, чужой хост отклонён', () => {
   assert.equal(isHostAllowed('vip.filmix.tv', ['filmix.tv']), true);
@@ -219,6 +220,27 @@ function startTestServer() {
           '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio0",NAME="default",DEFAULT=YES,URI="https://cdn.example/audio/en.m3u8"',
           '#EXTINF:6.000,',
           'https://cdn.example/seg-1.m3u8',
+          '#EXT-X-ENDLIST',
+          ''
+        ].join('\n'));
+        return;
+      }
+      if (req.url.startsWith('/hash.m3u8')) {
+        // SKAZ-MANIYA-008 §7: nl105-образ — `?hash=` только на плейлисте; seg-URI
+        // абсолютные БЕЗ hash (CDN ключует по hash на каждый ресурс → 403 на фрагмент).
+        // seg-2 несёт СВОЙ hash (werkecdn-образ) — его переписывать нельзя (идемпотентность).
+        const base = `http://127.0.0.1:${server.address().port}/hash`;
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl' });
+        res.end([
+          '#EXTM3U',
+          '#EXT-X-TARGETDURATION:6',
+          '#EXTINF:6.000,',
+          `${base}/seg-1-v1-a1.ts`,
+          '#EXTINF:6.000,',
+          'https://cdn.other/seg-2-v1-a1.ts?hash=SEGOWN',
+          '#EXTINF:6.000,',
+          'rel-seg-3-v1-a1.ts',
+          '#EXT-X-KEY:METHOD=AES-128,URI="keys/key.bin",IV=0x00000000000000000000000000000001',
           '#EXT-X-ENDLIST',
           ''
         ].join('\n'));
@@ -531,4 +553,154 @@ test('proxyMedia: 403 на redirect-цель, которой нет в allowHost
   } finally {
     server.close();
   }
+});
+
+test('proxyMedia: seg без query наследует hash плейлиста, свой hash не трогается (SKAZ-MANIYA-008 §7)', async () => {
+  const server = await startTestServer();
+  try {
+    const port = server.address().port;
+    const makeProxyUrl = (url) => `https://maniya.test/proxy?url=${encodeURIComponent(url)}`;
+    const response = new MockResponse();
+    const request = { headers: {} };
+
+    // Плейлист отдаётся ПО URL с `?hash=TOKEN` — как у CDN, ключующих по подписи.
+    await proxyMedia(`http://127.0.0.1:${port}/hash.m3u8?hash=TOKEN`, request, response, {
+      allowHosts: ['127.0.0.1', 'cdn.other'],
+      makeProxyUrl,
+      maxRedirects: 1,
+      timeoutMs: 3000
+    });
+
+    const body = await collect(response);
+    assert.equal(response.status, 200);
+    // (1) абсолютный seg без query → внутри прокси-URL появляется hash плейлиста.
+    assert.match(body, /https:\/\/maniya\.test\/proxy\?url=.+seg-1-v1-a1\.ts%3Fhash%3DTOKEN/);
+    // (3) относительный seg → резолвится против базы и тоже получает hash.
+    assert.match(body, /rel-seg-3-v1-a1\.ts%3Fhash%3DTOKEN/);
+    // (2) seg, у которого СВОЙ hash (werkecdn-образ), НЕ перезаписывается базой.
+    assert.match(body, /seg-2-v1-a1\.ts%3Fhash%3DSEGOWN/);
+    assert.doesNotMatch(body, /seg-2-v1-a1\.ts%3Fhash%3DTOKEN/);
+    // (2b) директивы (#EXT-X-KEY) — та же пропагация для относительных URI.
+    assert.match(body, /keys%2Fkey\.bin%3Fhash%3DTOKEN/);
+  } finally {
+    server.close();
+  }
+});
+
+test('proxyMedia: плейлист без query не добавляет seg никаких параметров (SKAZ-MANIYA-008 §7 no-op)', async () => {
+  const server = await startTestServer();
+  try {
+    const port = server.address().port;
+    const makeProxyUrl = (url) => `https://maniya.test/proxy?url=${encodeURIComponent(url)}`;
+    const response = new MockResponse();
+    const request = { headers: {} };
+
+    await proxyMedia(`http://127.0.0.1:${port}/render.m3u8`, request, response, {
+      allowHosts: ['127.0.0.1'],
+      makeProxyUrl,
+      maxRedirects: 1,
+      timeoutMs: 3000
+    });
+
+    const body = await collect(response);
+    assert.equal(response.status, 200);
+    // Без query у базы rewrite остаётся прежним: у сегментов НЕ появляется `?hash=…`.
+    assert.match(body, /https:\/\/maniya\.test\/proxy\?url=.+seg-1-f1-v1-a1\.m4s/);
+    assert.doesNotMatch(body, /hash=/);
+  } finally {
+    server.close();
+  }
+});
+
+// ── T037 DIRECT-FIRST PLAYBACK (staging-эксперимент) ──
+// buildPlayUrl — обёртка поверх buildProxyUrl: когда config.directPlayback.enabled
+// и https-хост target в config.directPlayback.allowHosts, Lampa получает ИСХОДНЫЙ
+// CDN URL (поток CDN→клиент, минуя наш egress-бутылочное горло T036 0.1–0.2 MB/s).
+// Во ВСЕХ остальных случаях — buildProxyUrl (fallback, поведение идентично текущему).
+// Флаг выключен по умолчанию → на PROD ничего не меняется (байт-в-байт).
+function withDirectPlayback(enabled, allowHosts, fn) {
+  const before = {
+    enabled: config.directPlayback.enabled,
+    allowHosts: config.directPlayback.allowHosts,
+    httpAllowHosts: config.directPlayback.httpAllowHosts
+  };
+  try {
+    config.directPlayback.enabled = enabled;
+    config.directPlayback.allowHosts = allowHosts;
+    config.directPlayback.httpAllowHosts = before.httpAllowHosts;
+    return fn();
+  } finally {
+    config.directPlayback.enabled = before.enabled;
+    config.directPlayback.allowHosts = before.allowHosts;
+    config.directPlayback.httpAllowHosts = before.httpAllowHosts;
+  }
+}
+
+test('buildPlayUrl: флаг выключен (default) → /proxy даже для allowlisted-хоста (PROD-байт-в-байт)', () => {
+  withDirectPlayback(false, ['filmix.tv'], () => {
+    const url = buildPlayUrl({ query: { token: 'tok-test' } }, 'https://vip.filmix.tv/s/x/2160p.mp4');
+    assert.match(url, /\/api\/lampa\/proxy\?url=/);
+    assert.ok(url.includes(encodeURIComponent('vip.filmix.tv/s/x/2160p.mp4')), 'target внутри прокси-URL');
+    assert.match(url, /token=tok-test/, 'токен подмешивается');
+  });
+});
+
+test('buildPlayUrl: direct включён + https-хост в allowlist → ИСХОДНЫЙ URL без /proxy', () => {
+  withDirectPlayback(true, ['filmix.tv'], () => {
+    const target = 'https://vip.filmix.tv/s/x/2160p.mp4';
+    const url = buildPlayUrl({ query: { token: 'tok-test' } }, target);
+    assert.equal(url, target, 'play-URL = CDN напрямую (поток минует /proxy)');
+  });
+});
+
+test('buildPlayUrl: direct включён, но хост ВНЕ allowlist → fallback на /proxy', () => {
+  withDirectPlayback(true, ['filmix.tv'], () => {
+    const url = buildPlayUrl({ query: {} }, 'https://voidboost.one/s/x/manifest.m3u8');
+    assert.match(url, /\/api\/lampa\/proxy\?url=/);
+    assert.ok(url.includes(encodeURIComponent('voidboost.one')), 'чужой CDN идёт через прокси');
+  });
+});
+
+test('buildPlayUrl: direct включён, http-схема вне httpAllowHosts → fallback на /proxy (T049)', () => {
+  withDirectPlayback(true, ['skaz.tv'], () => {
+    config.directPlayback.httpAllowHosts = [];
+    const url = buildPlayUrl({ query: {} }, 'http://online3.skaz.tv/lite/kinopub');
+    assert.match(url, /\/api\/lampa\/proxy\?url=/);
+    assert.ok(url.includes(encodeURIComponent('online3.skaz.tv')), 'http-источник без httpAllowHosts остаётся через прокси');
+  });
+});
+
+test('buildPlayUrl: direct включён + http-хост в httpAllowHosts → ИСХОДНЫЙ URL (SKAZ-parity T049)', () => {
+  withDirectPlayback(true, ['skaz.tv'], () => {
+    config.directPlayback.httpAllowHosts = ['skaz.tv'];
+    const raw = 'http://online3.skaz.tv/lite/videoseed?play=true';
+    const url = buildPlayUrl({ query: {} }, raw);
+    assert.equal(url, raw, 'http-хост из httpAllowHosts → ИСХОДНЫЙ URL напрямую');
+    assert.match(url, /^http:\/\/online3\.skaz\.tv/, 'http-URL без /proxy');
+  });
+});
+
+test('buildPlayUrl: direct включён, http-хост в allowHosts НО не в httpAllowHosts → /proxy (T049)', () => {
+  withDirectPlayback(true, ['skaz.tv'], () => {
+    config.directPlayback.httpAllowHosts = [];
+    const url = buildPlayUrl({ query: {} }, 'http://oleg6.skaz.tv/x/manifest.m3u8');
+    assert.match(url, /\/api\/lampa\/proxy\?url=/);
+    assert.ok(url.includes(encodeURIComponent('oleg6.skaz.tv')), 'http без httpAllowHosts идёт через прокси');
+  });
+});
+
+test('buildPlayUrl: direct — суффикс-маппинг allowlist (поддомен корня)', () => {
+  withDirectPlayback(true, ['kvb.cool'], () => {
+    assert.equal(buildPlayUrl({ query: {} }, 'https://svd5.kvb.cool/f.mp4'), 'https://svd5.kvb.cool/f.mp4');
+    assert.equal(buildPlayUrl({ query: {} }, 'https://kvb.cool/f.mp4'), 'https://kvb.cool/f.mp4');
+    // Чужой хост, «похожий» на корень (straddle) — НЕ прямой.
+    assert.match(buildPlayUrl({ query: {} }, 'https://kvb.cool.attacker.com/f.mp4'), /\/api\/lampa\/proxy\?url=/);
+  });
+});
+
+test('buildPlayUrl: не-URL значение → fallback на /proxy (не крашится)', () => {
+  withDirectPlayback(true, ['filmix.tv'], () => {
+    const url = buildPlayUrl({ query: {} }, 'not-a-url');
+    assert.match(url, /\/api\/lampa\/proxy\?url=not-a-url/);
+  });
 });

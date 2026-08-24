@@ -36,6 +36,12 @@ const STATUS_REST = new Set([200, 201, 202, 203, 204, 206]);
  * - resolveStream(url) — серверный резолв `method:"call"` потока: GET m3u8 с
  *                        `Origin`, отдать финальный URL (voidboost/skaz);
  * - discover()        — GET `lite/withsearch` → список балансеров или null;
+ * - getOnline(params) — GET `lite/events` (per-title источники online[],
+ *                        SKAZ-MANIYA-019): ротация по пулу, первый валидный
+ *                        online[] → стоп, иначе null. Ротацию `_hostIndex`
+ *                        НЕ сдвигает (глобальный запрос, не per-balancer);
+ * - parseEventsOnline  — экспорт: валидация online[] (balanser обязателен,
+ *                        show → boolean preserved, url-sanitize от query);
  * - isDead(rch)       — детект `{"rch":true}`.
  *
  * «Мёртвые» ответы (rch, accsdb, disable, 5xx) возвращаются как null —
@@ -365,15 +371,24 @@ export class SkazClient {
     const ctype = String(response.headers?.get?.('content-type') || '').toLowerCase();
     if (ctype.includes('json')) {
       const text = await response.text().catch(() => null);
-      const rchInfo = parseRchPayload(text);
-      if (rchInfo) {
-        const resolved = await this._rchFetchResolved(target, rchInfo, { Origin: this.origin }, options);
-        if (resolved == null) return null;
-        const parsed = tryJson(resolved);
+      if (text) {
+        const rchInfo = parseRchPayload(text);
+        if (rchInfo) {
+          const resolved = await this._rchFetchResolved(target, rchInfo, { Origin: this.origin }, options);
+          if (resolved == null) return null;
+          const parsed = tryJson(resolved);
+          if (parsed && parsed.method === 'play' && String(parsed.url || '').trim()) {
+            return String(parsed.url).split(/\s+or\s+|\s*%20or%20\s*/gi)[0].trim() || null;
+          }
+          return String(resolved).trim() || null;
+        }
+        // Не-RCH JSON: распаковываем `url` как resolveVideoJson — иначе фолбэк
+        // вернул бы сырой call-url (finalUrl) при интермиттентном срабатывании
+        // host-ротации/transient. SKAZ-MANIYA-003 TODO-2 root cause.
+        const parsed = tryJson(text);
         if (parsed && parsed.method === 'play' && String(parsed.url || '').trim()) {
           return String(parsed.url).split(/\s+or\s+|\s*%20or%20\s*/gi)[0].trim() || null;
         }
-        return String(resolved).trim() || null;
       }
     }
     return finalUrl || String(target).trim();
@@ -513,10 +528,73 @@ export class SkazClient {
     return extra.discovery ? 'withsearch' : this.balancer;
   }
 
+  /**
+   * Per-title модель источников (SKAZ-MANIYA-019): GET `lite/events?<cardParams>`
+   * (БЕЗ `life=true` — SKAZ-контракт из T018 §10) → JSON `{online:[…]}` / `[…].
+   * Ротация пула ПОСЛЕДОВАТЕЛЬНО (первый успешный валидный online[] → стоп);
+   * нода: таймаут `options.timeoutMs` (per-нода, из config.skaz.checkTimeoutMs);
+   * на весь обход общий кэп `min(timeoutMs×N, 12s)`, чтобы `/sources/card`
+   * не держался дольше лимита (рефайнмент T019 #5). Невалидный JSON/timeout/
+   * не-2xx/accsdb → следующая нода; пул исчерпан → null (route → probe fallback).
+   *
+   * В отличие от getLite здесь НЕ сканирующая волна, а «первый валидный ответ
+   * кластера»: лайт-события идемпотентны на любой ноде кластера, и первый
+   * parse-успех авторитарен. `_hostIndex` НЕ сдвигается — events глобальный
+   * (per-card), не per-balancer запрос; ротация провайдеров не меняется.
+   */
+  async getOnline(params = {}, options = {}) {
+    const base = this.buildEventsUrl(params);
+    if (!base) return null;
+    const pinnedHost = String(options.pinnedHost || '').trim() || undefined;
+    const targets = this._eventsTargets(base, pinnedHost);
+    const perNodeMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : this.timeoutMs;
+    const overallCapMs = Math.min(perNodeMs * Math.max(1, targets.length), 12_000);
+    const started = Date.now();
+    for (const target of targets) {
+      const remaining = overallCapMs - (Date.now() - started);
+      if (remaining <= 0) break;
+      const response = await this.fetch(target, { timeoutMs: Math.min(perNodeMs, remaining) });
+      if (!response) continue; // не-2xx / timeout / сеть
+      const text = await response.text().catch(() => null);
+      if (text == null) continue;
+      const online = parseEventsOnline(text);
+      if (online === null) continue; // невалидный/accsdb → следующая нода
+      return online; // валидный (в т.ч. пустой) online[] — СТОП
+    }
+    return null;
+  }
+
+  /** Собрать URL `lite/events?…` (для тестов — проверить параметры). */
+  buildEventsUrl(params = {}) {
+    if (!this.hosts.length) return '';
+    const host = this.hosts[this._hostIndex % this.hosts.length];
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+    }
+    query.set('account_email', this.accountEmail);
+    query.set('uid', this.uid);
+    return `${host}/lite/events?${query.toString()}`;
+  }
+
+  /** Кандидаты-хосты для `lite/events`: старт с пина (иначе hosts[0]), каждый
+   *  хост пула ровно один раз. Тот же порядок, что `_liteTargets` (W1). */
+  _eventsTargets(baseUrl, pinnedHost) {
+    const pool = this.hosts.length ? this.hosts : orderedSkazHosts(SKAZ_DEFAULT_HOSTS);
+    const targets = [];
+    const startIndex = this._poolIndex(pinnedHost);
+    const start = startIndex !== -1 ? startIndex : 0;
+    for (let step = 0; step < pool.length; step += 1) {
+      targets.push(swapHost(baseUrl, pool[(start + step) % pool.length]));
+    }
+    return targets;
+  }
+
   async fetch(url, options = {}) {
     if (!url) return null;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(this.timeoutMs), this.timeoutMs);
+    const timeoutMs = (options.timeoutMs && Number(options.timeoutMs) > 0) ? Number(options.timeoutMs) : this.timeoutMs;
+    const timer = setTimeout(() => controller.abort(timeoutMs), timeoutMs);
     try {
       const response = await this.fetchImpl(url, {
         headers: { accept: '*/*', ...(options.headers || {}) },
@@ -660,6 +738,49 @@ export function parseRchPayload(text) {
   const nws = String(parsed.nws || '').trim();
   if (!/^wss?:\/\//i.test(nws)) return null;
   return { rch: true, nws, host: rchHttpOrigin(nws) };
+}
+
+/**
+ * Разобрать ответ `lite/events` (SKAZ-MANIYA-019) в per-title модель источника.
+ * Форматы (как SKAZ-кластер отдаёт с СЕЙЧАС §T018-10): `{"online":[…],...}`
+ * или голый JSON-массив `[…]`. Каждая запись — `{name,url,index,show,balanser,
+ * rch,voices,seasons}`. Валидация: запись без balanser отбрасывается; `show`
+ * → boolean preserved (`o.show !== false`); `rch` → `o.rch === true`;
+ * `url`-sanitize: срезается query (account_email/uid/auth никогда не остаются
+ * в модели). Возвращает массив (в т.ч. пустой — валидный «источников нет»)
+ * или null (не JSON / нет поля online / accsdb — источник пер-карт недоступен).
+ */
+export function parseEventsOnline(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const online = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.online) ? parsed.online : null);
+  if (!online) return null;
+  const items = [];
+  for (const o of online) {
+    if (!o || typeof o !== 'object') continue;
+    const balanser = String(o.balanser || '').trim();
+    if (!balanser) continue;
+    let url = String(o.url || '').trim();
+    if (url.includes('?')) url = url.slice(0, url.indexOf('?'));
+    items.push({
+      name: String(o.name ?? balanser),
+      url,
+      index: Number(o.index) || 0,
+      show: o.show !== false,
+      balanser,
+      rch: o.rch === true,
+      voices: Number(o.voices) || 0,
+      seasons: Number(o.seasons) || 0
+    });
+  }
+  return items;
 }
 
 /** JSON.parse без бросков (результат RCH-повтора может быть битым/не-JSON). */

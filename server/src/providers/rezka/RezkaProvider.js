@@ -1,5 +1,5 @@
 import { Provider } from '../base.js';
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { RezkaClient } from './RezkaClient.js';
 import { RezkaNormalizer } from './RezkaNormalizer.js';
 
@@ -146,7 +146,7 @@ export class RezkaProvider extends Provider {
       // а не запрос: сериал по id/href без type не должен уходить как 'movie'.
       record.type = embedInfo.isSerial ? 'serial' : 'movie';
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       return embedInfo.isSerial
         ? this.serialStreams(record, embedInfo, query, streamProxy)
         : this.movieStreams(record, embedInfo, query, streamProxy);
@@ -232,7 +232,7 @@ export class RezkaProvider extends Provider {
       const embedInfo = await this.embed(record);
       if (!embedInfo) return { items: [], seasons: [], voices: [] };
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       return embedInfo.isSerial
         ? this.serialVideos(record, embedInfo, query, streamProxy)
         : this.movieVideos(record, embedInfo, query, streamProxy);

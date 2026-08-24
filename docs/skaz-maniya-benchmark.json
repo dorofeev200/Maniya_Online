@@ -1,0 +1,47 @@
+{
+  "task": "SKAZ-MANIYA-002",
+  "method": "20 identical local outbound requests to Skaz cluster (no deploy)",
+  "date": "2026-08-20",
+  "results": [
+    {
+      "name": "videoseed/serial ep1 (Дом дракона)",
+      "N": 20,
+      "found": 20,
+      "nulls": 0,
+      "errs": 0,
+      "resolved_stream": 20,
+      "call_url": 0,
+      "avg_ms": 228,
+      "max_ms": 964,
+      "distinct_inner": 1,
+      "verdict": "PASS: 100% resolved stream, 0 call-url, no intermittency"
+    },
+    {
+      "name": "rezka/movie (Форрест Гамп)",
+      "N": 20,
+      "found": 20,
+      "nulls": 0,
+      "errs": 0,
+      "resolved_stream": 20,
+      "call_url": 0,
+      "avg_ms": 286,
+      "max_ms": 1558,
+      "distinct_inner": 1,
+      "verdict": "PASS: 100% resolved stream, 0 call-url, no intermittency"
+    },
+    {
+      "name": "filmix/movie (Inception) via /video",
+      "N": 20,
+      "found": 0,
+      "nulls": 20,
+      "errs": 0,
+      "resolved_stream": 0,
+      "call_url": 0,
+      "avg_ms": null,
+      "max_ms": null,
+      "distinct_inner": 0,
+      "verdict": "BY-DESIGN: play-provider yields ready play-URLs in videos(); /video only resolves method:'call'. 4 play cards present. Not a divergence."
+    }
+  ],
+  "notes": "filmix/movie uses play-path, not /video; thus /video null is expected and correct for method:'play' cards. See report §9 case 4 / TODO-4."
+}

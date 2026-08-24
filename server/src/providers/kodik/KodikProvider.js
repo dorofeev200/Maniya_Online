@@ -1,5 +1,5 @@
 import { clientIp } from '../../security.js';
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { KodikClient } from './KodikClient.js';
 import { KodikNormalizer } from './KodikNormalizer.js';
@@ -116,7 +116,7 @@ export class KodikProvider extends Provider {
         ip: requestContext?.request ? clientIp(requestContext.request) : '127.0.0.1'
       });
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       const id = String(query.id || item?.id || query.link || link);
       const title = String(query.title || item?.title || this.title);
       const type = String(query.type || item?.type || 'movie');
@@ -150,7 +150,7 @@ export class KodikProvider extends Provider {
       const serials = records.filter((record) => record.type === 'serial');
       const movies = records.filter((record) => record.type === 'movie');
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       return serials.length
         ? await this.serialVideos(serials, query, requestContext, streamProxy)
         : await this.movieVideos(movies, query, requestContext, streamProxy);

@@ -155,6 +155,32 @@ export function providerById(id) {
   return providers.find((provider) => provider.id === id) || null;
 }
 
+/**
+ * Лёгкий снимок реестра для per-title sourceModel (SKAZ-MANIYA-019): карты
+ * id/слагов БЕЗ провайдер-инстансов. Разрешает `resolveModelId` (native enabled
+ * wins → id native) и список Maniya-only extras (зарегистрированные источники,
+ * чей слаг кластер для карточки не моделирует). Статичен на время жизни модуля
+ * (списки/порядки НЕ меняются).
+ */
+export function registrySnapshot() {
+  const natives = [];
+  const visibleSkaz = [];
+  for (const provider of allProviderInstances) {
+    if (!provider.enabled?.()) continue;
+    if (String(provider.id).startsWith('skaz-')) {
+      if (provider.show !== false) visibleSkaz.push({ id: provider.id, balancer: provider.balancer });
+    } else {
+      natives.push({ id: provider.id });
+    }
+  }
+  return {
+    natives,
+    visibleSkaz,
+    nativeIdSet: new Set(natives.map((n) => n.id)),
+    skazSlugVisible: new Set(visibleSkaz.map((s) => s.balancer))
+  };
+}
+
 function capitalize(text) {
   const s = String(text || '');
   return s ? s[0].toUpperCase() + s.slice(1) : s;

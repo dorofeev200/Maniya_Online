@@ -1,5 +1,5 @@
 import { Provider } from '../base.js';
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { AllohaClient } from './AllohaClient.js';
 import { AllohaNormalizer } from './AllohaNormalizer.js';
 
@@ -116,7 +116,7 @@ export class AllohaProvider extends Provider {
       const serial = records.find((record) => record.type === 'serial');
       const movie = records.find((record) => record.type === 'movie');
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       return serial
         ? await this.serialVideos(serial, query, streamProxy)
         : await this.movieVideos(movie, query, streamProxy);

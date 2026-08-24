@@ -268,7 +268,51 @@ export const config = {
       keepaliveMs: integer('SKAZ_RCH_KEEPALIVE_MS', 50_000),
       // Отладка RCH: только host/balancer/round/ok-длительность (никогда секреты).
       debug: bool('SKAZ_RCH_DEBUG', false)
+    },
+    // SKAZ-MANIYA-052 — тонкий клиент: флаг ВЫКЛЮЧЕН по умолчанию, на PROD ничего
+    // не меняется (бootstrap вернёт {enabled:false}, /sources/card байт-в-байт).
+    // enabled=true позволяет клиенту самому резолвить lite-цепочку с IP ДЕВАЙСА
+    // (минт direct CDN, как E-Online); /proxy остаётся фолбэком.
+    thin: {
+      enabled: bool('SKAZ_THIN_ENABLED', false),
+      // Allowlist слаг-балансеров, для которых клиент включает тонкий путь
+      // (пример: alloha,lordfilm). Пустой список = тонкий клиент выключен.
+      modules: list('SKAZ_THIN_MODULES', []),
+      // TTL bootstrap-ответа в памяти клиента (мс): 10 мин.
+      ttlMs: integer('SKAZ_THIN_TTL_MS', 600_000)
     }
+  },
+  // MANIYA-STAGING (TASK-032 Phase 17): тестовый плагин на staging-сервере.
+  // enabled=false по умолчанию → на PROD роуты /version, /api/lampa/version и
+  // /staging/<short>.js неактивны (404), стадинг-сборка не раздаётся (она вне
+  // publicDir, sendStatic её не видит). Включается только в server/.env staging.
+  staging: {
+    enabled: bool('MANIYA_STAGING_ENABLED', false),
+    // Базовый URL, на который смотрит тестовый плагин (обязан быть staging,
+    // НЕ prod-домен): http://<ip> или https://<hostname> после DNS+сертификата.
+    pluginBase: (process.env.MANIYA_STAGING_PLUGIN_BASE || '').trim().replace(/\/+$/, ''),
+    // Идентификатор сборки — MANIYA_STAGING_BUILD=<git-short-sha> (как T021:
+    // 8-hex fingerprint-хэш развёрнутого дерева). Отдаётся /version + вшит в
+    // плагин (window.MANIYA_STAGING_BUILD).
+    buildId: (process.env.MANIYA_STAGING_BUILD || '').trim(),
+    // Директория тестовой сборки плагина (server/staging-public) — вНЕ publicDir,
+    // sendStatic по /api-инстансам её не отдаёт; только роут /staging/<short>.js.
+    stagingPublicDir: resolvePath(process.env.MANIYA_STAGING_PUBLIC_DIR || path.join(rootDir, 'server', 'staging-public'))
+  },
+  // T037 DIRECT-FIRST PLAYBACK (staging-эксперимент, флаг ВЫКЛЮЧЕН по умолчанию):
+  // enabled=true и хост в allowHosts → buildPlayUrl() отдаёт Lampa ИСХОДНЫЙ CDN
+  // URL (без /proxy). Хосты добавляются только после live-верификации (206/Range,
+  // скорость CDN→клиент, необходимость Origin/Referer). Вне allowlist → /proxy.
+  directPlayback: {
+    enabled: bool('DIRECT_PLAYBACK', false),
+    // Хосты, разрешённые к прямому доступу (суффиксное сопоставление, как proxy
+    // allowHosts). По умолчанию пусто → поведение идентично текущему (всё /proxy).
+    allowHosts: list('DIRECT_PLAYBACK_ALLOW_HOSTS', []),
+    // T049 (SKAZ-parity): https-гейт buildPlayUrl отрезал http-источники, которые
+    // в SKAZ играют напрямую (skaz-хосты online3/online8/oleg6.skaz.tv, scts.tv).
+    // Узкий список http-хостов для direct-режима (как proxy.httpAllowHosts); пусто
+    // по умолчанию → PROD байт-в-байт. Хосты — только после live-верификации 206.
+    httpAllowHosts: list('DIRECT_PLAYBACK_HTTP_ALLOW_HOSTS', [])
   },
   proxy: {
     // TASK-KINOTOCHKA-001: kvb.cool — CDN прямых MP4 Kinotochka (svd*.kvb.cool);

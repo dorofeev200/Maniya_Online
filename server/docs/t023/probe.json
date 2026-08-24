@@ -1,0 +1,18 @@
+{
+  "withsearch": {
+    "label": "lite/withsearch",
+    "url": "http://online3.skaz.tv/lite/withsearch?account_email=REDACTED&uid=REDACTED",
+    "status": 200,
+    "ms": 337,
+    "len": 356,
+    "body": "[\"kinotochka\",\"kinobase\",\"kinopub\",\"lumex\",\"filmix\",\"filmixtv\",\"fxapi\",\"redheadsound\",\"animevost\",\"animego\",\"animedia\",\"animebesst\",\"anilibria\",\"aniliberty\",\"rezka\",\"rhsprem\",\"kodik\",\"remux\",\"animelib\",\"kinoukr\",\"rc/filmix\",\"rc/fxapi\",\"rc/rhs\",\"vcdn\",\"videocdn\",\"lumex\",\"collaps\",\"collaps-dash\",\"vdbmovies\",\"hdvb\",\"alloha\",\"veoveo\",\"rutubemovie\",\"vkmovie\"]"
+  },
+  "fsearch": {
+    "label": "lite/fsearch",
+    "url": "http://online3.skaz.tv/lite/fsearch?q=%D0%94%D0%BE%D0%BC%20%D0%94%D1%80%D0%B0%D0%BA%D0%BE%D0%BD%D0%B0&account_email=REDACTED&uid=REDACTED",
+    "status": 404,
+    "ms": 260,
+    "len": 0,
+    "body": ""
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "wrapped": "https://plugin.maniya-kvn.online/api/lampa/proxy?url=https%3A%2F%2Fnl221.werkecdn.me%2Fs%2FFHQS-By4bLkACFD5lx3_ddh0FBQUFBSTNXTzBFU",
+  "inner": "https://nl221.werkecdn.me/s/FHQS-By4bLkACFD5lx3_ddh0FBQUFBSTNXTzBFUmRUT1ZCU0dCY25Baw.xRQlHTJPMFqgO5mnscJ--c4I_sq8mdH4ReWShw/HD_45/",
+  "items": 3,
+  "probes": {
+    "table1": [
+      [
+        "bare",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "proxy-semantics",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "ref-only",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "origin-only",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "ua-android",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ]
+    ],
+    "range": {
+      "status": 429,
+      "ct": "text/html; charset=UTF-8"
+    },
+    "range2": {
+      "status": 429,
+      "ct": "text/html; charset=UTF-8"
+    },
+    "burst": [
+      [
+        "burst-1",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "burst-2",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "burst-3",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "burst-4",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "burst-5",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ],
+      [
+        "burst-6",
+        {
+          "status": 429,
+          "ct": "text/html; charset=UTF-8"
+        }
+      ]
+    ]
+  }
+}

@@ -512,6 +512,96 @@ test('movie: kinopub (Lime) — link-карточки с postid → follow че�
   assert.ok(result.items.every((item) => item.voice_name), 'перевод не пуст');
 });
 
+test('T035-D2: filmix — title-match ПРОХОДИТ год-гейт (пост кластера ≠ года выхода)', async () => {
+  // Реальный T035-кейс: «Мятеж / The Mutiny» кластер filmix постит под годом 2026,
+  // TMDB/клиент знает 2025. Единственная корректная similar-карточка (постid) — та же
+  // карточка, год-гейт НЕ должен её отвергать (иначе «Видео не найдено», SKAZ ведёт по ней).
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online3.skaz.tv/lite/filmix?postid=186401&title=%D0%9C%D1%8F%D1%82%D0%B5%D0%B6&original_title=The+Mutiny","similar":true,"year":2026,"details":"","title":"Мятеж / Mutiny"}\'>Мятеж / Mutiny</div>',
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online3.skaz.tv/lite/filmix?postid=184267&title=%D0%9C%D1%8F%D1%82%D0%B5%D0%B6%D0%BD%D0%B8%D0%BA%D0%B8","similar":true,"year":2024,"title":"Мятежники"}\'>Мятежники</div>'
+  ].join('');
+  const postHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"http://nl221.werkecdn.me/s/FHmG5rqU6DqQlpp4Q9U0-JZkFBQUFBQTU4S2tFUmRZ","quality":{"1080p":"http://nl221.werkecdn.me/s/1080","720p":"http://nl221.werkecdn.me/s/720"},"translate":"MVO [1080, HDRezka]","title":"Мятеж (MVO)"}\'>Мятеж (MVO [1080, HDRezka])</div>'
+  ].join('');
+
+  const client = new FakeSkazClient({ lite: similarHtml, pages: { 'postid:186401': postHtml } });
+  const provider = makeProvider(client, 'filmix');
+
+  // query год 2025 (TMDB) — ровно T035-запрос клиента/устройства.
+  const result = await provider.videos(context({ title: 'Мятеж', original_title: 'The Mutiny', year: '2025', serial: '0' }));
+
+  const postidCall = client.calls.find(([name, p]) => name === 'getLite' && p && p.postid != null);
+  assert.ok(postidCall, 'должен быть повторный getLite с postid=186401');
+  assert.equal(postidCall[1].postid, '186401', 'title-match побеждает год-гейт → корректная карточка');
+  assert.ok(result.items.length >= 1, `playable items из postid=186401: ${result.items.length}`);
+  assert.equal(result.items[0].method, 'play');
+  assert.ok(result.items[0].url.includes('werkecdn'), 'URL в items — проксированный CDN кластера');
+});
+
+test('T035b-veoveo: фильм как «сезон» — link s=1 с совпадающим ID → openLiteUrl-follow → play items', async () => {
+  // veoveo отдаёт ФИЛЬМ сезон-ссылкой (s=1, ID в URL == query); SKAZ играет по ней.
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online3.skaz.tv/lite/veoveo?rjson=False&movieid=35446&kinopoisk_id=5582050&imdb_id=tt32305988&title=%D0%9C%D1%8F%D1%82%D0%B5%D0%B6&original_title=The+Mutiny&s=1","similar":false}\'>1 сезон</div>'
+  ].join('');
+  const seasonHtml = [
+    '<div class="videos__item" data-json=\'{"method":"play","url":"https://api.rstprgapipt.com/content-router/r/1787497545/DwwmX9qLWHpo6AXnwt0j9w/anon/anon/movies/files/episodes?t=1","s":1,"e":1,"translate":"","title":"Мятеж (1 серия)"}\'>Мятеж (1 серия)</div>',
+    '<div class="videos__item" data-json=\'{"method":"play","url":"https://api.rstprgapipt.com/content-router/r/1787497545/ytcbruA_a0yd-Jd37yvDHQ/anon/anon/movies/files/episodes?t=2","s":1,"e":2,"translate":"","title":"Мятеж (2 серия)"}\'>Мятеж (2 серия)</div>'
+  ].join('');
+
+  const client = new FakeSkazClient({ lite: similarHtml, pages: { 'season:35446': seasonHtml } });
+  // FakeSkazClient.getLite с href не сработает для полного URL — подсовываем openLiteUrl-маршрут
+  client.openLiteUrl = async (url) => {
+    client.calls.push(['openLiteUrl', url]);
+    if (String(url).includes('movieid=35446')) return seasonHtml;
+    return client.lite;
+  };
+  const provider = makeProvider(client, 'veoveo');
+
+  const result = await provider.videos(context({ title: 'Мятеж', original_title: 'The Mutiny', kinopoisk_id: '5582050', imdb_id: 'tt32305988', year: '2025', serial: '0' }));
+
+  const followCall = client.calls.find(([name, url]) => name === 'openLiteUrl');
+  assert.ok(followCall, 'openLiteUrl-follow сезон-ссылки выполнен');
+  assert.ok(String(followCall[1]).includes('movieid=35446'), 'follow по URL карточки (не по ID-параметру getLite)');
+  assert.ok(result.items.length >= 2, `play items с сезон-страницы: ${result.items.length}`);
+  assert.ok(result.items.every((item) => item.method === 'play'));
+  assert.ok(result.items[0].url.includes('/api/lampa/proxy'), 'URL проксируется в наш /proxy');
+});
+
+test('T035b-veoveo: сезон-ссылка БЕЗ совпадающего ID → НЕ цель (KINOPUB-004-гейт)', async () => {
+  // «похожие» чужого фильма с s=1, но другой imdb → ID-гейт: не переходим.
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online3.skaz.tv/lite/veoveo?rjson=False&movieid=999999&kinopoisk_id=0&imdb_id=tt0000001&title=%D0%9C%D1%8F%D1%82%D0%B5%D0%B6&original_title=The+Mutiny&s=1","similar":true}\'>1 сезон (чужой)</div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: similarHtml });
+  let opened = 0;
+  client.openLiteUrl = async () => { opened += 1; return client.lite; };
+  const provider = makeProvider(client, 'veoveo');
+
+  const result = await provider.videos(context({ title: 'Мятеж', original_title: 'The Mutiny', kinopoisk_id: '5582050', imdb_id: 'tt32305988', year: '2025', serial: '0' }));
+
+  assert.equal(opened, 0, 'openLiteUrl НЕ вызван для чужого ID');
+  assert.equal(result.items.length, 0, 'items пусто — чужой фильм не отдаётся');
+});
+
+test('T035-D2: несопоставимые названия — НЕ проходят даже при подходящем годе', async () => {
+  // KINOPUB-004 сохранён: «Мятежники» (др. год) — другой фильм; title не совпал ни с
+  // одной частью query → навигации нет, items пусто (лучше недоступно, чем чужой фильм).
+  const similarHtml = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online3.skaz.tv/lite/filmix?postid=9310&title=Riot","similar":true,"year":1996,"title":"Мятеж / Riot"}\'>Мятеж / Riot</div>',
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://online3.skaz.tv/lite/filmix?postid=184267&title=%D0%9C%D1%8F%D1%82%D0%B5%D0%B6%D0%BD%D0%B8%D0%BA%D0%B8","similar":true,"year":2024,"title":"Мятежники"}\'>Мятежники</div>'
+  ].join('');
+  const postHtml = '<div class="videos__item" data-json=\'{"method":"play","url":"http://h/v.m3u8","translate":"Дубляж"}\'>Дубляж</div>';
+
+  const client = new FakeSkazClient({ lite: similarHtml, pages: { 'postid:9310': postHtml } });
+  const provider = makeProvider(client, 'filmix');
+
+  const result = await provider.videos(context({ title: 'Нечто иное', original_title: 'Something Else', year: '2025', serial: '0' }));
+
+  const postidCall = client.calls.find(([name, p]) => name === 'getLite' && p && p.postid != null);
+  assert.ok(!postidCall, 'ни одна similar-карточка не является целью → postid не запрашивается');
+  assert.equal(result.items.length, 0, 'чужой фильм не отдаётся как контент');
+});
+
 test('movie: PidTor — magnet-карточки НЕ отдаются как play (HTTP-прокси их не стримит)', async () => {
   const pidtorHtml = [
     '<div class="videos__item" data-json=\'{"method":"play","url":"http://online3.skaz.tv/lite/pidtor/s61065ea115b7cc3e8db9fb5ab1f6f327f08bd1c9?tr=http%3A%2F%2Fretracker.local%2Fannounce&tr=udp%3A%2F%2Ftorrent.by%3A2710","translate":"Дубляж","maxquality":"2160","title":"Матрица (Дубляж)"}\'>x</div>',
@@ -707,6 +797,32 @@ test('PARITY-009: search — poster/backdrop проходят из запрос�
   assert.equal(records[0].backdrop, '/backdrops/inception.jpg');
 });
 
+test('F9 (T026): search — title-only сериал отдаёт запись (title-fallback)', async () => {
+  const provider = makeProvider(new FakeSkazClient(), 'rezka');
+  // «For Serial ничего не находит»: Lampa шлёт поиск сериала без kp/tmdb/imdb
+  // (одни title+serial). Раньше гейт :114 возвращал [] — молча пустой поиск.
+  const records = await provider.search({
+    title: 'Дом Дракона', original_title: 'House of the Dragon',
+    serial: '1', year: 2022, source: 'tmdb'
+  });
+  assert.equal(records.length, 1, 'title-запись отдана вместо []');
+  assert.equal(records[0].type, 'serial');
+  assert.equal(records[0].title, 'Дом Дракона');
+  assert.equal(records[0].year, 2022);
+  assert.equal(records[0].id, '', 'числовых id нет — id пуст (не выдумываем)');
+  assert.equal(records[0].provider, 'skaz-rezka');
+  // У title-записи нет url/stream → store.getVideosForRequest её отфильтрует
+  // (SKAZ-MANIYA-001: поисковые записи без url/stream не показываются).
+  assert.equal(records[0].url, undefined);
+});
+
+test('F9 (T026): search — пустой title и пустые id по-прежнему дают []', async () => {
+  const provider = makeProvider(new FakeSkazClient(), 'rezka');
+  assert.deepEqual(await provider.search({ title: '' }), []);
+  assert.deepEqual(await provider.search({ serial: '1' }), [], 'без title и id — ничего');
+  assert.deepEqual(await provider.search({}), []);
+});
+
 // ===== cleanedQualityMap: P1-B — reserve «URL1 or URL2» в качествах =====
 // Каждая метка качества из JSON может нести `URL1 or URL2`. Проксируем каждую
 // часть отдельно и склеиваем обратно ` or ` (как item.url в resolveCardItem),
@@ -816,6 +932,63 @@ test('resolveCardItem: quality с or из JSON → primary/reserve раздел�
     const inner = new URL(p).searchParams.get('url');
     assert.ok(!/(^|\s)or(\s|$)/i.test(inner), `1080p url= без « or »: ${String(inner).slice(0, 60)}`);
   }
+});
+
+// ===== SKAZ-MANIYA-002: call-токен в card.url при пустом card.stream =====
+// videoseed-сериалы кладут токен в url, а stream оставляют ''. resolveVideoJson
+// обязан резолвить эффективный URL (stream||url) → /proxy/<hash>, а НЕ падать в
+// фолбэк resolveStream (который вернул бы call-url вместо resolved stream).
+
+test('SKAZ-MANIYA-002: serial stream="" + url=<call-токен> → resolveVideoJson(effective) даёт /proxy, без resolveStream-фолбэка', async () => {
+  const baseAlloha = [
+    '<div class="videos__item" data-json=\'{"method":"link","url":"http://h/lite/videoseed?title=GOT&s=1","similar":false}\'><span class="videos__item-title">1 сезон</span></div>'
+  ].join('');
+  // У серии stream ПУСТОЙ, токен — только в url (реальный видеосид-паттерн).
+  const season1Html = [
+    '<div class="videos__item" data-json=\'{"method":"call","url":"http://online3.skaz.tv/lite/videoseed/video/NCL5+ZV2EXG","stream":"","s":1,"e":1,"name":"1 серия"}\'>s</div>'
+  ].join('');
+  // Сервер отвечает JSON: /proxy/<hash> (resolved stream).
+  const videoJson = {
+    method: 'play',
+    url: 'http://online3.skaz.tv/proxy/04bbd07573fbd5c38ae413d5ccacf391.m3u8',
+    quality: { '1080p': 'http://online3.skaz.tv/proxy/04bbd07573fbd5c38ae413d5ccacf391.m3u8' },
+    subtitles: []
+  };
+  const client = new FakeSkazClient({ lite: baseAlloha, pages: { 's=1': season1Html }, videoJson });
+  const provider = makeProvider(client, 'videoseed');
+
+  const item = await provider.resolveVideo(context({ serial: '1', title: 'GOT', voice: '0', season: '1', episode: '1' }));
+
+  assert.ok(item, 'дескриптор серии');
+  assert.equal(item.method, 'play');
+  // resolveVideoJson получил эффективный URL (card.url), НЕ пустой card.stream.
+  const jsonCalls = client.calls.filter(([name]) => name === 'resolveVideoJson');
+  assert.equal(jsonCalls.length, 1, 'resolveVideoJson вызван ровно один раз при Play');
+  assert.ok(
+    String(jsonCalls[0][1]).includes('/lite/videoseed/video/NCL5'),
+    `resolveVideoJson резолвит card.url (не пустой stream): ${jsonCalls[0][1]}`
+  );
+  // Главное: НЕ падаем в resolveStream-фолбэк (там был call-url).
+  assert.ok(!client.calls.some(([name]) => name === 'resolveStream'), 'фолбэк resolveStream НЕ вызывается');
+  // URL через прокси оборачивает resolved /proxy/<hash>, а НЕ call-url.
+  assert.ok(String(item.url).includes('/api/lampa/proxy'), 'серия через прокси');
+  const inner = new URL(String(item.url).replace(/^https?:\/\/[^/]+/, 'http://h')).searchParams.get('url');
+  assert.ok(String(inner).includes('/proxy/04bbd075'), `внутри прокси — /proxy/<hash>, а не call-url: ${String(inner).slice(0, 80)}`);
+});
+
+test('SKAZ-MANIYA-002: stream="" + url=<call-токен> c НЕ-парсируемым JSON → честный фолбэк resolveStream(url)', async () => {
+  const html = [
+    '<div class="videos__item" data-json=\'{"method":"call","url":"http://online3.skaz.tv/lite/videoseed/video/NCL5+ZV2EXG","stream":"","s":1,"e":1,"name":"1 серия"}\'>s</div>'
+  ].join('');
+  const client = new FakeSkazClient({ lite: html, videoJson: null }); // JSON нет → null
+  const provider = makeProvider(client, 'videoseed');
+
+  const item = await provider.resolveVideo(context({ serial: '1', title: 'GOT', voice: '0', season: '1', episode: '1' }));
+
+  assert.ok(item, 'дескриптор серии через фолбэк');
+  const rsCalls = client.calls.filter(([name]) => name === 'resolveStream');
+  assert.equal(rsCalls.length, 1, 'фолбэк resolveStream один раз');
+  assert.ok(String(rsCalls[0][1]).includes('/lite/videoseed/video/NCL5'), 'resolveStream получает card.url (не пустой stream)');
 });
 
 // ===== I1: accsdb — provider_error в результате videos() =====

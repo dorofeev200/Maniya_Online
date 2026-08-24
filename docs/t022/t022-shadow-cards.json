@@ -1,0 +1,1446 @@
+{
+  "mutiny": {
+    "http": 200,
+    "elapsed_ms": 4530,
+    "model": true,
+    "total": 35,
+    "shown": 14,
+    "ghost": 21,
+    "first": {
+      "id": "skaz-kinopub",
+      "name": "KinoPub",
+      "index": 1,
+      "show": true
+    },
+    "rows": [
+      {
+        "id": "skaz-kinopub",
+        "name": "KinoPub",
+        "index": 1,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 4,
+        "seasons": 0
+      },
+      {
+        "id": "filmix",
+        "name": "Filmix ~ 4K",
+        "index": 2,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-sakhtv",
+        "name": "Lumex",
+        "index": 2,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoteatrkg",
+        "name": "Kinoteatr.kg",
+        "index": 3,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-alloha",
+        "name": "Alloha",
+        "index": 4,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 7,
+        "seasons": 0
+      },
+      {
+        "id": "rezka",
+        "name": "Rezka",
+        "index": 5,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinobase",
+        "name": "Kinobase",
+        "index": 6,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zagonka",
+        "name": "Zagonka",
+        "index": 7,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-remux",
+        "name": "iRemux",
+        "index": 7,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-pidtor",
+        "name": "SkazTV",
+        "index": 8,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 4,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn",
+        "name": "Fanserials",
+        "index": 9,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdnultra",
+        "name": "xVideoCDN (Ultra)",
+        "index": 10,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn60fps",
+        "name": "xVideoCDN (60/120fps)",
+        "index": 11,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoflix",
+        "name": "FilmGE",
+        "index": 12,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-ashdi",
+        "name": "Ashdi",
+        "index": 13,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoukr",
+        "name": "UAkino",
+        "index": 14,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-eneyida",
+        "name": "Eneyida",
+        "index": 15,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "rutubemovie",
+        "name": "Rutube",
+        "index": 16,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-vkmovie",
+        "name": "VK Видео",
+        "index": 17,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-videoseed",
+        "name": "Videoseed",
+        "index": 18,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 12,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-veoveo",
+        "name": "VeoVeo",
+        "index": 19,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-solntse",
+        "name": "Солнце",
+        "index": 22,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lumina",
+        "name": "Lumina - 720p",
+        "index": 23,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "hdvb",
+        "name": "HDVB",
+        "index": 24,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "kinotochka",
+        "name": "Kinotochka",
+        "index": 25,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-asiage",
+        "name": "AsiaGe",
+        "index": 26,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-geosaitebi",
+        "name": "Geosaitebi",
+        "index": 27,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "cdnvideohub",
+        "name": "VideoHUB 4k",
+        "index": 29,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lordfilm",
+        "name": "LordFilm",
+        "index": 30,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 5,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-mirkino",
+        "name": "Мир кино Z",
+        "index": 31,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 2,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zetflixdb",
+        "name": "ZetflixDB",
+        "index": 515,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-uakino",
+        "name": "UaKino",
+        "index": 825,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "kodik",
+        "name": "Kodik",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "collaps",
+        "name": "Collaps",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-rhsprem",
+        "name": "HDRezka 4K",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      }
+    ]
+  },
+  "toystory5": {
+    "http": 200,
+    "elapsed_ms": 4273,
+    "model": true,
+    "total": 35,
+    "shown": 17,
+    "ghost": 18,
+    "first": {
+      "id": "skaz-kinopub",
+      "name": "KinoPub",
+      "index": 1,
+      "show": true
+    },
+    "rows": [
+      {
+        "id": "skaz-kinopub",
+        "name": "KinoPub",
+        "index": 1,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 3,
+        "seasons": 0
+      },
+      {
+        "id": "filmix",
+        "name": "Filmix ~ 4K",
+        "index": 2,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-sakhtv",
+        "name": "Lumex",
+        "index": 2,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoteatrkg",
+        "name": "Kinoteatr.kg",
+        "index": 3,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-alloha",
+        "name": "Alloha",
+        "index": 4,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 3,
+        "seasons": 0
+      },
+      {
+        "id": "rezka",
+        "name": "Rezka",
+        "index": 5,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 4,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinobase",
+        "name": "Kinobase",
+        "index": 6,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zagonka",
+        "name": "Zagonka",
+        "index": 7,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-remux",
+        "name": "iRemux",
+        "index": 7,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 2,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-pidtor",
+        "name": "SkazTV",
+        "index": 8,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 8,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn",
+        "name": "Fanserials",
+        "index": 9,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdnultra",
+        "name": "xVideoCDN (Ultra)",
+        "index": 10,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn60fps",
+        "name": "xVideoCDN (60/120fps)",
+        "index": 11,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoflix",
+        "name": "FilmGE",
+        "index": 12,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-ashdi",
+        "name": "Ashdi",
+        "index": 13,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoukr",
+        "name": "UAkino",
+        "index": 14,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-eneyida",
+        "name": "Eneyida",
+        "index": 15,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "rutubemovie",
+        "name": "Rutube",
+        "index": 16,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 7,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-vkmovie",
+        "name": "VK Видео",
+        "index": 17,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 21,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-videoseed",
+        "name": "Videoseed",
+        "index": 18,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-veoveo",
+        "name": "VeoVeo",
+        "index": 19,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-solntse",
+        "name": "Солнце",
+        "index": 22,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lumina",
+        "name": "Lumina - 720p",
+        "index": 23,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "hdvb",
+        "name": "HDVB",
+        "index": 24,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "kinotochka",
+        "name": "Kinotochka",
+        "index": 25,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-asiage",
+        "name": "AsiaGe",
+        "index": 26,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-geosaitebi",
+        "name": "Geosaitebi",
+        "index": 27,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "cdnvideohub",
+        "name": "VideoHUB 4k",
+        "index": 29,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lordfilm",
+        "name": "LordFilm",
+        "index": 30,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 3,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-mirkino",
+        "name": "Мир кино Z",
+        "index": 31,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 1,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zetflixdb",
+        "name": "ZetflixDB",
+        "index": 515,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-uakino",
+        "name": "UaKino",
+        "index": 825,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "kodik",
+        "name": "Kodik",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "collaps",
+        "name": "Collaps",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-rhsprem",
+        "name": "HDRezka 4K",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      }
+    ]
+  },
+  "interst": {
+    "http": 200,
+    "elapsed_ms": 3513,
+    "model": true,
+    "total": 35,
+    "shown": 27,
+    "ghost": 8,
+    "first": {
+      "id": "skaz-kinopub",
+      "name": "KinoPub",
+      "index": 1,
+      "show": true
+    },
+    "rows": [
+      {
+        "id": "skaz-kinopub",
+        "name": "KinoPub",
+        "index": 1,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 9,
+        "seasons": 0
+      },
+      {
+        "id": "filmix",
+        "name": "Filmix ~ 4K",
+        "index": 2,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-sakhtv",
+        "name": "Lumex",
+        "index": 2,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoteatrkg",
+        "name": "Kinoteatr.kg",
+        "index": 3,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-alloha",
+        "name": "Alloha",
+        "index": 4,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 8,
+        "seasons": 0
+      },
+      {
+        "id": "rezka",
+        "name": "Rezka",
+        "index": 5,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 10,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinobase",
+        "name": "Kinobase",
+        "index": 6,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zagonka",
+        "name": "Zagonka",
+        "index": 7,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-remux",
+        "name": "iRemux",
+        "index": 7,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 5,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-pidtor",
+        "name": "SkazTV",
+        "index": 8,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 22,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn",
+        "name": "Fanserials",
+        "index": 9,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdnultra",
+        "name": "xVideoCDN (Ultra)",
+        "index": 10,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 2,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn60fps",
+        "name": "xVideoCDN (60/120fps)",
+        "index": 11,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 1,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoflix",
+        "name": "FilmGE",
+        "index": 12,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 3,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-ashdi",
+        "name": "Ashdi",
+        "index": 13,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoukr",
+        "name": "UAkino",
+        "index": 14,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-eneyida",
+        "name": "Eneyida",
+        "index": 15,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "rutubemovie",
+        "name": "Rutube",
+        "index": 16,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 9,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-vkmovie",
+        "name": "VK Видео",
+        "index": 17,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 21,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-videoseed",
+        "name": "Videoseed",
+        "index": 18,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 9,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-veoveo",
+        "name": "VeoVeo",
+        "index": 19,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 1,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-solntse",
+        "name": "Солнце",
+        "index": 22,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 1,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lumina",
+        "name": "Lumina - 720p",
+        "index": 23,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "hdvb",
+        "name": "HDVB",
+        "index": 24,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 3,
+        "seasons": 0
+      },
+      {
+        "id": "kinotochka",
+        "name": "Kinotochka",
+        "index": 25,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 1,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-asiage",
+        "name": "AsiaGe",
+        "index": 26,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-geosaitebi",
+        "name": "Geosaitebi",
+        "index": 27,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "cdnvideohub",
+        "name": "VideoHUB 4k",
+        "index": 29,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 2,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lordfilm",
+        "name": "LordFilm",
+        "index": 30,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 2,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-mirkino",
+        "name": "Мир кино Z",
+        "index": 31,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 1,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zetflixdb",
+        "name": "ZetflixDB",
+        "index": 515,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 9,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-uakino",
+        "name": "UaKino",
+        "index": 825,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "kodik",
+        "name": "Kodik",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "collaps",
+        "name": "Collaps",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-rhsprem",
+        "name": "HDRezka 4K",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      }
+    ]
+  },
+  "drake": {
+    "http": 200,
+    "elapsed_ms": 1686,
+    "model": true,
+    "total": 33,
+    "shown": 21,
+    "ghost": 12,
+    "first": {
+      "id": "skaz-kinopub",
+      "name": "KinoPub",
+      "index": 1,
+      "show": true
+    },
+    "rows": [
+      {
+        "id": "skaz-kinopub",
+        "name": "KinoPub",
+        "index": 1,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "filmix",
+        "name": "Filmix ~ 4K",
+        "index": 2,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-sakhtv",
+        "name": "Lumex",
+        "index": 2,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoteatrkg",
+        "name": "Kinoteatr.kg",
+        "index": 3,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-alloha",
+        "name": "Alloha",
+        "index": 4,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "rezka",
+        "name": "Rezka",
+        "index": 5,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 19,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinobase",
+        "name": "Kinobase",
+        "index": 6,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn",
+        "name": "Fanserials",
+        "index": 7,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-pidtor",
+        "name": "SkazTV",
+        "index": 8,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdnultra",
+        "name": "xVideoCDN (Ultra)",
+        "index": 8,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-xvideocdn60fps",
+        "name": "xVideoCDN (60/120fps)",
+        "index": 9,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoflix",
+        "name": "FilmGE",
+        "index": 10,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-ashdi",
+        "name": "Ashdi",
+        "index": 11,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-kinoukr",
+        "name": "UAkino",
+        "index": 12,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-eneyida",
+        "name": "Eneyida",
+        "index": 13,
+        "show": true,
+        "ghost": false,
+        "rch": true,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-videoseed",
+        "name": "Videoseed",
+        "index": 14,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-veoveo",
+        "name": "VeoVeo",
+        "index": 15,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-solntse",
+        "name": "Солнце",
+        "index": 17,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lumina",
+        "name": "Lumina - 720p",
+        "index": 18,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "hdvb",
+        "name": "HDVB",
+        "index": 19,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "kinotochka",
+        "name": "Kinotochka",
+        "index": 20,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-asiage",
+        "name": "AsiaGe",
+        "index": 21,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-geosaitebi",
+        "name": "Geosaitebi",
+        "index": 22,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-lordfilm",
+        "name": "LordFilm",
+        "index": 24,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 8,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-uakino",
+        "name": "UaKino",
+        "index": 825,
+        "show": false,
+        "ghost": true,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "kodik",
+        "name": "Kodik",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "rutubemovie",
+        "name": "Rutube",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "cdnvideohub",
+        "name": "CDNVideo",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "collaps",
+        "name": "Collaps",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-vkmovie",
+        "name": "RUmovie-1",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-rhsprem",
+        "name": "HDRezka 4K",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zetflixdb",
+        "name": "Maniya · zetflixdb",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      },
+      {
+        "id": "skaz-zagonka",
+        "name": "GET's TV",
+        "index": null,
+        "show": true,
+        "ghost": false,
+        "rch": false,
+        "voices": 0,
+        "seasons": 0
+      }
+    ]
+  }
+}

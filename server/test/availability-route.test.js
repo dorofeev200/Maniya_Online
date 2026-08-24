@@ -16,6 +16,7 @@ process.env.ALLOHA_ENABLED = '0';
 process.env.COLLAPS_ENABLED = '0';
 process.env.HDVB_ENABLED = '0';
 process.env.KINOTOCHKA_ENABLED = '0'; // TASK-KINOTOCHKA-001: native без сети в route-тестах
+process.env.RUTUBEMOVIE_ENABLED = '0'; // SKAZ-MANIYA-045: native rutubemovie при ЖИВОЙ сети честно даёт «нет» → show:false (флейк «сети нет»); выключаем как остальные мажоры
 
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';

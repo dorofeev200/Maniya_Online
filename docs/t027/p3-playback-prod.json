@@ -1,0 +1,149 @@
+{
+  "ts": "2026-08-22T21:36:24.742Z",
+  "cases": [
+    {
+      "key": "kinopub-movie",
+      "provider": "skaz-kinopub",
+      "http": 200,
+      "ms": 505,
+      "count": 4,
+      "first": {
+        "method": "play",
+        "type": "movie",
+        "title": "Многоголосый (Rezka)",
+        "urlOk": true
+      }
+    },
+    {
+      "key": "lordfilm-ephemeral",
+      "provider": "skaz-lordfilm",
+      "http": 200,
+      "ms": 156,
+      "count": 5,
+      "first": {
+        "method": "call",
+        "type": "movie",
+        "title": "Dragon Money Studio",
+        "urlOk": true
+      }
+    },
+    {
+      "key": "ashdi-rch",
+      "provider": "skaz-ashdi",
+      "http": 200,
+      "ms": 543,
+      "count": 0,
+      "first": null
+    },
+    {
+      "key": "filmix-native",
+      "provider": "filmix",
+      "http": 200,
+      "ms": 299,
+      "count": 3,
+      "first": {
+        "method": "play",
+        "type": "movie",
+        "title": "MVO [1080, HDRezka]",
+        "urlOk": true
+      }
+    },
+    {
+      "key": "collaps-native",
+      "provider": "collaps",
+      "http": 200,
+      "ms": 144,
+      "count": 0,
+      "first": null
+    },
+    {
+      "key": "kodik-native",
+      "provider": "kodik",
+      "http": 200,
+      "ms": 534,
+      "count": 0,
+      "first": null
+    },
+    {
+      "key": "kinopub-serial",
+      "provider": "skaz-kinopub",
+      "http": 200,
+      "ms": 613,
+      "count": 10,
+      "seasons": [
+        {
+          "number": 1,
+          "title": "1 сезон"
+        },
+        {
+          "number": 2,
+          "title": "2 сезон"
+        },
+        {
+          "number": 3,
+          "title": "3 сезон"
+        }
+      ],
+      "voices": [
+        {
+          "name": "Jask (aac)",
+          "index": 0
+        },
+        {
+          "name": "Кравец (aac)",
+          "index": 1
+        },
+        {
+          "name": "LostFilm (aac)",
+          "index": 2
+        },
+        {
+          "name": "NewComers (aac)",
+          "index": 3
+        },
+        {
+          "name": "SDI Media (aac)",
+          "index": 4
+        },
+        {
+          "name": "TVShows (aac)",
+          "index": 5
+        },
+        {
+          "name": "Многоголосый (aac)",
+          "index": 6
+        },
+        {
+          "name": "BaibaKo (aac)",
+          "index": 7
+        },
+        {
+          "name": "С. Рапсодов (aac)",
+          "index": 8
+        },
+        {
+          "name": "Цікава Ідея (aac)",
+          "index": 9
+        },
+        {
+          "name": "DniproFilm (aac)",
+          "index": 10
+        },
+        {
+          "name": "Оригинал (aac)",
+          "index": 11
+        },
+        {
+          "name": "Jask (ac3)",
+          "index": 12
+        }
+      ],
+      "first": {
+        "method": "play",
+        "type": "serial",
+        "title": "1 серия",
+        "urlOk": true
+      }
+    }
+  ]
+}

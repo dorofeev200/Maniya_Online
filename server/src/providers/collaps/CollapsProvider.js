@@ -1,4 +1,4 @@
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { HttpError } from '../../errors.js';
 import { Provider } from '../base.js';
 import { CollapsClient } from './CollapsClient.js';
@@ -92,7 +92,7 @@ export class CollapsProvider extends Provider {
       const parsed = this.normalizer.parseEmbed(text, query);
       if (!parsed.movie && !parsed.seasons.length) return { items: [], seasons: [], voices: [] };
 
-      const streamProxy = (url) => buildProxyUrl(requestContext, url);
+      const streamProxy = (url) => buildPlayUrl(requestContext, url);
       return parsed.movie
         ? await this.movieVideos(parsed.movie, query, streamProxy)
         : await this.serialVideos(parsed, query, streamProxy);
@@ -171,7 +171,7 @@ export class CollapsProvider extends Provider {
     const mediaUrl = String(query.url || item.url || '').trim();
     if (!mediaUrl) return [];
 
-    const streamProxy = (url) => buildProxyUrl(requestContext, url);
+    const streamProxy = (url) => buildPlayUrl(requestContext, url);
     const title = String(query.title || item.title || this.title);
     const type = String(query.type || item.type || 'movie');
     const voice = String(query.voice_name || item.voice_name || item.voice || 'Оригинал');

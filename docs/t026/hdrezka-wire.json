@@ -1,0 +1,33 @@
+{
+  "config": {},
+  "chain": {
+    "online": {
+      "total": 29,
+      "shown": 9,
+      "first": "KinoPub"
+    },
+    "row": {
+      "name": "Rezka",
+      "balanser": "rezka",
+      "rch": false,
+      "url": "http://online3.skaz.tv/lite/rezka",
+      "index": 5
+    },
+    "rawCards": {
+      "htmlLen": 0,
+      "cards": []
+    },
+    "voices": [],
+    "resolve": {
+      "ok": false,
+      "ms": 715,
+      "provider_error": null
+    },
+    "videos": {
+      "items": 0,
+      "first": null,
+      "provider_error": null
+    }
+  },
+  "ok": false
+}

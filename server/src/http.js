@@ -57,19 +57,25 @@ export async function sendStatic(request, response, pathname) {
 }
 
 /**
- * Отдать плагин для токена (короткая ссылка `/<prefix>_<short>.js`).
- * Вшивает полный токен в window.MANIYA_ONLINE_TOKEN — пользователь вводит
- * короткую ссылку проще длинной `?token=...`.
+ * Отдать плагин для токена (короткая ссылка `/<prefix>_<short>.js` и тестовый
+ * `/staging/<short>.js`). Вшивает полный токен в window.MANIYA_ONLINE_TOKEN —
+ * пользователь вводит короткую ссылку проще длинной `?token=...`.
+ * file/dir — переопределение сборки (MANIYA-STAGING Phase 17: тестовый плагин
+ * читается из config.stagingPublicDir, не из publicDir). Default — PROD-сборка.
+ * tokenGlobal — имя глобал-переменной для вшивки токена (TASK-034 M1):
+ * staging передаёт 'MANIYA_ONLINE_TOKEN_STAGING' — свои плагины в одном WebView
+ * не затирают общий window.MANIYA_ONLINE_TOKEN (T033 кросс-плагинная утечка).
+ * PROD-вызовы (короткая/install ссылки) параметр не передают → default PROD.
  */
-export async function sendPluginForToken(request, response, token) {
-  const pluginPath = path.join(config.publicDir, 'maniya-online.js');
+export async function sendPluginForToken(request, response, token, file = 'maniya-online.js', dir = config.publicDir, tokenGlobal = 'MANIYA_ONLINE_TOKEN') {
+  const pluginPath = path.join(dir, file);
   let source;
   try {
     source = await readFile(pluginPath, 'utf8');
   } catch (error) {
     return sendJson(request, response, 404, { error: 'plugin_not_found' });
   }
-  const body = `/* Maniya Online — подпись токена сервером */\nwindow.MANIYA_ONLINE_TOKEN=${JSON.stringify(token)};\n` + source;
+  const body = `/* Maniya Online — подпись токена сервером */\nwindow.${tokenGlobal}=${JSON.stringify(token)};\n` + source;
   const { headers } = corsHeaders(request?.headers?.origin);
   response.writeHead(200, {
     ...headers,

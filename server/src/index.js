@@ -10,12 +10,31 @@ import { subscriptionStatus } from './status.js';
 import { providerById, registeredProviders } from './providers/registry.js';
 import { PROVIDER_FALLBACK_ICON, providerMeta } from './providers/meta.js';
 import { defaultChecker } from './availability.js';
+import { sourceModel } from './sources/sourceModel.js';
+import { buildThinBootstrap } from './providers/skaz/thin-bootstrap.js';
 import { buildProxyUrl, proxyMedia } from './proxy.js';
 import { isTmdbApiPath, isTmdbImgPath, TMDB_API_ROUTE, TMDB_IMG_ROUTE, tmdbRelay } from './tmdbProxy.js';
 import { createTelegramRunner } from './telegram/runner.js';
 
 const startedAt = Date.now();
 let ready = true;
+
+/**
+ * MANIYA-STAGING (TASK-032 Phase 17): build-информация диагностики `/version`.
+ * Только non-secret метаданные: сборка (MANIYA_STAGING_BUILD), включённость
+ * staging-контура, модель (per-title online[]). Токенов/кред/конфигов нет.
+ */
+function buildInfo() {
+  return {
+    ok: true,
+    service: 'maniya-online-lampa',
+    version: '1.0.1',
+    env: config.env,
+    staging: Boolean(config.staging.enabled),
+    build: config.staging.enabled && config.staging.buildId ? config.staging.buildId : null,
+    model: Boolean(config.skaz?.enabled && config.skaz?.checkEnabled)
+  };
+}
 
 function requestContext(request) {
   const url = new URL(request.url, config.publicBaseUrl);
@@ -90,6 +109,13 @@ async function route(context, response) {
     });
   }
 
+  // MANIYA-STAGING (TASK-032 Phase 17): диагностика сборки ТОЛЬКО на staging.
+  // Вне MANIYA_STAGING_ENABLED — 404 (на PROD недоступен). Non-secret build-info.
+  if (pathname === '/version') {
+    if (!config.staging.enabled) throw new HttpError(404, 'not_found', 'Not found');
+    return sendJson(request, response, 200, buildInfo());
+  }
+
   // Короткая ссылка плагина /<prefix>_<short>.js → ищем пользователя по суффиксу токена.
   // PLUGIN-INSTALL-002: реальный код — только Lampa; браузеру — stub-текст.
   const shortLink = pathname.match(/^\/[^/]+_([0-9a-fA-F]{8,})\.js$/);
@@ -100,6 +126,25 @@ async function route(context, response) {
     if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
     if (!isLampaRequest(request)) return sendPluginStub(request, response);
     return sendPluginForToken(request, response, user.token);
+  }
+
+  // MANIYA-STAGING (TASK-032 Phase 17): тестовый плагин `/staging/<short>.js`.
+  // Та же схема, что PROD-короткая ссылка, но отдаёт СТАДЖИНГ-сборку из
+  // server/staging-public (MANIYA_API_BASE → сам staging, build-id вшит в код).
+  // Активен только при MANIYA_STAGING_ENABLED=true; иначе и вне staging — 404.
+  // Сборка вне publicDir → sendStatic её никогда не раздаёт. Токен вшивается в
+  // window.MANIYA_ONLINE_TOKEN_STAGING (TASK-034 M1) — НЕ трогает общий
+  // window.MANIYA_ONLINE_TOKEN, которым пользуется PROD-плагин (T033: кросс-
+  // плагинная утечка токена, когда staging и прод-VIP в одном WebView).
+  const stagingLink = pathname.match(/^\/staging\/([0-9a-fA-F]{8,})\.js$/);
+  if (stagingLink) {
+    if (!config.staging.enabled || !config.staging.pluginBase) throw new HttpError(404, 'not_found', 'Not found');
+    const short = stagingLink[1].toLowerCase();
+    const user = await findUserByShortToken(short);
+    if (!user) throw new HttpError(404, 'not_found', 'User not found');
+    if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
+    if (!isLampaRequest(request)) return sendPluginStub(request, response);
+    return sendPluginForToken(request, response, user.token, 'maniya-online-staging.js', config.staging.stagingPublicDir, 'MANIYA_ONLINE_TOKEN_STAGING');
   }
 
   // PLUGIN-INSTALL-001/002: opaque install-ссылки. `/i/<opaque>` — устаревший
@@ -147,6 +192,17 @@ async function route(context, response) {
   }
 
   assertCorsAllowed(request);
+
+  // MANIYA-STAGING (TASK-032 Phase 17): зеркало /health для Lampa-клиента +
+  // /api/lampa/version — build-info (только staging, как /version). Без секретов.
+  if (pathname === '/api/lampa/health') {
+    return sendJson(request, response, 200, { ok: true, service: 'maniya-online-lampa' });
+  }
+
+  if (pathname === '/api/lampa/version') {
+    if (!config.staging.enabled) throw new HttpError(404, 'not_found', 'Not found');
+    return sendJson(request, response, 200, buildInfo());
+  }
 
   if (pathname === '/api/lampa/proxy') {
     // Медиа-прокси: проверяем подписку, но не лимит запросов — иначе нативные
@@ -223,6 +279,10 @@ async function route(context, response) {
   // BALANCER-002: per-card availability. Статический /sources остаётся реестром;
   // этот эндпоинт (SHADOW-фаза, клиент НЕ вызывает пока не прошла live-сверка)
   // отдаёт динамический show:true/false по карточке (checksearch на кластер).
+  // SKAZ-MANIYA-019: при config.skaz.enabled ПЕРВЫМ делом — per-title модель
+  // (lite/events → online[]). Модель найдена → её и отдаём (meta.model=true);
+  // события недоступны (timeout/invalid/accsdb) → старый probe-path ДОСЛОВНО.
+  // Никакого частичного/смешанного результата (PREIMPLEMENT-AUDIT §8).
   if (pathname === '/api/lampa/sources/card') {
     const user = await requireSubscription(context);
     const userUid = sha256Hex(user.token).slice(0, 16);
@@ -236,6 +296,19 @@ async function route(context, response) {
         sources: staticSources,
         meta: { cached: false, elapsed_ms: 0, count: staticSources.length }
       });
+    } else if (config.skaz.enabled) {
+      const model = await sourceModel.card(context.query, userUid);
+      if (model) {
+        return sendJson(request, response, 200, {
+          sources: model.items,
+          meta: {
+            cached: model.cached,
+            elapsed_ms: model.elapsedMs,
+            count: model.items.length,
+            model: true
+          }
+        });
+      }
     }
 
     const payload = await defaultChecker.card(context.query, userUid);
@@ -247,6 +320,14 @@ async function route(context, response) {
         count: payload.count
       }
     });
+  }
+
+  // SKAZ-MANIYA-052 — bootstrap тонкого клиента: креды кластера + клиентские
+  // хосты для lite-резолва С ДЕВАЙСА. Bearer-гейт активной подписки (как
+  // /sources). Флаг off → 200 {enabled:false} без полей skaz (PROD-байт).
+  if (pathname === '/api/lampa/thin/bootstrap') {
+    await requireSubscription(context);
+    return sendJson(request, response, 200, buildThinBootstrap() || { enabled: false });
   }
 
   if (pathname === '/api/lampa/videos') {

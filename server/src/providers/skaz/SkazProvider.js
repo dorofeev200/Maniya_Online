@@ -1,5 +1,5 @@
 import { config } from '../../config.js';
-import { buildProxyUrl, tokenFromRequest } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl, tokenFromRequest } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { SkazClient } from './SkazClient.js';
 import { SkazNormalizer } from './SkazNormalizer.js';
@@ -90,7 +90,11 @@ export class SkazProvider extends Provider {
   }
 
   enabled() {
-    return Boolean(this.client?.enabled?.() && this.balancer);
+    // SKAZ-MANIYA-004 P0: мастера-выключатель SKAZ_ENABLED должен реально
+    // отключать skaz-провайдеров. Раньше гейтились только creds (balancer +
+    // accountEmail + uid), поэтому SKAZ_ENABLED=0 никак не влиял — skaz-источники
+    // оставались enabled() и светились в /sources. Уважаем config.skaz.enabled.
+    return Boolean(config.skaz?.enabled && this.client?.enabled?.() && this.balancer);
   }
 
   async search(queryOrContext = {}, context = null) {
@@ -106,8 +110,17 @@ export class SkazProvider extends Provider {
     const imdbId = String(query.imdb_id || '').trim();
     const kinopoiskId = String(query.kinopoisk_id || '').trim();
     const canon = canonicalId(query);
-
-    if (!id && !imdbId && !kinopoiskId && !canon) return [];
+    // SKAZ-MANIYA-032 (F9, T026 §10.1): title-fallback. Раньше при пустых id
+    // запрос сериала с одним title (Lampa «Поиск»/контекст-меню без kp/tmdb)
+    // молча возвращал [] — «For Serial ничего не находит» (кандидат-баг T026).
+    // Теперь поисковую запись отдаём и по чистому title (гейт — title из
+    // ЗАПРОСА: поиск с пустым title и без id по-прежнему ничего не находит).
+    // Навигация кластера умеет вести по title (buildPageParams whitelist §F1).
+    // Playback не затрагивается: store.getVideosForRequest фильтрует поисковые
+    // записи по url/stream (SKAZ-MANIYA-001), а у title-записи их нет — ghost
+    // items не появляются.
+    const title = String(query.title || '').trim();
+    if (!id && !imdbId && !kinopoiskId && !canon && !title) return [];
 
     const record = {
       provider: this.name(),
@@ -248,6 +261,15 @@ export class SkazProvider extends Provider {
       if (hasMovieItems(postCards)) return { cards: postCards };
     }
 
+    // 3) «сезонная» ссылка модулей (veoveo и т.п.): фильм отдаётся как сезон s=1,
+    //    ID в URL == query → openLiteUrl-follow (как сериальный путь). Гейт по ID
+    //    (seasonLinkTarget) не даёт уйти на чужую similar-карточку без совпадения.
+    const seasonUrl = seasonLinkTarget(cards, query);
+    if (seasonUrl) {
+      const seasonCards = this.normalizer.cards((await this.client.openLiteUrl(seasonUrl, options)) || '');
+      if (hasMovieItems(seasonCards)) return { cards: seasonCards };
+    }
+
     return { cards: [] };
   }
 
@@ -331,7 +353,7 @@ export class SkazProvider extends Provider {
     if (!this.enabled()) return null;
     if (this.client) this.client.lastRchError = null;
     const pinnedHost = this.pinFromContext(requestContext);
-    const streamProxy = (url) => buildProxyUrl(requestContext, url, {
+    const streamProxy = (url) => buildPlayUrl(requestContext, url, {
       origin: this.client.origin,
       ref: this.client.origin
     });
@@ -575,7 +597,7 @@ export class SkazProvider extends Provider {
     const pinnedHost = this.pinFromContext(requestContext);
     let result;
     try {
-      const streamProxy = (url) => buildProxyUrl(requestContext, url, {
+      const streamProxy = (url) => buildPlayUrl(requestContext, url, {
         origin: this.client.origin,
         ref: this.client.origin
       });
@@ -623,7 +645,11 @@ export class SkazProvider extends Provider {
     const title = String(overrides.title || this.normalizerCardTitle(card) || voice).trim();
     const rchOptions = this._rchOptions(requestContext);
 
-    const json = await this.client.resolveVideoJson?.(card.stream, rchOptions);
+    // Токен call-карточки может лежать в card.url при пустом card.stream
+    // (videoseed-сериалы и др.) — резолвим эффективный URL, как делает
+    // фолбэк resolveStream ниже. SKAZ-MANIYA-002 root cause.
+    const effective = String(card.stream || card.url || '').trim();
+    const json = await this.client.resolveVideoJson?.(effective, rchOptions);
     if (json) {
       const pair = splitOrUrl(json.url);
       const primary = pair[0];
@@ -727,7 +753,7 @@ export class SkazProvider extends Provider {
   }
 
   buildProxyFor(context, url) {
-    return buildProxyUrl(context, url);
+    return buildPlayUrl(context, url);
   }
 }
 
@@ -793,6 +819,35 @@ function paramValueOf(url, key) {
   } catch {
     return null;
   }
+}
+
+/**
+ * SKAZ-MANIYA-T035b (veoveo-паттерн): модули, отдающие ФИЛЬМ как «сезон», — первая
+ * страница несёт единственную link-карточку `?…&s=<сезон>` (`movieid`/kinostruktura),
+ * где в URL совпадены kinopoisk_id/imdb_id с запросом. Возврат URL карточки для
+ * openLiteUrl-follow (тот же механизм, что у сериальной навигации). ID-гейт в URL —
+ * защита от слепого перехода по чужой карточке: «похожие» similar-ссылки без
+ * совпадающего ID (Одиссея/kinopub) НЕ являются целью.
+ */
+function seasonLinkTarget(cards, query = {}) {
+  const qKp = Number(query.kinopoisk_id || query.kp || 0) || 0;
+  const qImdb = String(query.imdb_id || query.imdb || '').trim().toLowerCase();
+  if (!qKp && !qImdb) return null;
+  for (const card of cards || []) {
+    if (!card || String(card.method || '').toLowerCase() !== 'link') continue;
+    const url = String(card.url || card.href || '');
+    if (!url) continue;
+    if (paramValueOf(url, 's') == null && paramValueOf(url, 'season') == null) continue;
+    let kp = 0, imdb = '';
+    try {
+      const u = new URL(url);
+      kp = Number(u.searchParams.get('kinopoisk_id') || 0) || 0;
+      imdb = String(u.searchParams.get('imdb_id') || '').toLowerCase();
+    } catch { /* не absolute URL — не кандидат */ }
+    if (qKp && kp && kp === qKp) return url;
+    if (qImdb && imdb && imdb === qImdb) return url;
+  }
+  return null;
 }
 
 /**
@@ -905,13 +960,26 @@ function matchesAnyTitle(cardParts, qTitle, qOriginalTitle) {
 }
 
 /**
- * BALANCER-KINOPUB-004: является ли link-карточка ЦЕЛЬЮ навигации (postid/href).
- * Правило «лучше показать источник недоступным, чем дать видео другого фильма»:
+ * BALANCER-KINOPUB-004 + SKAZ-MANIYA-TASK-035 (D2): является ли link-карточка
+ * ЦЕЛЬЮ навигации (postid/href).
+ *
+ * Правило «лучше показать источник недоступным, чем дать видео другого фильма»,
+ * с приоритетом: **НАЗВАНИЕ первично, год — остаточный дискриминатор**.
+ * T035-артефакт: кластерный модуль filmix постит фильм под СВОИМ годом постинга
+ * (Мятеж 2026), а клиент/TMDB знает год выхода (2025). Жёсткий год-гейт ДО
+ * title-матча отвергал единственную корректную similar-карточку → навигация
+ * обрывалась → «Видео не найдено», хотя SKAZ-клиент ведёт ровно по ней
+ * (title-score, не по году). Filmix: "Мятеж / Mutiny" (2026) при query год 2025
+ * ДОЛЖНА быть целью — это тот же фильм.
+ *
  *   - KP/IMDb в URL карточки — сильнейший идентификатор: совпал → цель, чужой → нет;
- *   - год известен у обеих сторон и различается → другой фильм → нет;
- *   - название: части «Русское / Original»; совпала любая с query-title → цель;
- *     алфавиты сопоставимы, но ни одна часть не совпала → другой фильм → нет;
- *   - данных недостаточно (нет title/года/ID или несопоставимые алфавиты) → НЕ отвергать.
+ *   - название: части «Русское / Original»; совпала ЛЮБАЯ с query-title/query-original
+ *     → ЦЕЛЬ независимо от года (год поста кластера ≠ году выхода — не «другой фильм»);
+ *   - алфавиты сопоставимы, но ни одна часть не совпала → другой фильм → нет
+ *     (сохраняет KINOPUB-004: там тайтлы не совпадали, год был единственным отклонением);
+ *   - названий для сравнения НЕТ (несопоставимые алфавиты/пустой title) → тогда и только
+ *     тогда год-отклонение отвергает (остаточный дискриминатор);
+ *   - данных недостаточно (нет title/года/ID) → НЕ отвергать.
  * Не-link карточки (play/call) не фильтруются — они уже контент, не кандидаты цели.
  */
 function linkCardMatchesQuery(card, query = {}) {
@@ -925,23 +993,42 @@ function linkCardMatchesQuery(card, query = {}) {
   if (qKp && kp) return kp === qKp;
   if (qImdb && imdb) return imdb === qImdb;
 
-  const qYear = Number(query.year) || 0;
-  const cardYear = Number(card.year) || 0;
-  if (qYear && cardYear && cardYear !== qYear) return false;
-
   const cardParts = cardTitleTexts(card.title || card._text || '');
   const qTitle = normalizeNavTitle(query.title);
   const qOriginalTitle = normalizeNavTitle(query.original_title || query.originalTitle);
-  if (cardParts.length && (qTitle || qOriginalTitle)) {
-    if (matchesAnyTitle(cardParts, qTitle, qOriginalTitle)) return true;
+  const qYear = Number(query.year) || 0;
+  const cardYear = Number(card.year) || 0;
+
+  // Разница лет в пределах CATALOG_YEAR_TOLERANCE — это каталог-шуt («год поста кластера»
+  // vs «год выхода» TMDB, T035: filmix держит Мятеж 2026 при TMDB-2025), НЕ признак
+  // другого фильма. Большая разница (Одиссея: query 2026 vs карточки 1997/1992) — другой
+  // фильм, ему не место (KINOPUB-004: переход увёл бы на чужие минисериалы).
+  const yearsClose = Boolean((!qYear || !cardYear) || Math.abs(qYear - cardYear) <= CATALOG_YEAR_TOLERANCE);
+
+  const comparable = Boolean(cardParts.length && (qTitle || qOriginalTitle));
+  if (comparable) {
+    if (matchesAnyTitle(cardParts, qTitle, qOriginalTitle)) {
+      return yearsClose;
+    }
     for (const part of cardParts) {
       if ((qTitle && comparableTexts(part, qTitle)) || (qOriginalTitle && comparableTexts(part, qOriginalTitle))) {
         return false;
       }
     }
   }
+
+  // Остаточный год-гейт: только когда названия несопоставимы (нет данных для
+  // title-решения). При сопоставимых названиях решение уже принято выше —
+  // год-отклонение не отвергает, когда разница в пределах каталог-допуска.
+  if (qYear && cardYear && !yearsClose) return false;
+
   return true;
 }
+
+// Каталоговый допуск лет для linkCardMatchesQuery: год «поста кластера» и год выхода
+// TMDB могут отличаться на 1–2 (премьера в конце года / российская выдача), это не
+// идентичность фильма; разница в десятилетия — другой фильм.
+const CATALOG_YEAR_TOLERANCE = 2;
 
 function searchNeedle(query = {}) {
   const tokens = [];

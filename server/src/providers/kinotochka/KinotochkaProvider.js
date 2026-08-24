@@ -1,4 +1,4 @@
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { KinotochkaClient } from './KinotochkaClient.js';
 import { KinotochkaNormalizer } from './KinotochkaNormalizer.js';
@@ -95,7 +95,7 @@ export class KinotochkaProvider extends Provider {
     const file = await this.client.movieFile(record.url);
     if (!file) return { items: [], seasons: [], voices: [] };
 
-    const streamProxy = (url) => buildProxyUrl(requestContext, url);
+    const streamProxy = (url) => buildPlayUrl(requestContext, url);
     const item = this.playItem({
       title: 'По умолчанию',
       url: streamProxy(file),
@@ -119,7 +119,7 @@ export class KinotochkaProvider extends Provider {
     const playlist = seasonUrl ? await this.client.seasonPlaylist(seasonUrl) : [];
     const episodes = this.normalizer.episodes(playlist);
 
-    const streamProxy = (url) => buildProxyUrl(requestContext, url);
+    const streamProxy = (url) => buildPlayUrl(requestContext, url);
     const items = episodes.map((episode) => this.playItem({
       title: episode.title,
       url: streamProxy(episode.url),
@@ -139,7 +139,7 @@ export class KinotochkaProvider extends Provider {
     const file = String(query.file || query.videoId || query.url || item?.file || item?.url || '').trim();
     if (!/^https?:\/\//i.test(file)) return [];
 
-    const streamProxy = (url) => buildProxyUrl(requestContext, url);
+    const streamProxy = (url) => buildPlayUrl(requestContext, url);
     const title = String(query.title || item?.title || this.title);
     const type = String(query.type || item?.type || query.videoType || 'movie');
     const voice = String(query.voice_name || item?.voice_name || item?.voice || 'Оригинал');

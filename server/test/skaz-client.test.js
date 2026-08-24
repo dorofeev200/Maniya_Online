@@ -129,6 +129,54 @@ test('resolveStream: пустая ссылка → ошибка', async () => {
   );
 });
 
+// SKAZ-MANIYA-003 TODO-2: не-RCH JSON-ответ (play /proxy) — resolveStream обязан
+// распаковать `url` из JSON, а НЕ вернуть сырой call-url (finalUrl). Это был
+// источник интермиттентного call-url при падении resolveVideoJson (host-ротация/
+// transient) — фолбэк отдавал call-url плееру вместо /proxy/<hash>.
+test('resolveStream: не-RCH JSON {method:play,url:/proxy} → возвращает /proxy, НЕ call-url', async () => {
+  const CALL = 'http://online3.skaz.tv/lite/x/video/TOKEN';
+  const JSON_PLAY = JSON.stringify({ title: 'auto', method: 'play', url: 'http://online3.skaz.tv/proxy/abc123def.m3u8', quality: {} });
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    hosts: ['http://online3.skaz.tv'],
+    origin: 'http://lampa.mx',
+    fetchImpl: async () => ({
+      status: 200,
+      ok: true,
+      url: CALL,
+      headers: { get: (n) => (n.toLowerCase() === 'content-type' ? 'application/json; charset=utf-8' : null) },
+      body: { cancel: () => {} },
+      text: async () => JSON_PLAY
+    })
+  });
+  const final = await client.resolveStream(CALL);
+  assert.equal(final, 'http://online3.skaz.tv/proxy/abc123def.m3u8', 'распакован url из не-RCH JSON');
+  assert.ok(!final.includes('/lite/x/video/'), 'не вернулся call-url');
+});
+
+// Не-RCH JSON с 'primary or reserve' → только primary.
+test('resolveStream: не-RCH JSON url "primary or reserve" → primary только', async () => {
+  const CALL = 'http://online3.skaz.tv/lite/x/video/TOKEN';
+  const JSON_PLAY = JSON.stringify({ method: 'play', url: 'https://a.vkvideo.cloud/master.m3u8 or https://b.vkvideo.cloud/reserve.m3u8' });
+  const client = new SkazClient({
+    balancer: 'x',
+    ...ACCOUNT,
+    hosts: ['http://online3.skaz.tv'],
+    origin: 'http://lampa.mx',
+    fetchImpl: async () => ({
+      status: 200,
+      ok: true,
+      url: CALL,
+      headers: { get: (n) => (n.toLowerCase() === 'content-type' ? 'application/json' : null) },
+      body: { cancel: () => {} },
+      text: async () => JSON_PLAY
+    })
+  });
+  const final = await client.resolveStream(CALL);
+  assert.equal(final, 'https://a.vkvideo.cloud/master.m3u8', 'primary без or/reserve');
+});
+
 test('openLiteUrl: auth дописывается к URL карточки', async () => {
   const seen = [];
   const client = new SkazClient({

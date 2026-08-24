@@ -100,6 +100,28 @@ function resolveSegmentUrl(baseUrl, ref) {
 }
 
 /**
+ * SKAZ-MANIYA-008 §7: перенос query/auth из URL базового манифеста в ссылку
+ * фрагмента/директивы, у которой этих параметров нет. CDN (filmix nl105) ставит
+ * `?hash=<токен>` ТОЛЬКО на плейлист; seg-URI абсолютные без hash → CDN отдаёт
+ * 403 на каждый фрагмент → hls.js fatal fragLoadError. Правило ОБЩЕЕ (URL/query
+ * propagation, не CDN-specific): каждый query-параметр базы, отсутствующий у
+ * ссылки, переносится в неё (missing-check). Идемпотентно для CDN, которые уже
+ * кладут подпись в каждый сегмент (werkecdn nl221). База без query — no-op.
+ */
+function inheritBaseQuery(resolved, baseUrl) {
+  try {
+    const out = new URL(String(resolved || ''));
+    const base = new URL(String(baseUrl || ''));
+    for (const [key, value] of base.searchParams) {
+      if (!out.searchParams.has(key)) out.searchParams.set(key, value);
+    }
+    return out.toString();
+  } catch {
+    return resolved;
+  }
+}
+
+/**
  * Переписать HLS-манифест на прокси-ссылки. #-директивы проходят через
  * rewriteDirectiveUri — ЛИНИЯ КРИТИЧНА для vkvideo/CDN-рендеров (регрессия 00:00):
  * `#EXT-X-MAP` init-сегмент резолвится hls.js против ТЕКУЩЕГО URL плейлиста.
@@ -115,7 +137,7 @@ function rewriteHlsManifest(manifest, baseUrl, makeProxy) {
       if (trimmed.startsWith('#')) return rewriteDirectiveUri(line, baseUrl, makeProxy);
       const resolved = resolveSegmentUrl(baseUrl, trimmed);
       if (!resolved) return line;
-      return makeProxy(resolved);
+      return makeProxy(inheritBaseQuery(resolved, baseUrl));
     })
     .join('\n');
 }
@@ -135,7 +157,7 @@ function rewriteDirectiveUri(line, baseUrl, makeProxy) {
   if (!match) return line;
   const resolved = resolveSegmentUrl(baseUrl, match[2]);
   if (!resolved) return line;
-  return match[1] + makeProxy(resolved) + match[3];
+  return match[1] + makeProxy(inheritBaseQuery(resolved, baseUrl)) + match[3];
 }
 
 function rewriteMpdManifest(manifest, baseUrl, makeProxy) {
@@ -271,6 +293,39 @@ export function buildProxyUrl(context, targetUrl, extra = {}) {
     if (value && !url.searchParams.has(key)) url.searchParams.set(key, value);
   }
   return url.toString();
+}
+
+// T037 DIRECT-FIRST PLAYBACK (staging-эксперимент): финальный play-URL, который
+// получает Lampa. Когда включён DIRECT_PLAYBACK и хост CDN в
+// DIRECT_PLAYBACK_ALLOW_HOSTS — клиенту отдаётся ИСХОДНЫЙ URL CDN напрямую
+// (без /api/lampa/proxy): поток идёт CDN → клиент, минуя узкое место нашего
+// egress (T036: через /proxy 0.06–0.16 MB/s против 0.9–2.24 MB/s напрямую).
+// Для хостов вне allowlist или при выключенном флаге — buildProxyUrl (fallback).
+// По умолчанию флаг ВЫКЛЮЧЕН (PROD: никакого поведения не меняется, байт-в-байт).
+// HLS-манифесты/сегменты при direct-режиме тоже идут напрямую с CDN (клиент
+// сам резолвит относительные URI против базовой ссылки манифеста).
+//
+// T049 (SKAZ-parity): https vs http — отдельные allowlist'ы (как proxy
+// allowHosts/httpAllowHosts). https → allowHosts; http → ТОЛЬКО httpAllowHosts
+// (узкий live-проверенный список, по умолчанию пуст). http вне httpAllowHosts
+// и прежние https-хосты вне allowHosts — buildProxyUrl (без изменения поведения).
+export function buildPlayUrl(context, targetUrl, extra = {}) {
+  const direct = config.directPlayback?.enabled;
+  if (direct) {
+    const raw = String(targetUrl || '');
+    try {
+      const parsed = new URL(raw);
+      const allowed = (parsed.protocol === 'https:' && isHostAllowed(parsed.hostname, config.directPlayback.allowHosts))
+        || (parsed.protocol === 'http:' && isHostAllowed(parsed.hostname, config.directPlayback.httpAllowHosts));
+      if (allowed) {
+        return raw;
+      }
+    } catch {
+      // не URL — уходит в buildProxyUrl, который вернёт прокси-адрес (а на
+      // /proxy validateProxyTarget отдаст 400 invalid_proxy_url, как и раньше)
+    }
+  }
+  return buildProxyUrl(context, targetUrl, extra);
 }
 
 export function tokenFromRequest(query = {}, request) {

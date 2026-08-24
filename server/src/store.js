@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { HttpError } from './errors.js';
 import { validateToken } from './security.js';
 import { allProviders, registeredProviders, twinFor } from './providers/registry.js';
+import { skazProviderFor } from './providers/skaz/ephemeral.js';
 import { defaultChecker } from './availability.js';
 
 async function readJson(filePath, fallback) {
@@ -106,8 +107,12 @@ export async function getVideoForRequest(context) {
   // /videos отдаёт call items от skaz-<balancer>, и Play обязан их резолвить.
   // Запрос с provider=skaz-rezka НЕ должен падать в 404 только потому, что
   // у native-источника есть видимый одноимённый близнец.
+  // SKAZ-MANIYA-019: эфемерные skaz-<slug> (lordfilm/ashdi/… вне реестра),
+  // порождённые per-title моделью, НЕ зарегистрированы — резолвим инстанс на
+  // лету (memо-кэш в ephemeral.js), чтобы Play call-карточки честно дошёл
+  // до того же балансера.
   const provider = selected
-    ? allProviders().find((p) => p.enabled() && p.id === selected)
+    ? (allProviders().find((p) => p.enabled() && p.id === selected) || skazProviderFor(selected))
     : null;
   if (!provider || typeof provider.resolveVideo !== 'function') {
     return null;
@@ -117,7 +122,17 @@ export async function getVideoForRequest(context) {
 
 export async function getVideosForRequest(context) {
   const selected = String(context.query.provider || '').trim().toLowerCase();
-  const providers = registeredProviders().filter((provider) => provider.enabled() && (!selected || provider.id === selected));
+  // SKAZ-MANIYA-019: выбранный источник может быть эфемерным skaz-<slug> из
+  // per-title модели (вне реестра, близнецов нет). Резолвим инстанс на лету —
+  // он поведёт /videos ровно как зарегистрированный балансер. Реестровый
+  // приоритет: registeredProviders, когда selected там есть (native-first+twin
+  // логика ниже не меняется).
+  const ephemeral = selected && !registeredProviders().some((provider) => provider.id === selected)
+    ? skazProviderFor(selected)
+    : null;
+  const providers = ephemeral
+    ? (ephemeral.enabled?.() ? [ephemeral] : [])
+    : registeredProviders().filter((provider) => provider.enabled() && (!selected || provider.id === selected));
   const videoProviders = providers.filter((provider) => typeof provider.videos === 'function');
 
   // Один провайдер с расширенным контрактом videos() — отдаём payload

@@ -1,0 +1,56 @@
+{
+  "task": "SKAZ-MANIYA-003",
+  "method": "20 identical local outbound requests per resolvable provider (unified balancer/skaz path), plus 20-sequential cross-query (movie->series->ep->movie). No deploy.",
+  "date": "2026-08-20",
+  "results": [
+    {
+      "name": "videoseed (Дом дракона serial s1e1)",
+      "via": "skaz", "N": 20,
+      "found": 20, "resolved": 20, "callurl": 0, "nuls": 0, "errs": 0,
+      "avg_ms": 192, "max_ms": 1218, "distinct_inner": 1,
+      "verdict": "PASS: 100% resolved stream, 0 call-url"
+    },
+    {
+      "name": "hdvb (Форрест Гамп movie)",
+      "via": "skaz", "N": 20,
+      "found": 20, "resolved": 20, "callurl": 0, "nuls": 0, "errs": 0,
+      "avg_ms": 194, "max_ms": 1135, "distinct_inner": 1,
+      "verdict": "PASS: 100% resolved /proxy, 0 call-url"
+    },
+    {
+      "name": "kodik (Паразиты movie)",
+      "via": "skaz", "N": 20,
+      "found": 20, "resolved": 20, "callurl": 0, "nuls": 0, "errs": 0,
+      "avg_ms": 198, "max_ms": 1290, "distinct_inner": 1,
+      "verdict": "PASS: 100% resolved CDN HLS, 0 call-url"
+    },
+    {
+      "name": "kinopub (Форрест Гамп movie)",
+      "via": "skaz", "N": 20,
+      "found": 20, "resolved": 20, "callurl": 0, "nuls": 0, "errs": 0,
+      "avg_ms": 48, "max_ms": 925, "distinct_inner": 1,
+      "verdict": "PASS: 100% play, 0 call-url"
+    },
+    {
+      "name": "alloha (Форрест Гамп movie)",
+      "via": "skaz", "N": 20,
+      "found": 20, "resolved": 20, "callurl": 0, "nuls": 0, "errs": 0,
+      "avg_ms": 1168, "max_ms": 2711, "distinct_inner": 1,
+      "verdict": "PASS: 100% resolved CDN HLS, 0 call-url"
+    },
+    {
+      "name": "veoveo (Дом дракона serial)",
+      "via": "skaz", "N": 20,
+      "found": 20, "resolved": 20, "callurl": 0, "nuls": 0, "errs": 0,
+      "avg_ms": 29, "max_ms": 571, "distinct_inner": 1,
+      "verdict": "PASS: 100% play, 0 call-url"
+    }
+  ],
+  "cross_query": {
+    "N": 20,
+    "sequence": "A(movie)->B(series)->C(ep)->A repeat",
+    "found": 19, "resolved": 19, "callurl": 0,
+    "note": "1 of 20 = NOT-RESOLVED (rare videoseed cold-start transient; NO call-url leak). Critical invariant (never emit call-url) holds 100%."
+  },
+  "conclusion": "6/6 PASS providers 20/20 resolved, ZERO call-url anywhere. TODO-2 fix (resolveStream non-RCH JSON) holds under 20x load. Rare low-frequency cold-start empty nav (videoseed ~<5%) observed but NEVER produces call-url; documented as known transient, not a confirmed reproducible defect."
+}

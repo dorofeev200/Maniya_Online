@@ -1,6 +1,6 @@
 import { config } from '../../config.js';
 import { Provider } from '../base.js';
-import { buildProxyUrl, tokenFromRequest } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl, tokenFromRequest } from '../../proxy.js';
 import { isHttpUrl } from '../shared/utils/Url.js';
 import { normalizeQuality } from '../shared/normalize/QualityNormalizer.js';
 import { normalizeVoice } from '../shared/normalize/VoiceNormalizer.js';
@@ -104,7 +104,7 @@ export class FilmixProvider extends Provider {
     const links = typeof this.client.videoLinks === 'function'
       ? await this.client.videoLinks(id, requestContext)
       : null;
-    if (links) return this.streamsFromLinks(id, title, links, (url) => buildProxyUrl(requestContext, url), query);
+    if (links) return this.streamsFromLinks(id, title, links, (url) => buildPlayUrl(requestContext, url), query);
 
     // FALLBACK: filmix.my/api/v2/post (Lampac Filmix) — на случай восстановления mirror.
     const card = await this.client.card(id, requestContext);
@@ -114,7 +114,7 @@ export class FilmixProvider extends Provider {
 
   cardStreamItems(id, query, title, card, requestContext) {
     const type = this.detectType(card);
-    const normalizer = this.createNormalizer((url) => buildProxyUrl(requestContext, url));
+    const normalizer = this.createNormalizer((url) => buildPlayUrl(requestContext, url));
     const toStreamItems = (streams) => streams.map((stream) => this.streamItem({
       id,
       title,
@@ -152,7 +152,7 @@ export class FilmixProvider extends Provider {
       || records[0];
     if (!record?.id) return { items: [], seasons: [], voices: [] };
 
-    const streamProxy = (url) => buildProxyUrl(requestContext, url);
+    const streamProxy = (url) => buildPlayUrl(requestContext, url);
 
     // PRIMARY: browser-API api-fx video-links (Lampac FilmixTV.VideoLinks) — живой источник
     // стримов. Карточный путь ниже остаётся только как fallback.

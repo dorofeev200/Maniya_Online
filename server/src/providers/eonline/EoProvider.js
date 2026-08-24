@@ -1,4 +1,4 @@
-import { buildProxyUrl } from '../../proxy.js';
+import { buildPlayUrl, buildProxyUrl } from '../../proxy.js';
 import { Provider } from '../base.js';
 import { EoClient } from './EoClient.js';
 import { EoNormalizer } from './EoNormalizer.js';
@@ -306,7 +306,7 @@ export class EoProvider extends Provider {
       // E-Online-стримы идут через наш прокси; CDN (skaz/voidboost) требует
       // Origin/Referer на манифесте И на сегментах — отдаём их в URL прокси,
       // откуда index.js пробрасывает их заголовками upstream.
-      const streamProxy = (url) => buildProxyUrl(requestContext, url, {
+      const streamProxy = (url) => buildPlayUrl(requestContext, url, {
         origin: this.client.origin,
         ref: this.client.origin
       });
@@ -386,7 +386,7 @@ export class EoProvider extends Provider {
   }
 
   buildProxyFor(context, url) {
-    return buildProxyUrl(context, url);
+    return buildPlayUrl(context, url);
   }
 }
 
