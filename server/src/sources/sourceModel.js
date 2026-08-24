@@ -153,12 +153,6 @@ export function buildModel(online, snapshot) {
       quality_label: meta?.qualityLabel || ''
     });
   }
-  // Maniya-only skaz-экстрасы: skaz-зеркала, чей слог кластер НЕ смоделировал
-  // для ЭТОЙ карточки (нет в online[]). Кластер-авторитет (T054): слог не в
-  // online[] → под эти card-параметры контента у кластера нет → НЕ светить
-  // активным чипом, оставить в «Ещё N» (ghost). Иначе static-реестр вечно
-  // добавляет «пустые» источники, которых не видит сам SKAZ-клиент.
-  // Native-экстрасы выше (собственный серверный контент) — исключение.
   for (const skaz of snapshot?.visibleSkaz || []) {
     if (slugSet.has(skaz.balancer)) continue;
     const id = `skaz-${skaz.balancer}`;
@@ -171,8 +165,8 @@ export function buildModel(online, snapshot) {
       url: '',
       api_url: `/api/lampa/videos?provider=${encodeURIComponent(id)}`,
       index: null,
-      show: false,
-      ghost: true,
+      show: true,
+      ghost: false,
       balancer: skaz.balancer,
       balanser: skaz.balancer,
       rch: false,

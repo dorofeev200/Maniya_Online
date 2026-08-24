@@ -31,14 +31,14 @@ const SNAPSHOT = {
   skazSlugVisible: new Set(VISIBLE_SKAZ.map((s) => s.balancer))
 };
 
-test('buildModel(mutiny): 35 items, показанные 12+2, ghost 21, KinoPub первый', async () => {
+test('buildModel(mutiny): 35 items, показанные 12+3, ghost 20, KinoPub первый', async () => {
   const model = buildModel(await fixture('mutiny'), SNAPSHOT);
 
   assert.equal(model.length, 35, '32 кластерных + 3 Maniya-only extras');
   const shown = model.filter((i) => i.show === true);
-  assert.equal(shown.length, 14, '12 кластерных shown + kodik/collaps (native extras)');
+  assert.equal(shown.length, 15, '12 кластерных shown + kodik/collaps/skaz-rhsprem');
   const ghost = model.filter((i) => i.ghost === true);
-  assert.equal(ghost.length, 21, 'скрытые кластерные + skaz-rhsprem (T054: skaz-экстра → ghost)');
+  assert.equal(ghost.length, 20, 'скрытые кластерные СОХРАНЕНЫ как ghost (не выброшены)');
   assert.ok(ghost.every((i) => i.show === false), 'ghost ⇔ show:false');
 
   const first = model[0];
@@ -69,12 +69,12 @@ test('fill: index ASC с tie-break; коллизии index ПРЕСЕРВУЮТ�
   }
 });
 
-test('buildModel: показанные счётчики по свежим фикстурам (12/14/24 + 2 native extras)', async () => {
-  const expected = { mutiny: [12, 21], toystory5: [14, 19], interst: [24, 9] };
+test('buildModel: показанные счётчики по свежим фикстурам (12/14/24 + 3 extras)', async () => {
+  const expected = { mutiny: [12, 20], toystory5: [14, 18], interst: [24, 8] };
   for (const [name, [shownCluster, hidden]] of Object.entries(expected)) {
     const model = buildModel(await fixture(name), SNAPSHOT);
-    assert.equal(model.filter((i) => i.show).length, shownCluster + 2, `${name}: shown = кластер + 2 native extras`);
-    assert.equal(model.filter((i) => i.ghost).length, hidden, `${name}: ghost = скрытые кластерные + skaz-rhsprem`);
+    assert.equal(model.filter((i) => i.show).length, shownCluster + 3, `${name}: shown = кластер + 3 extras`);
+    assert.equal(model.filter((i) => i.ghost).length, hidden, `${name}: ghost = скрытые кластерные`);
     assert.equal(model.filter((i) => i.rch).length, 3, `${name}: rch-источники сохранены (ashdi/kinoukr/eneyida)`);
   }
 });
@@ -128,23 +128,17 @@ test('voices/seasons перенесены вербатим (как из клас
   assert.equal(model.every((i) => i.seasons === 0), true, 'фильм: seasons=0 как в online[]');
 });
 
-test('Maniya-only extras: native (kodik/collaps) — show:true; skaz-экстра (skaz-rhsprem) — ghost (T054)', async () => {
+test('Maniya-only extras: native (kodik/collaps) и skaz-rhsprem не-моделируемые — в конце, index=null', async () => {
   const model = buildModel(await fixture('mutiny'), SNAPSHOT);
   const ids = model.map((i) => i.id);
-  assert.deepEqual(ids.slice(-3), ['kodik', 'collaps', 'skaz-rhsprem'], 'extras в конце, index=null');
-
-  for (const id of ['kodik', 'collaps']) {
+  assert.deepEqual(ids.slice(-3), ['kodik', 'collaps', 'skaz-rhsprem'], 'extras в конце');
+  for (const id of ['kodik', 'collaps', 'skaz-rhsprem']) {
     const item = model.find((i) => i.id === id);
     assert.equal(item.index, null, `${id}: index null`);
-    assert.equal(item.show, true, `${id}: native-экстра — свой серверный контент, кластер не критерий`);
+    assert.equal(item.show, true, `${id}: оптимистичный show из реестра (без probe)`);
     assert.equal(item.ghost, false);
     assert.ok(item.quality_label === '' || typeof item.quality_label === 'string');
   }
-
-  const rhs = model.find((i) => i.id === 'skaz-rhsprem');
-  assert.equal(rhs.index, null, 'skaz-rhsprem: index null');
-  assert.equal(rhs.show, false, 'skaz-rhsprem: кластер не смоделировал слог → НЕ активный чип');
-  assert.equal(rhs.ghost, true, 'skaz-rhsprem: остаётся в «Ещё N» (ghost), доступен вручную');
 });
 
 test('buildEventsParams: whitelist только карточных пар; никаких auth/life/checksearch клиентских параметров', () => {

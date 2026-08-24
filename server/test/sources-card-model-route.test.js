@@ -133,11 +133,10 @@ describe('/api/lampa/sources/card (per-title model)', () => {
     assert.equal(body.meta.model, true, 'пустой online[] — по-прежнему детерминированная модель');
     // В этом env natives выключены → extras = все 18 видимых skaz-мостов, не покрытых
     // кластерным online[] (который пуст) → ровно 18 rows, каждая index:null,
-    // БЕЗ probe-волн (АУДИТ §8). T054: klaster НЕ смоделировал ни один слог → все
-    // skaz-мосты ghost («Ещё N»), НЕ активные чипы (кластер-авторитет).
+    // оптимистичный show из реестра (без probe-волн — АУДИТ §8).
     assert.equal(body.sources.length, 18, 'extras = 18 skaz-мостов (все видимые, natives off)');
     assert.ok(body.sources.every((s) => s.index === null), 'кластер пуст → только extras (index=null)');
-    assert.ok(body.sources.every((s) => s.show === false && s.ghost === true), 'extras: skaz-мосты ghost (T054)');
+    assert.ok(body.sources.every((s) => s.show === true && s.ghost === false), 'extras: оптимистичный show');
     assert.ok(body.sources.every((s) => String(s.id).startsWith('skaz-')), 'extras: только skaz-мосты');
     assert.ok(body.sources.every((s) => s.api_url.startsWith('/api/lampa/videos?provider=')), 'extras: api_url');
   });
