@@ -6,6 +6,35 @@ import { SkazNormalizer } from './SkazNormalizer.js';
 import { SkazRchRegistry } from './SkazRchRegistry.js';
 
 /**
+ * SKAZ-MANIYA-055: карточные параметры для резолва `lite/<slug>` (кластер без
+ * id/serial/title отвечает 503). Зеркало buildEventsParams из sourceModel
+ * (прямой импорт создал бы ESM-cycle registry↔provider) — тот же whitelist.
+ */
+function liteCardParams(query = {}) {
+  const params = {};
+  const id = String(query.id ?? query.tmdb_id ?? '');
+  if (id) params.id = id;
+  const imdb = String(query.imdb_id ?? '');
+  if (imdb) params.imdb_id = imdb;
+  const kp = String(query.kinopoisk_id ?? '');
+  if (kp) params.kinopoisk_id = kp;
+  const title = String(query.title ?? '');
+  if (title) params.title = title;
+  const original = String(query.original_title ?? '');
+  if (original) params.original_title = original;
+  const lang = String(query.original_language ?? '');
+  if (lang) params.original_language = lang;
+  const year = String(query.year ?? '');
+  if (year) params.year = year;
+  const serial = String(query.serial ?? '').trim();
+  params.serial = serial === '1' || serial === 'true' || serial === 'yes'
+    || String(query.type || '').toLowerCase() === 'serial'
+    || String(query.serial_type || '').toLowerCase() === 'serial' ? '1' : '0';
+  params.source = String(query.source || 'tmdb');
+  return params;
+}
+
+/**
  * Кэш навигации кластера (videos → video): финальные карточки, которые videos()
  * уже построил успешным походом в кластер, переиспользуются resolveVideo() на
  * Play вместо повторной навигации getLite→href→postid. Второй независимый поход
@@ -649,7 +678,10 @@ export class SkazProvider extends Provider {
     // (videoseed-сериалы и др.) — резолвим эффективный URL, как делает
     // фолбэк resolveStream ниже. SKAZ-MANIYA-002 root cause.
     const effective = String(card.stream || card.url || '').trim();
-    const json = await this.client.resolveVideoJson?.(effective, rchOptions);
+    // SKAZ-MANIYA-055: `lite/<slug>` без карточных параметров кластер отвечает
+    // 503 — events даёт голый url. Досылаем cardParams из query на резолв.
+    const cardParams = liteCardParams(requestContext.query || {});
+    const json = await this.client.resolveVideoJson?.(effective, { ...rchOptions, cardParams });
     if (json) {
       const pair = splitOrUrl(json.url);
       const primary = pair[0];

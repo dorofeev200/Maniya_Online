@@ -90,6 +90,28 @@ function hiddenKeyMatches(install, providedKey) {
   return a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b);
 }
 
+/**
+ * MANIYA-STAGING (TASK-032/034): какую сборку плагина отдаёт хост.
+ * На staging-хосте (MANIYA_STAGING_ENABLED=true) ЛЮБЫЕ ссылки установки —
+ * короткая /<prefix>_<short>.js и install /p/<install>.js→/x/… — отдают
+ * СТАДЖИНГ-сборку (MANIYA_API_BASE → сам staging, токен в отдельный
+ * MANIYA_ONLINE_TOKEN_STAGING). Иначе девайс получал клиент с жёстко вшитой
+ * PROD-базой: API-вызовы били в старый билд и тесты падали «Видео не найдено»
+ * (T055) даже при установке плагина со staging. На PROD (staging.enabled=false)
+ * дефолт не меняется.
+ */
+function pluginArtifact() {
+  const st = config.staging;
+  if (st.enabled && st.stagingPublicDir) {
+    return {
+      file: 'maniya-online-staging.js',
+      dir: st.stagingPublicDir,
+      tokenGlobal: 'MANIYA_ONLINE_TOKEN_STAGING'
+    };
+  }
+  return { file: 'maniya-online.js', dir: config.publicDir, tokenGlobal: 'MANIYA_ONLINE_TOKEN' };
+}
+
 async function route(context, response) {
   const { request, url } = context;
   const pathname = url.pathname;
@@ -125,7 +147,8 @@ async function route(context, response) {
     if (!user) throw new HttpError(404, 'not_found', 'User not found');
     if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
     if (!isLampaRequest(request)) return sendPluginStub(request, response);
-    return sendPluginForToken(request, response, user.token);
+    const art = pluginArtifact();
+    return sendPluginForToken(request, response, user.token, art.file, art.dir, art.tokenGlobal);
   }
 
   // MANIYA-STAGING (TASK-032 Phase 17): тестовый плагин `/staging/<short>.js`.
@@ -184,7 +207,8 @@ async function route(context, response) {
     if (!user || !hiddenKeyMatches(install, key)) throw new HttpError(404, 'install_link_not_found', 'Install link not found');
     if (!isSubscriptionActive(user)) throw new HttpError(403, 'subscription_required', 'Подписка истекла');
     if (!isLampaRequest(request)) return sendPluginStub(request, response);
-    return sendPluginForToken(request, response, user.token);
+    const art = pluginArtifact();
+    return sendPluginForToken(request, response, user.token, art.file, art.dir, art.tokenGlobal);
   }
 
   if (!isApiPath(pathname)) {

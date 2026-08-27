@@ -413,6 +413,14 @@ export class SkazClient {
       const video = new URL(withAuth(raw, this.accountEmail, this.uid));
       video.pathname = video.pathname.replace(/\.m3u8$/i, '');
       video.searchParams.delete('play');
+      // SKAZ-MANIYA-055: `lite/<slug>` без карточных параметров → 503 от кластера.
+      // Досылаем cardParams (ид фильма/сериала), когда их нет в URL. CDN-потоки
+      // и уже параметризованные URL не трогаем.
+      if (video.pathname.includes('/lite/')) {
+        for (const [k, v] of Object.entries(options.cardParams || {})) {
+          if (!video.searchParams.has(k)) video.searchParams.set(k, String(v));
+        }
+      }
       target = video.toString();
     } catch {
       return null;
@@ -435,10 +443,50 @@ export class SkazClient {
     try {
       parsed = JSON.parse(text);
     } catch {
+      // SKAZ-MANIYA-055: HTML-источники (kinopub/filmix/rezka/veoveo/mirkino/
+      // hdvb/rutubemovie/vkmovie/geosaitebi/pidtor/lordfilm) отдают НЕ JSON,
+      // а Lampac-страницу `videos__line` с `data-json='{"method":"link",...}'`:
+      // первый data-json → follow его url (постфикс postid/NNN) → JSON play
+      // {method:'play',url:'…master.m3u8',quality:{…}}. Иначе → null «не доступен».
+      const viaHtml = await this._resolveHtmlChain(text, target, { Origin: this.origin }, options, 0);
+      return viaHtml;
+    }
+    if (typeof parsed !== 'object' || parsed.method !== 'play' || !String(parsed.url || '').trim()) {
+      const viaHtml = await this._resolveHtmlChain(text, target, { Origin: this.origin }, options, 0);
+      if (viaHtml) return viaHtml;
       return null;
     }
-    if (!parsed || typeof parsed !== 'object' || parsed.method !== 'play' || !String(parsed.url || '').trim()) return null;
     return parsed;
+  }
+
+  /**
+   * HTML-фоллбэк resolveVideoJson: рекурсивный follow цепочки
+   * `videos__line` → data-json `method:link` до JSON-видео
+   * ({method:'play',url,quality}). Глубина ≤ 4; каждый шаг — перебор
+   * хостов пула (5xx → следующий хост), URL токенизируется withAuth.
+   * Вернёт распарсенный play или null.
+   */
+  async _resolveHtmlChain(htmlText, target, headers, options, depth) {
+    if (depth > 4) return null;
+    const item = parseHtmlFirstItem(htmlText);
+    if (!item) return null;
+    const nextUrl = withAuth(item.url, this.accountEmail, this.uid);
+    const { response } = await this.fetchResolvedHosts(nextUrl, headers);
+    if (!response) return null;
+    const text = await response.text().catch(() => null);
+    if (!text) return null;
+    const rchInfo = parseRchPayload(text);
+    if (rchInfo) {
+      const resolved = await this._rchFetchResolved(nextUrl, rchInfo, headers, options);
+      if (resolved == null) return null;
+      const reparsed = tryJson(resolved);
+      if (reparsed && typeof reparsed === 'object' && reparsed.method === 'play' && String(reparsed.url || '').trim()) return reparsed;
+      return null;
+    }
+    const parsed = tryJson(text);
+    if (parsed && typeof parsed === 'object' && parsed.method === 'play' && String(parsed.url || '').trim()) return parsed;
+    if (text.includes('data-json=')) return this._resolveHtmlChain(text, nextUrl, headers, options, depth + 1);
+    return null;
   }
 
   /**
@@ -717,6 +765,34 @@ function rchHttpOrigin(nws) {
   } catch {
     return '';
   }
+}
+
+/**
+ * Первый `data-json` из Lampac-HTML (`videos__line`) → объект метода link/play.
+ * SKAZ-MANIYA-055: HTML-источники кластера (kinopub/filmix/rezka/veoveo/hdvb/
+ * rutubemovie/vkmovie/mirkino/geosaitebi/pidtor/lordfilm) на `lite/<slug>` отдают
+ * НЕ JSON, а страницу-селектор с data-json-строками. Берётся ПЕРВЫЙ валидный
+ * (focused-строка; «similar»-перевыпуски идут ниже в списке). HTML-entities
+ * декодируются; `&` внутри JSON рулит сам JSON.parse. Возвращает {method,url}
+ * или null.
+ */
+function parseHtmlFirstItem(text) {
+  const m = String(text || '').match(/data-json=(["'])([\s\S]*?)\1/i);
+  if (!m) return null;
+  const raw = m[2]
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, '&');
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object' && (obj.method === 'link' || obj.method === 'play') && String(obj.url || '').trim()) {
+      return obj;
+    }
+  } catch {
+    /* не JSON — это не HTML-селектор кластера */
+  }
+  return null;
 }
 
 /**

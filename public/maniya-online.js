@@ -273,6 +273,40 @@
     };
   }
 
+  // SKAZ-MANIYA-058 (W3, D9): классификатор озвучки по kind — порт ShezUI.VOICE_KINDS +
+  // VOICE_STUDIOS (onlines.js 452-499). Используется для сортировки ряда «Озвучка»
+  // (Дубляж → Многоголосый → Двухголосый → Авторский → Оригинал → Субтитры → прочее)
+  // и для памяти предпочтения голоса (skaz_voice_pref → maniya_voice_pref).
+  var VOICE_KINDS = [
+    { key: 'dub', rank: 0, re: /дубляж|дублирован|\bdub\b|\bdubbing\b/i },
+    { key: 'mvo', rank: 1, re: /многоголос|\bmvo\b|\bpmvo\b/i },
+    { key: 'dvo', rank: 2, re: /двухголос|\bdvo\b/i },
+    { key: 'avo', rank: 3, re: /авторск|одноголос|\bavo\b|\bvo\b/i },
+    { key: 'orig', rank: 4, re: /оригинал|original|\beng\b|\bua\b|\bukr\b/i },
+    { key: 'sub', rank: 5, re: /субтитр|sub(title)?s?\b/i }
+  ];
+  var VOICE_STUDIOS = [
+    { key: 'mvo', re: /lostfilm|лостфильм|tvshows|dniprofilm|невафильм|newstudio|newcomers|baibako|байбако|alexfilm|jaskier|coldfilm|колдфильм|hdrezka|rezkastudio|red head sound|sunshine|amedia|zakadry|закадры|linefilm|le-production|1win|kerob|profix|selena|октопус/i },
+    { key: 'dvo', re: /кубик в кубе|kubik|viruseproject|вирус|green ?tea|paradox/i },
+    { key: 'avo', re: /яроцк|гаврилов|володарск|сербин|горчаков|михал[её]в|живов|пучков|гоблин|кураж|дольск|есарев|карповск|визгунов/i }
+  ];
+  function voiceKind(title) {
+    var text = String(title || '');
+    for (var i = 0; i < VOICE_KINDS.length; i++) {
+      if (VOICE_KINDS[i].re.test(text)) return VOICE_KINDS[i].key;
+    }
+    for (var j = 0; j < VOICE_STUDIOS.length; j++) {
+      if (VOICE_STUDIOS[j].re.test(text)) return VOICE_STUDIOS[j].key;
+    }
+    return 'other';
+  }
+  function voiceKindRank(key) {
+    for (var i = 0; i < VOICE_KINDS.length; i++) {
+      if (VOICE_KINDS[i].key === key) return VOICE_KINDS[i].rank;
+    }
+    return 90;
+  }
+
   function escapeHtml(value) {
     return (value === undefined || value === null ? '' : String(value))
       .replace(/&/g, '&amp;')
@@ -494,6 +528,14 @@
     var activeVoice = null;
     var seasonNumbers = [];
     var voiceIndexes = [];
+    // SKAZ-MANIYA-058: опции сезонов/озвучек ДЛЯ Z01-тулбара (чипы «Сезон»/«Озвучка»).
+    // Данные те же, что у етalonа filter_find (onlines.js parse): array {title, url/мета}.
+    // Сезоны: number+title; озвучки: name+index. Чипы рисуются только при >1 опции.
+    // Чисто клиентский рендер — сервер уже понимает season=/voice= (store.js+SkazProvider).
+    var uiSeasons = [];
+    var uiVoices = [];
+    // W3 (D7): число серий текущего сезона (для чипа «Переход»; >20 → рисуем).
+    var uiItemsCount = 0;
     var seasonEpisodesCache = {};
     // SKAZ-MANIYA-052: тонкий путь уже пробовали на этой карточке → после
     // фолбэка навсегда legacy /videos+/proxy (гейт не зацикливается).
@@ -689,6 +731,11 @@
       // SKAZ-MANIYA-044: новый фильм — источники опрашиваем заново: «пустые» для
       // одного фильма могут снова ожить (ghost-статус — только для этой карточки).
       uiDeadSources = {};
+      // SKAZ-MANIYA-058: опции сезонов/озвучек и счётчик серий — per-карточка
+      // (не перетекать между фильмами; заполняются снова в setFilters/draw).
+      uiSeasons = [];
+      uiVoices = [];
+      uiItemsCount = 0;
       var url = addMovieParams(trimSlash(MANIYA_API_BASE) + '/sources/card', object.movie, object);
       requestJson(network, url, function (json) {
         self.applyCardAvailability(json);
@@ -1025,8 +1072,8 @@
      *  Заголовок «Опрашиваем источники», строка-прогресс как SKAZ uiLoadingText:
      *  «Опрашиваем источники · Nс», после ответа балансера — «Найдено источников:
      *  {n} · Nс», при ≥12с и percent<100 — « · отвечают медленно». Бар = max(pct,
-     *  min(90, sec*7)). БЕЗ тулбара «ИСТОЧНИК» — селектор появляется только когда
-     *  баланер вернул модель. */
+     *  min(90, sec*7)). Тулбар «ИСТОЧНИК» рисуется СРАЗУ (смена источника работает
+     *  во время опроса, как SKAZ), а не только когда баланер вернул модель. */
     this.uiLoadingPanel = function () {
       var self = this;
       if (!Z01_UI_OK) return;
@@ -1063,6 +1110,11 @@
       }, 1000);
       this.loading(false);
       Lampa.Controller.enable('content');
+      // Селектор «ИСТОЧНИК» живёт и на polling-экране: switch источника доступен
+      // сразу (было: селектор появлялся только после ответа балансера → «первое
+      // открытие висит, нельзя сменить источник»). Переключение → changeSource →
+      // loadVideos рисует свежую polling-панель, цикл закрыт.
+      if (activeSource && sources[activeSource]) self.uiToolbar();
       // WATCHDOG: если балансер долго молчит (нет сети/сервер занят) — через
       // 15с снимаем панель и показываем статический реестр (не весим вечно).
       uiPollDeadline();
@@ -1182,31 +1234,260 @@
       } else seasonLine.hide();
     };
 
-    /** Селектор «ИСТОЧНИК [4K 🌐 Lime ▼]» + раскрытие в pill-чипы (onlines.js uiRows/uiSourceRow). */
+    /**
+     * SKAZ-MANIYA-058: селектор «Источник / Сезон / Озвучка» + раскрытие в pill-чипы
+     * (onlines.js uiRows/addChip + uiOptionRow). Чипы «Сезон»/«Озвучка» рисуются
+     * как у SKAZ (1806/1811): только когда опций > 1, текст — текущий выбор,
+     * клик → uiToggle(type) → .z01-drop рядами опций → uiSwitch(type, index).
+     * Данные uiSeasons/uiVoices приходят из ответа /videos (setFilters) — сервер
+     * уже умеет season=/voice=, поэтому чипы это чистый клиентский рендер.
+     */
     this.uiToolbar = function () {
       var self = this;
       ui.rows.empty();
       var toolbar = $('<div class="z01-toolbar"></div>');
-      toolbar.append($('<div class="z01-toolbar__label"></div>').text(Lampa.Lang.translate('maniya_source')));
+
+      // Эталон onlines.js addChip: label (маленький, caps) + чип (текст = текущее).
+      var addChip = function (key, label, text, opts) {
+        opts = opts || {};
+        if (label) toolbar.append($('<div class="z01-toolbar__label"></div>').text(label));
+        var chip = $('<div class="z01-chip selector"></div>');
+        chip.attr('data-z01-focus', key);
+        if (opts.badge) chip.append($('<span class="z01-chip__badge"></span>').text(opts.badge));
+        chip.append($('<span class="z01-chip__label"></span>').text(text));
+        chip.append(chevronSvg());
+        if (opts.active) chip.addClass('z01-chip--active');
+        chip.on('hover:enter', function () { self.uiToggle(key); })
+          .on('hover:focus', function (e) { last = e.target; scroll.update($(e.target), true); });
+        toolbar.append(chip);
+      };
+
       var current = sources[activeSource];
       var parts = sourceChipParts(current, activeSource);
       // T052: «✈» = thin direct доказан и играет с устройства (не через /proxy).
-      var chipLabel = parts.label;
-      if (current && current.thin && ThinSkaz.flowOk(activeSource)) chipLabel += ' ✈';
-      var chip = $('<div class="z01-chip z01-chip--source selector"></div>');
-      if (parts.badge) chip.append($('<span class="z01-chip__badge"></span>').text(parts.badge));
-      chip.append($('<span class="z01-chip__label"></span>').text(chipLabel));
-      chip.append(chevronSvg());
-      chip.on('hover:enter', function () { self.uiToggleSource(); })
-        .on('hover:focus', function (e) { last = e.target; scroll.update($(e.target), true); });
-      toolbar.append(chip);
+      var sourceText = parts.label;
+      if (current && current.thin && ThinSkaz.flowOk(activeSource)) sourceText += ' ✈';
+      addChip('source', Lampa.Lang.translate('maniya_source'), sourceText, {
+        badge: parts.badge,
+        active: ui.open === 'source'
+      });
+
+      // Сезон — только если источников сезонов > 1 (как SKAZ filter_find.season.length>1).
+      if (uiSeasons.length > 1) {
+        addChip('season', Lampa.Lang.translate('maniya_season'), this.uiCurrentSeasonTitle(), {
+          active: ui.open === 'season'
+        });
+      }
+      // Озвучка — только если озвучек > 1.
+      if (uiVoices.length > 1) {
+        addChip('voice', Lampa.Lang.translate('maniya_voice'), this.uiCurrentVoiceName(), {
+          active: ui.open === 'voice'
+        });
+      }
+
+      // W3 (D7): «Переход» для длинных списков серий (как SKAZ JUMP_FROM=20,
+      // onlines.js 1815-1818): только сериал и серий больше 20.
+      if (object.movie && object.movie.name && uiItemsCount > 20) {
+        addChip('jump', Lampa.Lang.translate('maniya_jump'), '1–20+', {
+          active: ui.open === 'jump'
+        });
+      }
+
       ui.rows.append(toolbar);
       if (ui.open === 'source') ui.rows.append(this.uiSourceRow());
+      else if (ui.open === 'season') ui.rows.append(this.uiOptionRow('season'));
+      else if (ui.open === 'voice') ui.rows.append(this.uiOptionRow('voice'));
+      else if (ui.open === 'jump') ui.rows.append(this.uiJumpRow());
     };
 
-    this.uiToggleSource = function () {
-      if (ui.open === 'source') ui.open = '';
-      else ui.open = 'source';
+    /** W3 (D7): ряд «Переход {n}» по 20 серий (onlines.js uiJumpRow 2096-2116,
+     *  но без пейджинга — у нас серии в одном скролле, поэтому клик скроллит). */
+    this.uiJumpRow = function () {
+      var self = this;
+      var row = $('<div class="z01-drop"></div>');
+      var from = 1;
+      while (from <= uiItemsCount) {
+        var to = Math.min(from + 19, uiItemsCount);
+        (function (f, t) {
+          var c = $('<div class="z01-chip selector"></div>');
+          c.attr('data-z01-focus', 'jump:' + f);
+          c.append($('<span class="z01-chip__label"></span>').text(f + '–' + t));
+          c.on('hover:enter', function () { self.uiJumpTo(f - 1); })
+            .on('hover:focus', function (e) { last = e.target; scroll.update($(e.target), true); });
+          row.append(c);
+        })(from, to);
+        from += 20;
+      }
+      return row;
+    };
+
+    /** Текущий сезон (заголовок) для чипа «Сезон», фолбэк — первый из списка. */
+    this.uiCurrentSeasonTitle = function () {
+      if (activeSeason !== null && uiSeasons.length) {
+        for (var i = 0; i < uiSeasons.length; i++) {
+          if (String(uiSeasons[i].number) === String(activeSeason)) return uiSeasons[i].title;
+        }
+      }
+      return uiSeasons.length ? uiSeasons[0].title : '';
+    };
+
+    /** Текущая озвучка (имя) для чипа «Озвучка», фолбэк — первая из списка. */
+    this.uiCurrentVoiceName = function () {
+      if (activeVoice !== null && uiVoices.length) {
+        for (var i = 0; i < uiVoices.length; i++) {
+          if (String(uiVoices[i].index) === String(activeVoice)) return uiVoices[i].name;
+        }
+      }
+      return uiVoices.length ? uiVoices[0].name : '';
+    };
+
+    /** Общий аккордеон: раскрытие/закрытие ряда опций (onlines.js uiToggle). */
+    this.uiToggle = function (key) {
+      if (ui.open === key) ui.open = '';
+      else ui.open = key;
+      this.uiToolbar();
+      Lampa.Controller.enable('content');
+    };
+
+    /** SKAZ-MANIYA-058: ряд опций сезона/озвучки в .z01-drop (onlines.js uiOptionRow).
+     *  Активный помечается z01-chip--active; клик по другому → uiSwitch → loadVideos
+     *  с новым season=/voice= (источник не пересоздаётся, выбор переживает смену). */
+    this.uiOptionRow = function (type) {
+      var self = this;
+      var row = $('<div class="z01-drop"></div>');
+      var order = [];
+      if (type === 'season') {
+        order = uiSeasons.map(function (opt, index) { return { opt: opt, index: index }; });
+      } else {
+        // W3 (D9): сортируем озвучки по kind (Дубляж → Многоголосый → Двухголосый →
+        // Авторский → Оригинал → Субтитры → прочее) — как SKAZ uiOptionRow 2160-2171.
+        order = uiVoices.map(function (opt, index) {
+          return { opt: opt, index: index, kind: voiceKind(opt.name), rk: voiceKindRank(voiceKind(opt.name)) };
+        }).sort(function (a, b) {
+          return (a.rk - b.rk) || (a.index - b.index);
+        });
+      }
+      order.forEach(function (entry) {
+        var opt = entry.opt;
+        var index = entry.index;
+        var value = type === 'season' ? opt.number : opt.index;
+        var active = type === 'season'
+          ? (activeSeason !== null && String(value) === String(activeSeason))
+          : (activeVoice !== null && String(value) === String(activeVoice));
+        var c = $('<div class="z01-chip selector"></div>');
+        c.attr('data-z01-focus', type + ':' + index);
+        c.append($('<span class="z01-chip__label"></span>').text(opt.title || opt.name));
+        if (active) c.addClass('z01-chip--active');
+        (function (v, chip) {
+          chip.on('hover:enter', function () {
+            if (active) { ui.open = ''; self.uiToolbar(); return; }
+            self.uiSwitch(type, v);
+          }).on('hover:focus', function (e) { last = e.target; scroll.update($(e.target), true); });
+        })(value, c);
+        row.append(c);
+      });
+      return row;
+    };
+
+    /** SKAZ-MANIYA-058: выбор сезона/озвучки (onlines.js uiSwitch): значение кладём
+     *  в activeSeason/activeVoice, закрываем дроп и перезапрашиваем через loadVideos
+     *  (он уже шлёт season=/voice=; загруженное попадает в setFilters → draw).
+     *  W3 (D5/D6): сохраняем выбор — предпочитаемая озвучка (kind) и последний сезон. */
+    this.uiSwitch = function (type, value) {
+      if (type === 'season') {
+        activeSeason = value;
+        this.seasonMemory(value);
+      } else {
+        activeVoice = value;
+        var name = this.uiCurrentVoiceName();
+        var kind = voiceKind(name);
+        if (kind && kind !== 'other') Lampa.Storage.set('maniya_voice_pref', kind);
+        else Lampa.Storage.set('maniya_voice_pref', '');
+      }
+      ui.open = '';
+      this.loadVideos();
+    };
+
+    /** W3 (D6): последний выбранный сезон per movie.id (эталон onlines.js
+     *  seasonMemory/z01_season_last 3841-3857, только свой ключ maniya_season_last).
+     *  Lampa.Storage.cache — норма, fallback (vm-песочница без cache) — plain get/set. */
+    this.seasonMemory = function (number) {
+      var all;
+      if (typeof Lampa.Storage.cache === 'function') {
+        all = Lampa.Storage.cache('maniya_season_last', 7200, {});
+      } else {
+        all = Lampa.Storage.get('maniya_season_last', {}) || {};
+      }
+      if (number === undefined) return all[object.movie.id];
+      all[object.movie.id] = number;
+      Lampa.Storage.set('maniya_season_last', all);
+    };
+    this.seasonMemoryIndex = function () {
+      var wanted = this.seasonMemory();
+      if (!wanted) return -1;
+      for (var i = 0; i < seasonNumbers.length; i++) {
+        if (String(seasonNumbers[i]) === String(wanted)) return i;
+      }
+      return -1;
+    };
+
+    /** W3 (D5): автоприменение сохранённых предпочтений при ПЕРВОМ открытии сериала
+     *  на карточке (activeSeason/activeVoice ещё null): озвучка по kind (как SKAZ
+     *  skaz_voice_pref, onlines.js 3710-3737) и последний сезон (з01_season_last).
+     *  Предпочтение ≠ активного варианта → перезапрос с новым season=/voice=
+     *  (перезапроса нет, если memory — уже дефолтный выбор сервера → лишних
+     *  запросов нет). Возвращает true, если уже запрошена перезагрузка. */
+    this.applyPrefChoices = function () {
+      if (!object.movie || !object.movie.name) return false;
+      var changed = false;
+
+      if (activeVoice === null && uiVoices.length > 1 &&
+          Lampa.Storage.get('maniya_voice_auto', true) !== false) {
+        var pref = Lampa.Storage.get('maniya_voice_pref', '');
+        for (var v = 0; v < uiVoices.length; v++) {
+          if (voiceKind(uiVoices[v].name) === pref) {
+            // Дефолтный выбор сервера — первый голос (index 0): он же и есть
+            // предпочтение → перезапрос не нужен, просто фиксируем.
+            if (String(uiVoices[v].index) !== '0' && String(uiVoices[v].index) !== String(voiceIndexes[0])) {
+              activeVoice = uiVoices[v].index;
+              changed = true;
+            } else {
+              activeVoice = uiVoices[v].index;
+            }
+            break;
+          }
+        }
+      }
+
+      if (activeSeason === null && uiSeasons.length > 1) {
+        var idx = this.seasonMemoryIndex();
+        if (idx > 0) {
+          activeSeason = uiSeasons[idx].number;
+          changed = true;
+        } else if (idx === 0) {
+          activeSeason = uiSeasons[0].number;
+        }
+      }
+
+      if (changed) {
+        var self = this;
+        setTimeout(function () { self.loadVideos(); }, 0);
+      }
+      return changed;
+    };
+
+    /** W3 (D7): навигация по длинному списку серий драматургии — чип «Переход»
+     *  (onlines.js addChip('jump') 1815-1818 + uiJumpRow 2096-2116). Отличие:
+     *  у нас серии рисуются одним скроллом (без пейджинга), поэтому «переход» —
+     *  это СКРОЛЛ к нужному куску списка, а не смена страницы. Ряды = по 20 серий. */
+    this.uiJumpTo = function (startIndex) {
+      if (!ui.list) return;
+      var cards = ui.list.find('.z01-card');
+      var target = cards.eq(startIndex);
+      if (!target.length) return;
+      ui.open = '';
+      last = target[0];
+      scroll.update(target, true);
       this.uiToolbar();
       Lampa.Controller.enable('content');
     };
@@ -1438,11 +1719,18 @@
       var select = [];
       seasonNumbers = [];
       voiceIndexes = [];
+      uiSeasons = [];
+      uiVoices = [];
       var selectedVoice = '';
       var selectedSeason = '';
 
       if (json && json.voices && json.voices.length) {
         voiceIndexes = json.voices.map(function (voice) { return voice.index; });
+        // SKAZ-MANIYA-058: копия опций для Z01-тулбара (чип «Озвучка») — как
+        // filter_find.voice в onlines.js. name для чипа, index для season=/voice=.
+        uiVoices = json.voices.map(function (voice, idx) {
+          return { name: voice.name || '', index: voice.index != null ? voice.index : idx, title: voice.name || '' };
+        });
         var voiceIndex = 0;
         if (activeVoice !== null) {
           for (var j = 0; j < voiceIndexes.length; j++) {
@@ -1462,6 +1750,10 @@
 
       if (json && json.seasons && json.seasons.length) {
         seasonNumbers = json.seasons.map(function (season) { return season.number; });
+        // SKAZ-MANIYA-058: копия опций сезонов для Z01-чипа «Сезон» (как filter_find.season).
+        uiSeasons = json.seasons.map(function (season) {
+          return { number: season.number, title: season.title || Lampa.Lang.translate('maniya_season') + ' ' + season.number };
+        });
         var seasonIndex = 0;
         if (activeSeason !== null) {
           for (var i = 0; i < seasonNumbers.length; i++) {
@@ -1497,6 +1789,11 @@
         if (selectedSeason) labels.push(Lampa.Lang.translate('maniya_season') + ': ' + selectedSeason);
         filter.chosen('filter', labels);
       }
+      // W3 (D5/D6): авто-предпочтения (озвучка по kind, последний сезон) применяются
+      // на ПЕРВОМ открытии сериала на карточке — ТОЛЬКО в real-DOM (Z01): чипы
+      // есть только там, а в vm-песочнице тестов Storage-заглушка без cache →
+      // legacy-ветка строит нативный filter (строки выше) и не трогает это.
+      if (Z01_UI_OK) this.applyPrefChoices();
     };
 
     this.reset = function () {
@@ -1551,6 +1848,8 @@
 
     this.draw = function (items) {
       var self = this;
+      // W3 (D7): количество серий — для чипа «Переход» (>20 → рисуем).
+      uiItemsCount = items.length;
       // SKAZ-MANIYA-043: 0 items (источник не отдал видео) — не стираем экран.
       // SKAZ на это показывает note + держит тулбар (можно сменить источник).
       if (!items.length) {
@@ -1975,6 +2274,7 @@
       maniya_season: { ru: 'Сезон', en: 'Season' },
       maniya_voice: { ru: 'Озвучка', en: 'Voice' },
       maniya_reset: { ru: 'Сброс', en: 'Reset' },
+      maniya_jump: { ru: 'Переход', en: 'Jump' },
       maniya_quality: { ru: 'Выбор качества', en: 'Select quality' },
       maniya_watch_quality: { ru: 'Смотреть', en: 'Watch' },
       maniya_episode: { ru: 'Серия', en: 'Episode' },
