@@ -273,6 +273,35 @@
     };
   }
 
+  // ── SKAZ-MANIYA-059 E1/E2 helpers ──
+  // Kill-switch'и «живого источника на карточке»: maniya_live_probe (E1) и
+  // maniya_auto_switch (E2) — false в Lampa.Storage → старое поведение целиком
+  // (бандл откатывать не нужно). Default on, как skaz_auto_switch у SKAZ.
+  function liveProbeEnabled() {
+    try { return String(Lampa.Storage.get('maniya_live_probe', true)) !== 'false'; }
+    catch (e) { return true; }
+  }
+  function liveAutoSwitchEnabled() {
+    try { return String(Lampa.Storage.get('maniya_auto_switch', true)) !== 'false'; }
+    catch (e) { return true; }
+  }
+  /** Ранг качества источника для авто-выбора (4K>FHD>HD>SD>—) — из тех же данных, что бейдж чипа. */
+  function liveQualityRank(source) {
+    var rank = { '4K': 4, 'FHD': 3, 'HD': 2, 'SD': 1 };
+    return rank[shortQuality(source && source.quality_label)] || 0;
+  }
+  /** Активен ли плеер — тики E1 встают на паузу, чтобы не мешать воспроизведению (§5). */
+  function playerBusy() {
+    try {
+      if (Lampa.Activity && Lampa.Activity.active &&
+        String(Lampa.Activity.active().activity) === 'player') return true;
+    } catch (e) {}
+    try {
+      if (Lampa.Player && typeof Lampa.Player.isActive === 'function' && Lampa.Player.isActive()) return true;
+    } catch (e) {}
+    return false;
+  }
+
   // SKAZ-MANIYA-058 (W3, D9): классификатор озвучки по kind — порт ShezUI.VOICE_KINDS +
   // VOICE_STUDIOS (onlines.js 452-499). Используется для сортировки ряда «Озвучка»
   // (Дубляж → Многоголосый → Двухголосый → Авторский → Оригинал → Субтитры → прочее)
@@ -553,6 +582,26 @@
     // SKAZ-MANIYA-044: источники, живая проба которых (/videos) на ЭТОЙ карточке
     // уже вернула 0 видео. Сбрасываются при новом фильме (loadCardAvailability).
     var uiDeadSources = {};
+    // SKAZ-MANIYA-059 E1/E2: «живой источник на карточке» (аналог SKAZ
+    // probeBackground + doesNotAnswer). Всё client-only под Z01_UI_OK, откат —
+    // kill-switch Storage maniya_live_probe / maniya_auto_switch (helpers выше).
+    var cardReady = false;           // после первого успешного draw — тики только тогда
+    var liveProbeTimer = null;       // один глобальный interval (STABILITY-004: чистка в destroy)
+    var liveProbeBusy = false;       // тик не заходит в себя
+    var liveTickSeq = 0;             // обесценивает вердикты устаревшего тика
+    var liveProbeCache = {};         // key -> {v:'ok'|'empty'|'unverified', t:ms}; сметается на карточку
+    var autoSwitchCount = 0;         // анти-thrash: ≤ LIVE_SWITCH_LIMIT авто-свитчей на карточку
+    var autoSwitchTimer = null;      // E2 таймер обратного отсчёта (1с тик)
+    var autoSwitchNote = null;       // jQuery .z01-note__switch — живая строка отсчёта
+    var LIVE_PROBE_TICK_MS = 25000;      // период тика E1
+    var LIVE_PROBE_TIMEOUT = 8000;       // live Range-проба на URL (как probeSources)
+    var LIVE_PROBE_PARALLEL = 2;         // параллель пробы (как SKAZ PROBE_PARALLEL)
+    var LIVE_PROBE_TARGET_LIMIT = 6;     // макс целей за тик
+    var LIVE_PROBE_BUDGET = 25000;       // бюджет тика (дедлайн, а не «висим»)
+    var LIVE_PROBE_OK_TTL = 6 * 60 * 60 * 1000;   // ok не перепроверяем 6ч (не трогаем часто)
+    var LIVE_PROBE_EMPTY_TTL = 30 * 1000;         // empty перепроверяем каждые 30с (ловить оживание)
+    var LIVE_SWITCH_SECONDS = 6;         // как SKAZ doesNotAnswer
+    var LIVE_SWITCH_LIMIT = 2;           // анти-thrash: макс 2 авто-свитча на карточку
     // SKAZ WATCHDOG (onlines.js uiLoadTimer + watchdog): если балансер не ответил
     // за дедлайн — прекращаем «Опрашиваем источники» и показываем статический
     // реестр (фолбэк), чтобы экран не висел на skeleton вечно.
@@ -731,6 +780,12 @@
       // SKAZ-MANIYA-044: новый фильм — источники опрашиваем заново: «пустые» для
       // одного фильма могут снова ожить (ghost-статус — только для этой карточки).
       uiDeadSources = {};
+      // SKAZ-MANIYA-059 E1/E2: новая карточка — кэш вердиктов, анти-thrash и
+      // readiness тика с нуля (между фильмами не перетекают).
+      liveAutoSwitchCancel();
+      autoSwitchCount = 0;
+      liveProbeCache = {};
+      cardReady = false;
       // SKAZ-MANIYA-058: опции сезонов/озвучек и счётчик серий — per-карточка
       // (не перетекать между фильмами; заполняются снова в setFilters/draw).
       uiSeasons = [];
@@ -959,6 +1014,9 @@
         sources[key].show = false;
         sources[key].ghost = true;
         hasVideo[key] = 'dead';
+        // SKAZ-MANIYA-059 E1/E2: вердикт важен и для периодического re-probe, и для
+        // ранжирования nextSource при авто-переключении (общий in-memory кэш).
+        liveProbeCache[key] = { v: 'empty', t: Date.now() };
         if (finished) { self.updateFilter(); self.uiRefreshGhost(); }
       }
       var settle = function () {
@@ -1008,7 +1066,13 @@
           var done = function (verdict) {
             if (timer) clearTimeout(timer);
             pendingDeep -= 1;
-            if (verdict === 'ok') { hasVideo[key] = 'confirmed'; if (!winner) winner = key; }
+            if (verdict === 'ok') {
+              hasVideo[key] = 'confirmed';
+              if (!winner) winner = key;
+              // SKAZ-MANIYA-059 E1/E2: подтверждённый живой источник — в общий кэш
+              // (для следующего тика E1 и ранжирования nextSource у E2).
+              liveProbeCache[key] = { v: 'ok', t: Date.now() };
+            }
             else if (verdict === 'bad') { kill(key); }
             else { hasVideo[key] = 'unverified'; } // network/CORS → не подтверждён, не мёртв
             if (finished) { self.updateFilter(); self.uiRefreshGhost(); }
@@ -1023,6 +1087,238 @@
           settle();
         });
       });
+    };
+
+    // ══ SKAZ-MANIYA-059 E1: периодический фоновый re-probe известных источников ══
+    // Аналог SKAZ probeBackground/probeSources/probeMark: раз в ~25с прицельно
+    // перепроверяем мёртвых (вдруг ожили) + текущего активного (вдруг умер) и
+    // живьём флипаем show/ghost в ОТКРЫТОМ drop (uiRefreshGhost) + в filter
+    // (Lampa сколлапсирует под «Ещё N») — чип появляется/гаснет без выхода из
+    // карточки. Кэш вердиктов in-memory: ok 6ч / empty 30с. Тик НЕ трогает
+    // rch/thin — у тех живая картина на девайсе (RCH-only /ws, thin-минты).
+    // Гигиена — STABILITY-004: один глобальный interval, clear в destroy, все
+    // проб в цепочке с deadline-стражем, ни одного «висящего» колбэка.
+
+    this.startProbeTick = function () {
+      var self = this;
+      if (!Z01_UI_OK || liveProbeTimer || typeof setInterval !== 'function') return;
+      liveProbeTimer = setInterval(function () {
+        try { self.probeTick(); } catch (e) { /* STABILITY-004 */ }
+      }, LIVE_PROBE_TICK_MS);
+    };
+
+    this.probeTick = function () {
+      if (!Z01_UI_OK || liveProbeBusy || !cardReady) return;
+      if (!Lampa.Arrays.getKeys(sources).length) return;
+      if (!liveProbeEnabled()) return;                      // kill-switch
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (playerBusy()) return;                             // плеер активен — не мешаем
+      var self = this;
+      var seq = ++liveTickSeq;
+      var queue = this.liveProbeTargets(Date.now());
+      if (!queue.length) return;
+      liveProbeBusy = true;
+      var finished = false;
+      var guard = setTimeout(function () {                  // бюджет тика = дедлайн
+        finished = true;
+        liveProbeBusy = false;
+      }, LIVE_PROBE_BUDGET);
+      var inflight = 0;
+      function next() {
+        while (inflight < LIVE_PROBE_PARALLEL && queue.length) {
+          var key = queue.shift();
+          if (!sources[key]) continue;
+          inflight += 1;
+          self.liveProbeOne(key, function (verdict) {
+            inflight -= 1;
+            liveProbeCache[key] = { v: verdict, t: Date.now() };
+            if (seq === liveTickSeq) self.liveProbeApply(key, verdict);
+            if (!queue.length && inflight === 0 && !finished) {
+              finished = true;
+              clearTimeout(guard);
+              liveProbeBusy = false;
+            }
+          });
+        }
+      }
+      next();
+    };
+
+    /** Цели тика: мёртвые (вдруг ожили) + активный (вдруг умер). rch/thin — skip. */
+    this.liveProbeTargets = function (now) {
+      var targets = [];
+      Lampa.Arrays.getKeys(sources).forEach(function (key) {
+        var src = sources[key];
+        if (!src || src.rch || src.thin) return;
+        var cache = liveProbeCache[key];
+        if (cache && cache.v === 'ok' && (now - cache.t) < LIVE_PROBE_OK_TTL) return;
+        if (cache && cache.v === 'empty' && (now - cache.t) < LIVE_PROBE_EMPTY_TTL) return;
+        if (key === activeSource) { targets.push(key); return; }  // активный — всегда
+        if (src.show === false || src.ghost) targets.push(key);   // мёртвые — вдруг ожили
+      });
+      if (targets.length > LIVE_PROBE_TARGET_LIMIT) {
+        var keep = targets.indexOf(activeSource) >= 0 ? 1 : 0;
+        targets = targets
+          .filter(function (k) { return k === activeSource; })
+          .concat(targets.filter(function (k) { return k !== activeSource; })
+            .slice(0, LIVE_PROBE_TARGET_LIMIT - keep));
+      }
+      return targets;
+    };
+
+    /** Одна живая проба источника: /videos (0 items → 'empty'); для активного ещё
+     *  live Range-проба первой плей-ссылки (кликабельность). Ошибка сети → 'unverified'
+     *  (не мёртв: транзиентный сбой сервера не должен гостить всё подряд). */
+    this.liveProbeOne = function (key, cb) {
+      var self = this;
+      var src = sources[key];
+      if (!src || !src.url) { cb('empty'); return; }
+      if (src.thin && ThinSkaz.flowOk(key)) { cb('ok'); return; }  // девайс уже доказал direct
+      var finished = false;
+      var done = function (v) { if (finished) return; finished = true; cb(v); };
+      var url = addMovieParams(src.url, object.movie, object);
+      requestJson(network, url, function (json) {
+        var items = Lampa.Arrays.isArray(json) ? json
+          : (Lampa.Arrays.isArray(json && json.items) ? json.items : []);
+        if (!items.length) { done('empty'); return; }
+        if (key !== activeSource) { done('ok'); return; }  // ghost-ожившему достаточно жизни /videos
+        var play = '';
+        for (var i = 0; i < items.length; i++) {
+          var it = items[i];
+          if (it && it.method !== 'call' && it.url && /^https?:\/\//i.test(it.url)) { play = it.url; break; }
+        }
+        if (!play) { done('unverified'); return; }  // call-позиции резолвятся позже — жив не мёртв
+        if (typeof fetch !== 'function' || typeof AbortController !== 'function') { done('ok'); return; }
+        var ctrl = new AbortController();
+        var timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, LIVE_PROBE_TIMEOUT);
+        var settled = function (verdict) {
+          if (timer) clearTimeout(timer);
+          done(verdict);
+        };
+        fetch(play, { method: 'GET', headers: { 'Range': 'bytes=0-1023' }, signal: ctrl.signal })
+          .then(function (r) { settled(r && r.ok ? 'ok' : 'empty'); })
+          .catch(function () { settled('unverified'); });  // network/CORS → не подтверждён, не мёртв
+      }, function () {
+        done('unverified');
+      });
+    };
+
+    /** Применение вердикта: флип show/ghost + живая перестройка открытого drop
+     *  (uiRefreshGhost) и filter (обновляет «Ещё N» Lampa). Активный только
+     *  тускнеет (skaz-chip--ghost), НЕ уходит в «Ещё N» — юзер не теряет место;
+     *  его следующий /videos уйдёт в uiListEmpty → E2 auto-switch. */
+    this.liveProbeApply = function (key, verdict) {
+      var self = this;
+      if (!Z01_UI_OK) return;
+      var src = sources[key];
+      if (!src) return;
+      var showBefore = src.show;
+      var ghostBefore = src.ghost;
+      if (verdict === 'ok') {
+        if (uiDeadSources[key] || src.ghost || src.show === false) {
+          delete uiDeadSources[key];
+          src.show = true;
+          src.ghost = false;
+        }
+      } else if (verdict === 'empty') {
+        if (key === activeSource) {
+          src.ghost = true;                       // тускнеем, но остаёмся на месте
+        } else if (src.show !== false) {
+          src.show = false;
+          src.ghost = true;
+          uiDeadSources[key] = true;
+        }
+      } else {
+        return;                                   // unverified — ни жизни, ни смерти
+      }
+      if (src.show !== showBefore || src.ghost !== ghostBefore) {
+        try { self.updateFilter(); } catch (e) {}
+        try { self.uiRefreshGhost(); } catch (e) {}
+      }
+    };
+
+    /** Вердикт из кэша, если свежий (для ранжирования nextSource). */
+    this.liveProbeVerdict = function (key, now) {
+      var c = liveProbeCache[key];
+      if (!c) return '';
+      if (c.v === 'ok' && (now - c.t) < LIVE_PROBE_OK_TTL) return 'ok';
+      if (c.v === 'empty' && (now - c.t) < LIVE_PROBE_EMPTY_TTL) return 'empty';
+      return '';
+    };
+
+    // ══ SKAZ-MANIYA-059 E2: авто-переключение мёртвого активного (doesNotAnswer) ══
+    // uiListEmpty («источник пуст/не отвечает») → modern-note + обратный отсчёт 6с
+    // → changeSource(nextSource). Гейт maniya_auto_switch (default on); анти-thrash
+    // ≤2 авто-свитча на карточку; ручной выбор юзера отменяет таймер (changeSource).
+
+    this.autoSwitchPlan = function () {
+      if (!Z01_UI_OK) return null;
+      if (uiPolling) return null;
+      if (autoSwitchCount >= LIVE_SWITCH_LIMIT) return null;
+      if (!liveAutoSwitchEnabled()) return null;
+      liveAutoSwitchCancel();          // новый пустой источник → свежий отсчёт
+      return { sec: LIVE_SWITCH_SECONDS };
+    };
+
+    this.autoSwitchTick = function (line, plan) {
+      var self = this;
+      if (autoSwitchTimer) { clearInterval(autoSwitchTimer); autoSwitchTimer = null; }
+      autoSwitchNote = line;
+      var left = plan.sec;
+      var render = function () {
+        if (!autoSwitchNote) return;
+        try { autoSwitchNote.text(Lampa.Lang.translate('maniya_auto_switch').replace('{sec}', left)); }
+        catch (e) {}
+      };
+      render();
+      autoSwitchTimer = setInterval(function () {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(autoSwitchTimer);
+          autoSwitchTimer = null;
+          autoSwitchNote = null;
+          try { self.autoSwitchDead(); } catch (e) {}
+          return;
+        }
+        render();
+      }, 1000);
+    };
+
+    this.autoSwitchDead = function () {
+      autoSwitchCount += 1;
+      var next = this.nextSource();
+      if (!next) return;   // кандидатов нет — остаёмся на ноте, дальше только вручную
+      this.changeSource(next);
+    };
+
+    function liveAutoSwitchCancel() {
+      if (autoSwitchTimer) { clearInterval(autoSwitchTimer); autoSwitchTimer = null; }
+      autoSwitchNote = null;
+    }
+
+    /** Следующий источник: 'ok' по live-пробе > knownQuality > серверный порядок
+     *  (index ASC из кард-модели). Только показанные, не активный. */
+    this.nextSource = function () {
+      var self = this;
+      var now = Date.now();
+      var ok = [];
+      var rest = [];
+      Lampa.Arrays.getKeys(sources).forEach(function (key) {
+        if (key === activeSource || !sources[key] || sources[key].show === false) return;
+        if (self.liveProbeVerdict(key, now) === 'ok') ok.push(key);
+        else rest.push(key);
+      });
+      var pick = function (list) {
+        list.sort(function (a, b) {
+          var byQuality = liveQualityRank(sources[b]) - liveQualityRank(sources[a]);
+          if (byQuality) return byQuality;
+          var ia = sources[a].index == null ? 1e9 : Number(sources[a].index);
+          var ib = sources[b].index == null ? 1e9 : Number(sources[b].index);
+          return ia - ib;
+        });
+        return list.length ? list[0] : null;
+      };
+      return pick(ok) || pick(rest);
     };
 
     this.updateFilter = function () {
@@ -1605,6 +1901,8 @@
 
     this.changeSource = function (key) {
       if (!sources[key]) return;
+      // SKAZ-MANIYA-059 E2: ручной выбор юзера всегда побеждает — гасим авто-switch.
+      liveAutoSwitchCancel();
       ui.open = '';
       activeSource = key;
       activeUrl = sources[key].url;
@@ -1848,6 +2146,9 @@
 
     this.draw = function (items) {
       var self = this;
+      // SKAZ-MANIYA-059 E1: карточка нарисована — фоновый живой re-probe пошёл.
+      cardReady = true;
+      this.startProbeTick();
       // W3 (D7): количество серий — для чипа «Переход» (>20 → рисуем).
       uiItemsCount = items.length;
       // SKAZ-MANIYA-043: 0 items (источник не отдал видео) — не стираем экран.
@@ -2091,6 +2392,9 @@
       if (!Z01_UI_OK) return this.empty(message);
       uiPollStop();
       ui.open = '';
+      // SKAZ-MANIYA-059 E2: «источник пуст/не отвечает» — если авто-switch разрешён,
+      // планируем обратный отсчёт (как SKAZ doesNotAnswer); иначе прежний статичный hint.
+      var plan = this.autoSwitchPlan();
       // SKAZ-MANIYA-044: карточка фильма НЕ пропадает на пустом источнике — hero
       // (арт+название+мета от object.movie, ▶ только при наличии видео) рисуем и
       // при 0 items (SKAZ uiHero строится от фильма, а не от items). uiFrame()
@@ -2100,8 +2404,15 @@
       this.uiToolbar();
       var html = $('<div class="z01-note"></div>');
       html.append($('<div class="z01-note__title"></div>').text(message));
-      if (hint) html.append($('<div class="z01-note__hint"></div>').text(hint));
-      ui.list.append(html);
+      if (plan) {
+        var line = $('<div class="z01-note__switch"></div>');
+        html.append(line);
+        ui.list.append(html);
+        this.autoSwitchTick(line, plan);
+      } else {
+        if (hint) html.append($('<div class="z01-note__hint"></div>').text(hint));
+        ui.list.append(html);
+      }
       this.loading(false);
       Lampa.Controller.enable('content');
     };
@@ -2117,6 +2428,12 @@
       // T052 STABILITY-004: закрыть ws-сессии, сбросить пинги/таймеры/кэши
       // (иначе на следующей карточке висят старые сессии и orphan-промисы).
       ThinSkaz.destroyAll();
+      // SKAZ-MANIYA-059 STABILITY-004: E1/E2 — один глобальный interval + тикер
+      // отсчёта, чистим оба, висящие пробы обесцениваем.
+      if (liveProbeTimer) { clearInterval(liveProbeTimer); liveProbeTimer = null; }
+      liveAutoSwitchCancel();
+      liveProbeBusy = false;
+      liveTickSeq += 1;
     };
   }
 
@@ -2235,6 +2552,7 @@
       '.z01-note{padding:1.2em .2em 2.2em;line-height:1.55}' +
       '.z01-note__title{font-size:1.05em;color:rgba(255,255,255,.8)}' +
       '.z01-note__hint{margin-top:.45em;font-size:.95em;opacity:.55}' +
+      '.z01-note__switch{margin-top:.45em;font-size:1em;color:#ffd98f}' +
       '.z01-skeleton{padding:.4em 0}' +
       '.z01-skeleton__row{display:flex;align-items:center;padding:.7em 0}' +
       '.z01-skeleton__thumb{width:12em;height:6.75em;border-radius:.5em;background:rgba(255,255,255,.07);flex-shrink:0;-webkit-animation:z01skeleton 1.2s ease-in-out infinite;animation:z01skeleton 1.2s ease-in-out infinite}' +
@@ -2294,6 +2612,8 @@
       maniya_polling_slow: { ru: 'отвечают медленно', en: 'responding slowly' },
       maniya_sec: { ru: 'с', en: 's' },
       maniya_switch_source: { ru: 'На текущем источнике нет этого фильма — смените его в списке выше', en: 'No such video on this source — switch it from the list above' },
+      // SKAZ-MANIYA-059 E2: строка авто-переключения мёртвого источника (doesNotAnswer).
+      maniya_auto_switch: { ru: 'Сменим источник автоматически через {sec}с…', en: 'Auto-switching source in {sec}s…' },
       maniya_subscription_required: { ru: 'Нужна активная подписка Maniya Online', en: 'Active Maniya Online subscription is required' },
       maniya_subscription_error: { ru: 'Не удалось проверить подписку Maniya Online', en: 'Failed to check Maniya Online subscription' }
     });
